@@ -64,14 +64,9 @@ message(STATUS "downloading...
      dst='${file}'
      timeout='${timeout_msg}'")
 
-file(DOWNLOAD ${URL} ${file}
-  ${timeout_args}
-  ${hash_args}
-  STATUS status
-  LOG log)
-
-list(GET status 0 status_code)
-list(GET status 1 status_string)
+execute_process(COMMAND wget -O ${file} ${URL}
+        RESULT_VARIABLE status_code
+        OUTPUT_VARIABLE status_string)
 
 if(NOT status_code EQUAL 0)
   # Retry on certain errors, e.g. CURLE_COULDNT_RESOLVE_HOST, which is often
