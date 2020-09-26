@@ -1588,7 +1588,8 @@ return {
       full_name='mousefocus', abbreviation='mousef',
       type='bool', scope={'global'},
       vi_def=true,
-      enable_if=false,
+      redraw={'ui_option'},
+      varname='p_mousef',
       defaults={if_true={vi=false}}
     },
     {
@@ -2317,6 +2318,16 @@ return {
       expand=true,
       varname='p_sps',
       defaults={if_true={vi="best"}}
+    },
+    {
+      full_name='spelloptions', abbreviation='spo',
+      type='string', list='onecomma', scope={'buffer'},
+      deny_duplicates=true,
+      secure=true,
+      vi_def=true,
+      expand=true,
+      varname='p_spo',
+      defaults={if_true={vi="", vim=""}}
     },
     {
       full_name='splitbelow', abbreviation='sb',

@@ -250,13 +250,13 @@ void ui_refresh(void)
     }, res)
   end)
 
-  it('allow loading query with escaped quotes and capture them with `match?` and `vim-match?`', function()
+  it('allow loading query with escaped quotes and capture them with `lua-match?` and `vim-match?`', function()
     if not check_parser() then return end
 
     insert('char* astring = "Hello World!";')
 
     local res = exec_lua([[
-      cquery = vim.treesitter.parse_query("c", '((_) @quote (vim-match? @quote "^\\"$")) ((_) @quote (match? @quote "^\\"$"))')
+      cquery = vim.treesitter.parse_query("c", '((_) @quote (vim-match? @quote "^\\"$")) ((_) @quote (lua-match? @quote "^\\"$"))')
       parser = vim.treesitter.get_parser(0, "c")
       tree = parser:parse()
       res = {}
@@ -312,6 +312,18 @@ void ui_refresh(void)
     ]], custom_query)
 
     eq({{0, 4, 0, 8}}, res)
+
+    local res_list = exec_lua[[
+    local query = require'vim.treesitter.query'
+
+    local list = query.list_predicates()
+
+    table.sort(list)
+
+    return list
+    ]]
+
+    eq({ 'contains?', 'eq?', 'is-main?', 'lua-match?', 'match?', 'vim-match?' }, res_list)
   end)
 
   it('supports highlighting', function()
@@ -361,7 +373,7 @@ static int nlua_schedule(lua_State *const lstate)
 
 ; Use lua regexes
 ((identifier) @Identifier (#contains? @Identifier "lua_"))
-((identifier) @Constant (#match? @Constant "^[A-Z_]+$"))
+((identifier) @Constant (#lua-match? @Constant "^[A-Z_]+$"))
 ((identifier) @Normal (#vim-match? @Constant "^lstate$"))
 
 ((binary_expression left: (identifier) @WarningMsg.left right: (identifier) @WarningMsg.right) (#eq? @WarningMsg.left @WarningMsg.right))
@@ -428,6 +440,29 @@ static int nlua_schedule(lua_State *const lstate)
                        {5:1}, ({3:void} *)({3:ptrdiff_t})cb);                      |
         {4:return} {5:0};                                                      |
       ^}                                                                |
+      {1:~                                                                }|
+      {1:~                                                                }|
+                                                                       |
+    ]]}
+
+    feed("5Goc<esc>dd")
+
+    screen:expect{grid=[[
+      {2:/// Schedule Lua callback on main loop's event queue}             |
+      {3:static} {3:int} {11:nlua_schedule}({3:lua_State} *{3:const} lstate)                |
+      {                                                                |
+        {4:if} ({11:lua_type}(lstate, {5:1}) != {5:LUA_TFUNCTION}                       |
+            || {6:lstate} != {6:lstate}) {                                     |
+          {11:^lua_pushliteral}(lstate, {5:"vim.schedule: expected function"});  |
+          {4:return} {11:lua_error}(lstate);                                    |
+        }                                                              |
+                                                                       |
+        {7:LuaRef} cb = {11:nlua_ref}(lstate, {5:1});                               |
+                                                                       |
+        multiqueue_put(main_loop.events, {11:nlua_schedule_event},          |
+                       {5:1}, ({3:void} *)({3:ptrdiff_t})cb);                      |
+        {4:return} {5:0};                                                      |
+      }                                                                |
       {1:~                                                                }|
       {1:~                                                                }|
                                                                        |
