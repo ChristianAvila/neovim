@@ -1,8 +1,10 @@
 " Test for edit functions
-"
+
 if exists("+t_kD")
   let &t_kD="[3;*~"
 endif
+
+source check.vim
 
 " Needed for testing basic rightleft: Test_edit_rightleft
 source view_util.vim
@@ -733,17 +735,16 @@ func! Test_edit_CTRL_O()
 endfunc
 
 func! Test_edit_CTRL_R()
-  throw 'skipped: Nvim does not support test_override()'
   " Insert Register
   new
-  call test_override("ALL", 1)
+  " call test_override("ALL", 1)
   set showcmd
   call feedkeys("AFOOBAR eins zwei\<esc>", 'tnix')
   call feedkeys("O\<c-r>.", 'tnix')
   call feedkeys("O\<c-r>=10*500\<cr>\<esc>", 'tnix')
   call feedkeys("O\<c-r>=getreg('=', 1)\<cr>\<esc>", 'tnix')
   call assert_equal(["getreg('=', 1)", '5000', "FOOBAR eins zwei", "FOOBAR eins zwei"], getline(1, '$'))
-  call test_override("ALL", 0)
+  " call test_override("ALL", 0)
   set noshowcmd
   bw!
 endfunc
@@ -955,7 +956,6 @@ func! Test_edit_DROP()
 endfunc
 
 func! Test_edit_CTRL_V()
-  throw 'skipped: Nvim does not support test_override()'
   if has("ebcdic")
     return
   endif
@@ -965,7 +965,7 @@ func! Test_edit_CTRL_V()
   " force some redraws
   set showmode showcmd
   "call test_override_char_avail(1)
-  call test_override('ALL', 1)
+  " call test_override('ALL', 1)
   call feedkeys("A\<c-v>\<c-n>\<c-v>\<c-l>\<c-v>\<c-b>\<esc>", 'tnix')
   call assert_equal(["abc\x0e\x0c\x02"], getline(1, '$'))
 
@@ -978,7 +978,7 @@ func! Test_edit_CTRL_V()
     set norl
   endif
 
-  call test_override('ALL', 0)
+  " call test_override('ALL', 0)
   set noshowmode showcmd
   bw!
 endfunc
@@ -1513,4 +1513,24 @@ func Test_edit_startinsert()
 
   set backspace&
   bwipe!
+endfunc
+
+func Test_edit_noesckeys()
+  CheckNotGui
+  new
+
+  " <Left> moves cursor when 'esckeys' is set
+  exe "set t_kl=\<Esc>OD"
+  " set esckeys
+  call feedkeys("axyz\<Esc>ODX", "xt")
+  " call assert_equal("xyXz", getline(1))
+
+  " <Left> exits Insert mode when 'esckeys' is off
+  " set noesckeys
+  call setline(1, '')
+  call feedkeys("axyz\<Esc>ODX", "xt")
+  call assert_equal(["DX", "xyz"], getline(1, 2))
+
+  bwipe!
+  " set esckeys
 endfunc

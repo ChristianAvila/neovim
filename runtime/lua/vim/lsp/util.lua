@@ -505,13 +505,13 @@ function M.convert_signature_help_to_markdown_lines(signature_help)
   if signature.documentation then
     M.convert_input_to_markdown_lines(signature.documentation, contents)
   end
-  if signature_help.parameters then
+  if signature.parameters and #signature.parameters > 0 then
     local active_parameter = signature_help.activeParameter or 0
     -- If the activeParameter is not inside the valid range, then clip it.
-    if active_parameter >= #signature_help.parameters then
+    if active_parameter >= #signature.parameters then
       active_parameter = 0
     end
-    local parameter = signature.parameters and signature.parameters[active_parameter]
+    local parameter = signature.parameters[active_parameter + 1]
     if parameter then
       --[=[
       --Represents a parameter of a callable-signature. A parameter can
@@ -532,8 +532,8 @@ function M.convert_signature_help_to_markdown_lines(signature_help)
       }
       --]=]
       -- TODO highlight parameter
-      if parameter.documentation then
-        M.convert_input_help_to_markdown_lines(parameter.documentation, contents)
+      if parameter.documentation and parameter.documentation ~= vim.NIL then
+        M.convert_input_to_markdown_lines(parameter.documentation, contents)
       end
     end
   end
@@ -668,7 +668,7 @@ function M.focusable_float(unique_name, fn)
   local bufnr = api.nvim_get_current_buf()
   do
     local win = find_window_by_var(unique_name, bufnr)
-    if win then
+    if win and api.nvim_win_is_valid(win) and not vim.fn.pumvisible() then
       api.nvim_set_current_win(win)
       api.nvim_command("stopinsert")
       return
@@ -1465,8 +1465,43 @@ end
 function M.make_range_params()
   local position = make_position_param()
   return {
-    textDocument = { uri = vim.uri_from_bufnr(0) },
+    textDocument = M.make_text_document_params(),
     range = { start = position; ["end"] = position; }
+  }
+end
+
+--- Using the given range in the current buffer, creates an object that
+--- is similar to |vim.lsp.util.make_range_params()|.
+---
+--@param start_pos ({number, number}, optional) mark-indexed position.
+---Defaults to the start of the last visual selection.
+--@param end_pos ({number, number}, optional) mark-indexed position.
+---Defaults to the end of the last visual selection.
+--@returns { textDocument = { uri = `current_file_uri` }, range = { start =
+---`start_position`, end = `end_position` } }
+function M.make_given_range_params(start_pos, end_pos)
+  validate {
+    start_pos = {start_pos, 't', true};
+    end_pos = {end_pos, 't', true};
+  }
+  local A = list_extend({}, start_pos or api.nvim_buf_get_mark(0, '<'))
+  local B = list_extend({}, end_pos or api.nvim_buf_get_mark(0, '>'))
+  -- convert to 0-index
+  A[1] = A[1] - 1
+  B[1] = B[1] - 1
+  -- account for encoding.
+  if A[2] > 0 then
+    A = {A[1], M.character_offset(0, A[1], A[2])}
+  end
+  if B[2] > 0 then
+    B = {B[1], M.character_offset(0, B[1], B[2])}
+  end
+  return {
+    textDocument = M.make_text_document_params(),
+    range = {
+      start = {line = A[1], character = A[2]},
+      ['end'] = {line = B[1], character = B[2]}
+    }
   }
 end
 

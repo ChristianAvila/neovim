@@ -280,26 +280,31 @@ int foldLevel(linenr_T lnum)
 // Return false if line is not folded.
 bool lineFolded(win_T *const win, const linenr_T lnum)
 {
-  return foldedCount(win, lnum, NULL) != 0;
+  return fold_info(win, lnum).fi_lines != 0;
 }
 
-/* foldedCount() {{{2 */
-/*
- * Count the number of lines that are folded at line number "lnum".
- * Normally "lnum" is the first line of a possible fold, and the returned
- * number is the number of lines in the fold.
- * Doesn't use caching from the displayed window.
- * Returns number of folded lines from "lnum", or 0 if line is not folded.
- * When "infop" is not NULL, fills *infop with the fold level info.
- */
-long foldedCount(win_T *win, linenr_T lnum, foldinfo_T *infop)
+/// fold_info() {{{2
+///
+/// Count the number of lines that are folded at line number "lnum".
+/// Normally "lnum" is the first line of a possible fold, and the returned
+/// number is the number of lines in the fold.
+/// Doesn't use caching from the displayed window.
+///
+/// @return with the fold level info.
+///         fi_lines = number of folded lines from "lnum",
+///                    or 0 if line is not folded.
+foldinfo_T fold_info(win_T *win, linenr_T lnum)
 {
+  foldinfo_T info;
   linenr_T last;
 
-  if (hasFoldingWin(win, lnum, NULL, &last, false, infop)) {
-    return (long)(last - lnum + 1);
+  if (hasFoldingWin(win, lnum, NULL, &last, false, &info)) {
+    info.fi_lines = (long)(last - lnum + 1);
+  } else {
+    info.fi_lines = 0;
   }
-  return 0;
+
+  return info;
 }
 
 /* foldmethodIsManual() {{{2 */
@@ -1744,8 +1749,7 @@ static void foldDelMarker(
       STRCPY(newline + (p - line), p + len);
       ml_replace_buf(buf, lnum, newline, false);
       extmark_splice_cols(buf, (int)lnum-1, (int)(p - line),
-                          (int)len,
-                          0, kExtmarkUndo);
+                          (int)len, 0, kExtmarkUndo);
     }
     break;
   }
@@ -1756,7 +1760,7 @@ static void foldDelMarker(
 /// When 'foldtext' isn't set puts the result in "buf[FOLD_TEXT_LEN]".
 /// Otherwise the result is in allocated memory.
 char_u *get_foldtext(win_T *wp, linenr_T lnum, linenr_T lnume,
-                     foldinfo_T *foldinfo, char_u *buf)
+                     foldinfo_T foldinfo, char_u *buf)
   FUNC_ATTR_NONNULL_ARG(1)
 {
   char_u      *text = NULL;
@@ -1784,11 +1788,12 @@ char_u *get_foldtext(win_T *wp, linenr_T lnum, linenr_T lnume,
     set_vim_var_nr(VV_FOLDSTART, (varnumber_T) lnum);
     set_vim_var_nr(VV_FOLDEND, (varnumber_T) lnume);
 
-    /* Set "v:folddashes" to a string of "level" dashes. */
-    /* Set "v:foldlevel" to "level". */
-    level = foldinfo->fi_level;
-    if (level > (int)sizeof(dashes) - 1)
+    // Set "v:folddashes" to a string of "level" dashes.
+    // Set "v:foldlevel" to "level".
+    level = foldinfo.fi_level;
+    if (level > (int)sizeof(dashes) - 1) {
       level = (int)sizeof(dashes) - 1;
+    }
     memset(dashes, '-', (size_t)level);
     dashes[level] = NUL;
     set_vim_var_string(VV_FOLDDASHES, dashes, -1);
@@ -2681,7 +2686,8 @@ static void foldRemove(
       fold_changed = true;
       continue;
     }
-    if (fp >= (fold_T *)(gap->ga_data) + gap->ga_len
+    if (gap->ga_data == NULL
+        || fp >= (fold_T *)(gap->ga_data) + gap->ga_len
         || fp->fd_top > bot) {
       // 6: Found a fold below bot, can stop looking.
       break;

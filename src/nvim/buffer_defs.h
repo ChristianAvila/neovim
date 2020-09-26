@@ -451,6 +451,7 @@ typedef struct {
   regprog_T   *b_cap_prog;      // program for 'spellcapcheck'
   char_u      *b_p_spf;         // 'spellfile'
   char_u      *b_p_spl;         // 'spelllang'
+  char_u      *b_p_spo;         // 'spelloptions'
   int b_cjk;                    // all CJK letters as OK
   char_u b_syn_chartab[32];     // syntax iskeyword option
   char_u *b_syn_isk;            // iskeyword option
@@ -835,17 +836,12 @@ struct file_buffer {
   // tree-sitter) or the corresponding UTF-32/UTF-16 size (like LSP) of the
   // deleted text.
   size_t deleted_bytes;
+  size_t deleted_bytes2;
   size_t deleted_codepoints;
   size_t deleted_codeunits;
 
   // The number for times the current line has been flushed in the memline.
   int flush_count;
-
-  bool b_luahl;
-  LuaRef b_luahl_start;
-  LuaRef b_luahl_window;
-  LuaRef b_luahl_line;
-  LuaRef b_luahl_end;
 
   int b_diff_failed;    // internal diff failed for this buffer
 };
