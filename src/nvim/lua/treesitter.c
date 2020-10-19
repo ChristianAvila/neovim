@@ -39,10 +39,11 @@ typedef struct {
 static struct luaL_Reg parser_meta[] = {
   { "__gc", parser_gc },
   { "__tostring", parser_tostring },
-  { "parse_buf", parser_parse_buf },
+  { "parse", parser_parse },
   { "edit", parser_edit },
   { "tree", parser_tree },
   { "set_included_ranges", parser_set_ranges },
+  { "included_ranges", parser_get_ranges },
   { NULL, NULL }
 };
 
@@ -172,6 +173,14 @@ int tslua_add_language(lua_State *L)
   TSLanguage *lang = lang_parser();
   if (lang == NULL) {
     return luaL_error(L, "Failed to load parser: internal error");
+  }
+
+  uint32_t lang_version = ts_language_version(lang);
+  if (lang_version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION) {
+    return luaL_error(
+        L,
+        "ABI version mismatch : expected %" PRIu32 ", found %" PRIu32,
+        TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION, lang_version);
   }
 
   pmap_put(cstr_t)(langs, xstrdup(lang_name), lang);
@@ -306,22 +315,64 @@ static const char *input_cb(void *payload, uint32_t byte_index,
 #undef BUFSIZE
 }
 
-static int parser_parse_buf(lua_State *L)
+static void push_ranges(lua_State *L,
+                        const TSRange *ranges,
+                        const unsigned int length)
+{
+  lua_createtable(L, length, 0);
+  for (size_t i = 0; i < length; i++) {
+    lua_createtable(L, 4, 0);
+    lua_pushinteger(L, ranges[i].start_point.row);
+    lua_rawseti(L, -2, 1);
+    lua_pushinteger(L, ranges[i].start_point.column);
+    lua_rawseti(L, -2, 2);
+    lua_pushinteger(L, ranges[i].end_point.row);
+    lua_rawseti(L, -2, 3);
+    lua_pushinteger(L, ranges[i].end_point.column);
+    lua_rawseti(L, -2, 4);
+
+    lua_rawseti(L, -2, i+1);
+  }
+}
+
+static int parser_parse(lua_State *L)
 {
   TSLua_parser *p = parser_check(L);
   if (!p) {
     return 0;
   }
 
-  long bufnr = lua_tointeger(L, 2);
-  buf_T *buf = handle_get_buffer(bufnr);
+  TSTree *new_tree;
+  size_t len;
+  const char *str;
+  long bufnr;
+  buf_T *buf;
+  TSInput input;
 
-  if (!buf) {
-    return luaL_error(L, "invalid buffer handle: %d", bufnr);
+  // This switch is necessary because of the behavior of lua_isstring, that
+  // consider numbers as strings...
+  switch (lua_type(L, 2)) {
+    case LUA_TSTRING:
+      str = lua_tolstring(L, 2, &len);
+      new_tree = ts_parser_parse_string(p->parser, p->tree, str, len);
+      break;
+
+    case LUA_TNUMBER:
+      bufnr = lua_tointeger(L, 2);
+      buf = handle_get_buffer(bufnr);
+
+      if (!buf) {
+        return luaL_error(L, "invalid buffer handle: %d", bufnr);
+      }
+
+      input = (TSInput){ (void *)buf, input_cb, TSInputEncodingUTF8 };
+      new_tree = ts_parser_parse(p->parser, p->tree, input);
+
+      break;
+
+    default:
+      return luaL_error(L, "invalid argument to parser:parse()");
   }
-
-  TSInput input = { (void *)buf, input_cb, TSInputEncodingUTF8 };
-  TSTree *new_tree = ts_parser_parse(p->parser, p->tree, input);
 
   uint32_t n_ranges = 0;
   TSRange *changed = p->tree ? ts_tree_get_changed_ranges(p->tree, new_tree,
@@ -333,20 +384,8 @@ static int parser_parse_buf(lua_State *L)
 
   tslua_push_tree(L, p->tree);
 
-  lua_createtable(L, n_ranges, 0);
-  for (size_t i = 0; i < n_ranges; i++) {
-    lua_createtable(L, 4, 0);
-    lua_pushinteger(L, changed[i].start_point.row);
-    lua_rawseti(L, -2, 1);
-    lua_pushinteger(L, changed[i].start_point.column);
-    lua_rawseti(L, -2, 2);
-    lua_pushinteger(L, changed[i].end_point.row);
-    lua_rawseti(L, -2, 3);
-    lua_pushinteger(L, changed[i].end_point.column);
-    lua_rawseti(L, -2, 4);
+  push_ranges(L, changed, n_ranges);
 
-    lua_rawseti(L, -2, i+1);
-  }
   xfree(changed);
   return 2;
 }
@@ -442,6 +481,21 @@ static int parser_set_ranges(lua_State *L)
   xfree(ranges);
 
   return 0;
+}
+
+static int parser_get_ranges(lua_State *L)
+{
+  TSLua_parser *p = parser_check(L);
+  if (!p || !p->parser) {
+    return 0;
+  }
+
+  unsigned int len;
+  const TSRange *ranges = ts_parser_included_ranges(p->parser, &len);
+
+  push_ranges(L, ranges, len);
+
+  return 1;
 }
 
 

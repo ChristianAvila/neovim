@@ -56,6 +56,9 @@ endfunc
 
 " Run "cmd".  Returns the job if using a job.
 func RunCommand(cmd)
+  " Running an external command can occasionally be slow or fail.
+  let g:test_is_flaky = 1
+
   let job = 0
   if has('job')
     let job = job_start(a:cmd, {"stoponexit": "hup"})
@@ -294,6 +297,13 @@ func GetVimCommandClean()
   return cmd
 endfunc
 
+" Get the command to run Vim, with --clean, and force to run in terminal so it
+" won't start a new GUI.
+func GetVimCommandCleanTerm()
+  " Add -v to have gvim run in the terminal (if possible)
+  return GetVimCommandClean() .. ' -v '
+endfunc
+
 " Run Vim, using the "vimcmd" file and "-u NORC".
 " "before" is a list of Vim commands to be executed before loading plugins.
 " "after" is a list of Vim commands to be executed after loading plugins.
@@ -329,3 +339,17 @@ func RunVimPiped(before, after, arguments, pipecmd)
   endif
   return 1
 endfunc
+
+" Get all messages but drop the maintainer entry.
+func GetMessages()
+  redir => result
+  redraw | messages
+  redir END
+  let msg_list = split(result, "\n")
+  " if msg_list->len() > 0 && msg_list[0] =~ 'Messages maintainer:'
+  "   return msg_list[1:]
+  " endif
+  return msg_list
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab

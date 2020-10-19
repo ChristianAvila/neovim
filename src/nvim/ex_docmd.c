@@ -258,6 +258,27 @@ void do_exmode(int improved)
   msg_scroll = save_msg_scroll;
 }
 
+// Print the executed command for when 'verbose' is set.
+// When "lnum" is 0 only print the command.
+static void msg_verbose_cmd(linenr_T lnum, char_u *cmd)
+  FUNC_ATTR_NONNULL_ALL
+{
+  no_wait_return++;
+  verbose_enter_scroll();
+
+  if (lnum == 0) {
+    smsg(_("Executing: %s"), cmd);
+  } else {
+    smsg(_("line %" PRIdLINENR ": %s"), lnum, cmd);
+  }
+  if (msg_silent == 0) {
+    msg_puts("\n");   // don't overwrite this
+  }
+
+  verbose_leave_scroll();
+  no_wait_return--;
+}
+
 /*
  * Execute a simple command line.  Used for translated commands like "*".
  */
@@ -567,17 +588,8 @@ int do_cmdline(char_u *cmdline, LineGetter fgetline,
       }
     }
 
-    if (p_verbose >= 15 && sourcing_name != NULL) {
-      ++no_wait_return;
-      verbose_enter_scroll();
-
-      smsg(_("line %" PRIdLINENR ": %s"), sourcing_lnum, cmdline_copy);
-      if (msg_silent == 0) {
-        msg_puts("\n");  // don't overwrite this either
-      }
-
-      verbose_leave_scroll();
-      --no_wait_return;
+    if ((p_verbose >= 15 && sourcing_name != NULL) || p_verbose >= 16) {
+      msg_verbose_cmd(sourcing_lnum, cmdline_copy);
     }
 
     /*
@@ -2388,6 +2400,7 @@ int parse_cmd_address(exarg_T *eap, char_u **errormsg, bool silent)
             }
             break;
           case ADDR_TABS_RELATIVE:
+          case ADDR_OTHER:
             *errormsg = (char_u *)_(e_invrange);
             return FAIL;
           case ADDR_ARGUMENTS:
@@ -5045,16 +5058,18 @@ fail:
 static struct {
   int expand;
   char *name;
+  char *shortname;
 } addr_type_complete[] =
 {
-  { ADDR_ARGUMENTS, "arguments" },
-  { ADDR_LINES, "lines" },
-  { ADDR_LOADED_BUFFERS, "loaded_buffers" },
-  { ADDR_TABS, "tabs" },
-  { ADDR_BUFFERS, "buffers" },
-  { ADDR_WINDOWS, "windows" },
-  { ADDR_QUICKFIX, "quickfix" },
-  { -1, NULL }
+  { ADDR_ARGUMENTS, "arguments", "arg" },
+  { ADDR_LINES, "lines", "line" },
+  { ADDR_LOADED_BUFFERS, "loaded_buffers", "load" },
+  { ADDR_TABS, "tabs", "tab" },
+  { ADDR_BUFFERS, "buffers", "buf" },
+  { ADDR_WINDOWS, "windows", "win" },
+  { ADDR_QUICKFIX, "quickfix", "qf" },
+  { ADDR_OTHER, "other", "?" },
+  { -1, NULL, NULL }
 };
 
 /*
@@ -5139,7 +5154,7 @@ static void uc_list(char_u *name, size_t name_len)
       // Put out the title first time
       if (!found) {
         MSG_PUTS_TITLE(_("\n    Name              Args Address "
-                         "Complete   Definition"));
+                         "Complete    Definition"));
       }
       found = true;
       msg_putchar('\n');
@@ -5225,13 +5240,13 @@ static void uc_list(char_u *name, size_t name_len)
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 9 - over);
+      } while (len < 8 - over);
 
       // Address Type
       for (j = 0; addr_type_complete[j].expand != -1; j++) {
         if (addr_type_complete[j].expand != ADDR_LINES
             && addr_type_complete[j].expand == cmd->uc_addr_type) {
-          STRCPY(IObuff + len, addr_type_complete[j].name);
+          STRCPY(IObuff + len, addr_type_complete[j].shortname);
           len += (int)STRLEN(IObuff + len);
           break;
         }
@@ -5250,13 +5265,13 @@ static void uc_list(char_u *name, size_t name_len)
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 24 - over);
+      } while (len < 25 - over);
 
       IObuff[len] = '\0';
       msg_outtrans(IObuff);
 
       msg_outtrans_special(cmd->uc_rep, false,
-                           name_len == 0 ? Columns - 46 : 0);
+                           name_len == 0 ? Columns - 47 : 0);
       if (p_verbose > 0) {
         last_set_msg(cmd->uc_script_ctx);
       }
@@ -6914,8 +6929,9 @@ void ex_splitview(exarg_T *eap)
 {
   win_T       *old_curwin = curwin;
   char_u      *fname = NULL;
-
-
+  const bool use_tab = eap->cmdidx == CMD_tabedit
+    || eap->cmdidx == CMD_tabfind
+    || eap->cmdidx == CMD_tabnew;
 
   /* A ":split" in the quickfix window works like ":new".  Don't want two
    * quickfix windows.  But it's OK when doing ":tab split". */
@@ -6937,9 +6953,7 @@ void ex_splitview(exarg_T *eap)
   /*
    * Either open new tab page or split the window.
    */
-  if (eap->cmdidx == CMD_tabedit
-      || eap->cmdidx == CMD_tabfind
-      || eap->cmdidx == CMD_tabnew) {
+  if (use_tab) {
     if (win_new_tabpage(cmdmod.tab != 0 ? cmdmod.tab : eap->addr_count == 0
                         ? 0 : (int)eap->line2 + 1, eap->arg) != FAIL) {
       do_exedit(eap, old_curwin);
@@ -7124,14 +7138,14 @@ static void ex_resize(exarg_T *eap)
   n = atol((char *)eap->arg);
   if (cmdmod.split & WSP_VERT) {
     if (*eap->arg == '-' || *eap->arg == '+') {
-      n += curwin->w_width;
+      n += wp->w_width;
     } else if (n == 0 && eap->arg[0] == NUL) {  // default is very wide
       n = Columns;
     }
     win_setwidth_win(n, wp);
   } else {
     if (*eap->arg == '-' || *eap->arg == '+') {
-      n += curwin->w_height;
+      n += wp->w_height;
     } else if (n == 0 && eap->arg[0] == NUL) {  // default is very high
       n = Rows-1;
     }
@@ -9297,14 +9311,17 @@ static void ex_match(exarg_T *eap)
 static void ex_fold(exarg_T *eap)
 {
   if (foldManualAllowed(true)) {
-    foldCreate(curwin, eap->line1, eap->line2);
+    pos_T start = { eap->line1, 1, 0 };
+    pos_T end = { eap->line2, 1, 0 };
+    foldCreate(curwin, start, end);
   }
 }
 
 static void ex_foldopen(exarg_T *eap)
 {
-  opFoldRange(eap->line1, eap->line2, eap->cmdidx == CMD_foldopen,
-      eap->forceit, FALSE);
+  pos_T start = { eap->line1, 1, 0 };
+  pos_T end = { eap->line2, 1, 0 };
+  opFoldRange(start, end, eap->cmdidx == CMD_foldopen, eap->forceit, false);
 }
 
 static void ex_folddo(exarg_T *eap)

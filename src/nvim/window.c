@@ -1490,13 +1490,11 @@ int win_split_ins(int size, int flags, win_T *new_wp, int dir)
   if (flags & (WSP_TOP | WSP_BOT))
     (void)win_comp_pos();
 
-  /*
-   * Both windows need redrawing
-   */
+  // Both windows need redrawing.  Update all status lines, in case they
+  // show something related to the window count or position.
   redraw_win_later(wp, NOT_VALID);
-  wp->w_redr_status = TRUE;
   redraw_win_later(oldwin, NOT_VALID);
-  oldwin->w_redr_status = TRUE;
+  status_redraw_all();
 
   if (need_status) {
     msg_row = Rows - 1;
@@ -2580,9 +2578,14 @@ int win_close(win_T *win, bool free_buf)
     return OK;
   }
 
-  /* Free independent synblock before the buffer is freed. */
-  if (win->w_buffer != NULL)
+  // Free independent synblock before the buffer is freed.
+  if (win->w_buffer != NULL) {
     reset_synblock(win);
+  }
+  // When the quickfix/location list window is closed, unlist the buffer.
+  if (win->w_buffer != NULL && bt_quickfix(win->w_buffer)) {
+    win->w_buffer->b_p_bl = false;
+  }
 
   /*
    * Close the link to the buffer.
