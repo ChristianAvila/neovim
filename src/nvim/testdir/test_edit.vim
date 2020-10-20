@@ -1534,3 +1534,48 @@ func Test_edit_noesckeys()
   bwipe!
   " set esckeys
 endfunc
+
+" Test for editing a directory
+func Test_edit_is_a_directory()
+  CheckEnglish
+  let dirname = getcwd() . "/Xdir"
+  call mkdir(dirname, 'p')
+
+  new
+  redir => msg
+  exe 'edit' dirname
+  redir END
+  call assert_match("is a directory$", split(msg, "\n")[0])
+  bwipe!
+
+  let dirname .= '/'
+
+  new
+  redir => msg
+  exe 'edit' dirname
+  redir END
+  call assert_match("is a directory$", split(msg, "\n")[0])
+  bwipe!
+
+  call delete(dirname, 'rf')
+endfunc
+
+func Test_edit_browse()
+  " in the GUI this opens a file picker, we only test the terminal behavior
+  CheckNotGui
+
+  " ":browse xxx" checks for the FileExplorer augroup and assumes editing "."
+  " works then.
+  augroup FileExplorer
+    au!
+  augroup END
+
+  " When the USE_FNAME_CASE is defined this used to cause a crash.
+  browse enew
+  bwipe!
+
+  browse split
+  bwipe!
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab
