@@ -1024,7 +1024,7 @@ static int command_line_execute(VimState *state, int key)
   }
 
   // free expanded names when finished walking through matches
-  if (!(s->c == p_wc && KeyTyped) && s->c != p_wcm
+  if (!(s->c == p_wc && KeyTyped) && s->c != p_wcm && s->c != Ctrl_Z
       && s->c != Ctrl_N && s->c != Ctrl_P && s->c != Ctrl_A
       && s->c != Ctrl_L) {
     if (compl_match_array) {
@@ -1328,7 +1328,8 @@ static int command_line_execute(VimState *state, int key)
   // - hitting <ESC> twice means: abandon command line.
   // - wildcard expansion is only done when the 'wildchar' key is really
   //   typed, not when it comes from a macro
-  if ((s->c == p_wc && !s->gotesc && KeyTyped) || s->c == p_wcm) {
+  if ((s->c == p_wc && !s->gotesc && KeyTyped) || s->c == p_wcm
+      || s->c == Ctrl_Z) {
     int options = WILD_NO_BEEP;
     if (wim_flags[s->wim_index] & WIM_BUFLASTUSED) {
       options |= WILD_BUFLASTUSED;
@@ -2096,7 +2097,7 @@ static int command_line_handle_key(CommandLineState *s)
     s->do_abbr = false;                   // don't do abbreviation now
     ccline.special_char = NUL;
     // may need to remove ^ when composing char was typed
-    if (enc_utf8 && utf_iscomposing(s->c) && !cmd_silent) {
+    if (utf_iscomposing(s->c) && !cmd_silent) {
       if (ui_has(kUICmdline)) {
         // TODO(bfredl): why not make unputcmdline also work with true?
         unputcmdline();
@@ -2143,9 +2144,8 @@ static int command_line_handle_key(CommandLineState *s)
   if (s->do_abbr && (IS_SPECIAL(s->c) || !vim_iswordc(s->c))
       // Add ABBR_OFF for characters above 0x100, this is
       // what check_abbr() expects.
-      && (ccheck_abbr((has_mbyte && s->c >= 0x100) ?
-          (s->c + ABBR_OFF) : s->c)
-        || s->c == Ctrl_RSB)) {
+      && (ccheck_abbr((s->c >= 0x100) ? (s->c + ABBR_OFF) : s->c)
+          || s->c == Ctrl_RSB)) {
     return command_line_changed(s);
   }
 
@@ -2254,7 +2254,7 @@ static int command_line_changed(CommandLineState *s)
     may_do_incsearch_highlighting(s->firstc, s->count, &s->is_state);
   }
 
-  if (cmdmsg_rl || (p_arshape && !p_tbidi && enc_utf8)) {
+  if (cmdmsg_rl || (p_arshape && !p_tbidi)) {
     // Always redraw the whole command line to fix shaping and
     // right-left typing.  Not efficient, but it works.
     // Do it only when there are no characters left to read
@@ -3139,11 +3139,9 @@ static void draw_cmdline(int start, int len)
   if (cmdline_star > 0) {
     for (int i = 0; i < len; i++) {
       msg_putchar('*');
-      if (has_mbyte) {
-        i += (*mb_ptr2len)(ccline.cmdbuff + start + i) - 1;
-      }
+      i += utfc_ptr2len(ccline.cmdbuff + start + i) - 1;
     }
-  } else if (p_arshape && !p_tbidi && enc_utf8 && len > 0) {
+  } else if (p_arshape && !p_tbidi && len > 0) {
     bool do_arabicshape = false;
     int mb_l;
     for (int i = start; i < start + len; i += mb_l) {
@@ -3439,32 +3437,31 @@ void put_on_cmdline(char_u *str, int len, int redraw)
         (size_t)(ccline.cmdlen - ccline.cmdpos));
     ccline.cmdlen += len;
   } else {
-    if (has_mbyte) {
-      /* Count nr of characters in the new string. */
-      m = 0;
-      for (i = 0; i < len; i += (*mb_ptr2len)(str + i))
-        ++m;
-      /* Count nr of bytes in cmdline that are overwritten by these
-       * characters. */
-      for (i = ccline.cmdpos; i < ccline.cmdlen && m > 0;
-           i += (*mb_ptr2len)(ccline.cmdbuff + i))
-        --m;
-      if (i < ccline.cmdlen) {
-        memmove(ccline.cmdbuff + ccline.cmdpos + len,
-            ccline.cmdbuff + i, (size_t)(ccline.cmdlen - i));
-        ccline.cmdlen += ccline.cmdpos + len - i;
-      } else
-        ccline.cmdlen = ccline.cmdpos + len;
-    } else if (ccline.cmdpos + len > ccline.cmdlen)
+    // Count nr of characters in the new string.
+    m = 0;
+    for (i = 0; i < len; i += utfc_ptr2len(str + i)) {
+      m++;
+    }
+    // Count nr of bytes in cmdline that are overwritten by these
+    // characters.
+    for (i = ccline.cmdpos; i < ccline.cmdlen && m > 0;
+         i += utfc_ptr2len(ccline.cmdbuff + i)) {
+      m--;
+    }
+    if (i < ccline.cmdlen) {
+      memmove(ccline.cmdbuff + ccline.cmdpos + len,
+              ccline.cmdbuff + i, (size_t)(ccline.cmdlen - i));
+      ccline.cmdlen += ccline.cmdpos + len - i;
+    } else {
       ccline.cmdlen = ccline.cmdpos + len;
+    }
   }
   memmove(ccline.cmdbuff + ccline.cmdpos, str, (size_t)len);
   ccline.cmdbuff[ccline.cmdlen] = NUL;
 
-  if (enc_utf8) {
-    /* When the inserted text starts with a composing character,
-     * backup to the character before it.  There could be two of them.
-     */
+  {
+    // When the inserted text starts with a composing character,
+    // backup to the character before it.  There could be two of them.
     i = 0;
     c = utf_ptr2char(ccline.cmdbuff + ccline.cmdpos);
     while (ccline.cmdpos > 0 && utf_iscomposing(c)) {
@@ -3515,23 +3512,19 @@ void put_on_cmdline(char_u *str, int len, int redraw)
   for (i = 0; i < len; i++) {
     c = cmdline_charsize(ccline.cmdpos);
     // count ">" for a double-wide char that doesn't fit.
-    if (has_mbyte) {
-      correct_screencol(ccline.cmdpos, c, &ccline.cmdspos);
-    }
+    correct_screencol(ccline.cmdpos, c, &ccline.cmdspos);
     // Stop cursor at the end of the screen, but do increment the
     // insert position, so that entering a very long command
     // works, even though you can't see it.
     if (ccline.cmdspos + c < m) {
       ccline.cmdspos += c;
     }
-    if (has_mbyte) {
-      c = (*mb_ptr2len)(ccline.cmdbuff + ccline.cmdpos) - 1;
-      if (c > len - i - 1) {
-        c = len - i - 1;
-      }
-      ccline.cmdpos += c;
-      i += c;
+    c = utfc_ptr2len(ccline.cmdbuff + ccline.cmdpos) - 1;
+    if (c > len - i - 1) {
+      c = len - i - 1;
     }
+    ccline.cmdpos += c;
+    i += c;
     ccline.cmdpos++;
   }
 
@@ -3676,11 +3669,7 @@ void cmdline_paste_str(char_u *s, int literally)
       if (cv == Ctrl_V && s[1]) {
         s++;
       }
-      if (has_mbyte) {
-        c = mb_cptr2char_adv((const char_u **)&s);
-      } else {
-        c = *s++;
-      }
+      c = mb_cptr2char_adv((const char_u **)&s);
       if (cv == Ctrl_V || c == ESC || c == Ctrl_C
           || c == CAR || c == NL || c == Ctrl_L
           || (c == Ctrl_BSL && *s == Ctrl_N)) {
@@ -4990,7 +4979,7 @@ ExpandFromContext (
     char_u *pat,
     int *num_file,
     char_u ***file,
-    int options              /* EW_ flags */
+    int options              // WILD_ flags
 )
 {
   regmatch_T regmatch;
@@ -5052,6 +5041,21 @@ ExpandFromContext (
     ret = expand_wildcards_eval(&pat, num_file, file, flags);
     if (free_pat)
       xfree(pat);
+#ifdef BACKSLASH_IN_FILENAME
+    if (p_csl[0] != NUL && (options & WILD_IGNORE_COMPLETESLASH) == 0) {
+      for (int i = 0; i < *num_file; i++) {
+        char_u *ptr = (*file)[i];
+        while (*ptr != NUL) {
+          if (p_csl[0] == 's' && *ptr == '\\') {
+            *ptr = '/';
+          } else if (p_csl[0] == 'b' && *ptr == '/') {
+            *ptr = '\\';
+          }
+          ptr += utfc_ptr2len(ptr);
+        }
+      }
+    }
+#endif
     return ret;
   }
 
@@ -5193,7 +5197,7 @@ ExpandFromContext (
  * obtain strings, one by one.	The strings are matched against a regexp
  * program.  Matching strings are copied into an array, which is returned.
  */
-void ExpandGeneric(
+static void ExpandGeneric(
     expand_T    *xp,
     regmatch_T  *regmatch,
     int         *num_file,
@@ -5530,6 +5534,7 @@ static int ExpandRTDir(char_u *pat, int flags, int *num_file, char_u ***file,
   garray_T ga;
   ga_init(&ga, (int)sizeof(char *), 10);
 
+  // TODO(bfredl): this is bullshit, exandpath should not reinvent path logic.
   for (int i = 0; dirnames[i] != NULL; i++) {
     size_t size = STRLEN(dirnames[i]) + pat_len + 7;
     char_u *s = xmalloc(size);
@@ -5546,6 +5551,14 @@ static int ExpandRTDir(char_u *pat, int flags, int *num_file, char_u ***file,
       globpath(p_pp, s, &ga, 0);
       xfree(s);
     }
+
+    for (int i = 0; dirnames[i] != NULL; i++) {
+      size_t size = STRLEN(dirnames[i]) + pat_len + 22;
+      char_u *s = xmalloc(size);
+      snprintf((char *)s, size, "start/*/%s/%s*.vim", dirnames[i], pat);  // NOLINT
+      globpath(p_pp, s, &ga, 0);
+      xfree(s);
+    }
   }
 
   if (flags & DIP_OPT) {
@@ -5553,6 +5566,14 @@ static int ExpandRTDir(char_u *pat, int flags, int *num_file, char_u ***file,
       size_t size = STRLEN(dirnames[i]) + pat_len + 20;
       char_u *s = xmalloc(size);
       snprintf((char *)s, size, "pack/*/opt/*/%s/%s*.vim", dirnames[i], pat);  // NOLINT
+      globpath(p_pp, s, &ga, 0);
+      xfree(s);
+    }
+
+    for (int i = 0; dirnames[i] != NULL; i++) {
+      size_t size = STRLEN(dirnames[i]) + pat_len + 20;
+      char_u *s = xmalloc(size);
+      snprintf((char *)s, size, "opt/*/%s/%s*.vim", dirnames[i], pat);  // NOLINT
       globpath(p_pp, s, &ga, 0);
       xfree(s);
     }
@@ -5602,6 +5623,8 @@ static int ExpandPackAddDir(char_u *pat, int *num_file, char_u ***file)
   size_t buflen = pat_len + 26;
   char_u *s = xmalloc(buflen);
   snprintf((char *)s, buflen, "pack/*/opt/%s*", pat);  // NOLINT
+  globpath(p_pp, s, &ga, 0);
+  snprintf((char *)s, buflen, "opt/%s*", pat);  // NOLINT
   globpath(p_pp, s, &ga, 0);
   xfree(s);
 
@@ -6468,7 +6491,7 @@ static int open_cmdwin(void)
     ccline.redraw_state = kCmdRedrawNone;
     ui_call_cmdline_hide(ccline.level);
   }
-  redraw_later(SOME_VALID);
+  redraw_later(curwin, SOME_VALID);
 
   // Save the command line info, can be used recursively.
   save_cmdline(&save_ccline);

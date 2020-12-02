@@ -442,6 +442,7 @@ function module.new_argv(...)
         'NVIM_LOG_FILE',
         'NVIM_RPLUGIN_MANIFEST',
         'GCOV_ERROR_FILE',
+        'XDG_DATA_DIRS',
         'TMPDIR',
       }) do
         if not env_tbl[k] then
@@ -554,9 +555,9 @@ function module.curbuf(method, ...)
   return module.buffer(method, 0, ...)
 end
 
-function module.wait()
-  -- Execute 'nvim_eval' (a deferred function) to block
-  -- until all pending input is processed.
+function module.poke_eventloop()
+  -- Execute 'nvim_eval' (a deferred function) to
+  -- force at least one main_loop iteration
   session:request('nvim_eval', '1')
 end
 
@@ -566,7 +567,7 @@ end
 
 --@see buf_lines()
 function module.curbuf_contents()
-  module.wait()  -- Before inspecting the buffer, process all input.
+  module.poke_eventloop()  -- Before inspecting the buffer, do whatever.
   return table.concat(module.curbuf('get_lines', 0, -1, true), '\n')
 end
 
@@ -750,6 +751,14 @@ module.tabmeths = module.create_callindex(module.tabpage)
 module.curbufmeths = module.create_callindex(module.curbuf)
 module.curwinmeths = module.create_callindex(module.curwin)
 module.curtabmeths = module.create_callindex(module.curtab)
+
+function module.exec(code)
+  return module.meths.exec(code, false)
+end
+
+function module.exec_capture(code)
+  return module.meths.exec(code, true)
+end
 
 function module.exec_lua(code, ...)
   return module.meths.exec_lua(code, {...})

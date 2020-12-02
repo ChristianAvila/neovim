@@ -28,6 +28,7 @@
 #include "nvim/map.h"
 #include "nvim/mark.h"
 #include "nvim/extmark.h"
+#include "nvim/decoration.h"
 #include "nvim/fileio.h"
 #include "nvim/move.h"
 #include "nvim/syntax.h"
@@ -953,6 +954,53 @@ Boolean nvim_buf_is_loaded(Buffer buffer)
   return buf && buf->b_ml.ml_mfp != NULL;
 }
 
+/// Deletes the buffer. See |:bwipeout|
+///
+/// @param buffer Buffer handle, or 0 for current buffer
+/// @param opts  Optional parameters. Keys:
+///          - force:  Force deletion and ignore unsaved changes.
+///          - unload: Unloaded only, do not delete. See |:bunload|
+void nvim_buf_delete(Buffer buffer, Dictionary opts, Error *err)
+  FUNC_API_SINCE(7)
+{
+  buf_T *buf = find_buffer_by_handle(buffer, err);
+
+  if (ERROR_SET(err)) {
+    return;
+  }
+
+  bool force = false;
+  bool unload = false;
+  for (size_t i = 0; i < opts.size; i++) {
+    String k = opts.items[i].key;
+    Object v = opts.items[i].value;
+    if (strequal("force", k.data)) {
+      force = api_object_to_bool(v, "force", false, err);
+    } else if (strequal("unload", k.data)) {
+      unload = api_object_to_bool(v, "unload", false, err);
+    } else {
+      api_set_error(err, kErrorTypeValidation, "unexpected key: %s", k.data);
+      return;
+    }
+  }
+
+  if (ERROR_SET(err)) {
+    return;
+  }
+
+  int result = do_buffer(
+      unload ? DOBUF_UNLOAD : DOBUF_WIPE,
+      DOBUF_FIRST,
+      FORWARD,
+      buf->handle,
+      force);
+
+  if (result == FAIL) {
+    api_set_error(err, kErrorTypeException, "Failed to unload buffer.");
+    return;
+  }
+}
+
 /// Checks if a buffer is valid.
 ///
 /// @note Even if a buffer is valid it may have been unloaded. See |api-buffer|
@@ -1074,6 +1122,8 @@ static Array extmark_to_array(ExtmarkInfo extmark, bool id, bool add_dict)
         }
         PUT(dict, "virt_text", ARRAY_OBJ(chunks));
       }
+
+      PUT(dict, "priority", INTEGER_OBJ(decor->priority));
     }
 
     if (dict.size) {
@@ -1327,6 +1377,7 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id,
 
   uint64_t id = 0;
   int line2 = -1, hl_id = 0;
+  DecorPriority priority = DECOR_PRIORITY_BASE;
   colnr_T col2 = 0;
   VirtText virt_text = KV_INITIAL_VALUE;
   for (size_t i = 0; i < opts.size; i++) {
@@ -1394,10 +1445,23 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id,
         goto error;
       }
     } else if (strequal("ephemeral", k.data)) {
-      ephemeral = api_is_truthy(*v, "ephemeral", false, err);
+      ephemeral = api_object_to_bool(*v, "ephemeral", false, err);
       if (ERROR_SET(err)) {
         goto error;
       }
+    } else if (strequal("priority",  k.data)) {
+      if (v->type != kObjectTypeInteger) {
+        api_set_error(err, kErrorTypeValidation,
+                      "priority is not a Number of the correct size");
+        goto error;
+      }
+
+      if (v->data.integer < 0 || v->data.integer > UINT16_MAX) {
+        api_set_error(err, kErrorTypeValidation,
+                      "priority is not a valid value");
+        goto error;
+      }
+      priority = (DecorPriority)v->data.integer;
     } else {
       api_set_error(err, kErrorTypeValidation, "unexpected key: %s", k.data);
       goto error;
@@ -1423,15 +1487,15 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id,
   }
 
   // TODO(bfredl): synergize these two branches even more
-  if (ephemeral && redrawn_win && redrawn_win->w_buffer == buf) {
+  if (ephemeral && decor_state.buf == buf) {
     int attr_id = hl_id > 0 ? syn_id2attr(hl_id) : 0;
     VirtText *vt_allocated = NULL;
     if (kv_size(virt_text)) {
       vt_allocated = xmalloc(sizeof *vt_allocated);
       *vt_allocated = virt_text;
     }
-    decorations_add_ephemeral(attr_id, (int)line, (colnr_T)col,
-                              (int)line2, (colnr_T)col2, vt_allocated);
+    decor_add_ephemeral(attr_id, (int)line, (colnr_T)col,
+                        (int)line2, (colnr_T)col2, priority, vt_allocated);
   } else {
     if (ephemeral) {
       api_set_error(err, kErrorTypeException, "not yet implemented");
@@ -1443,7 +1507,8 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id,
       decor->hl_id = hl_id;
       decor->virt_text = virt_text;
     } else if (hl_id) {
-      decor = decoration_hl(hl_id);
+      decor = decor_hl(hl_id);
+      decor->priority = priority;
     }
 
     id = extmark_set(buf, (uint64_t)ns_id, id, (int)line, (colnr_T)col,
@@ -1562,7 +1627,7 @@ Integer nvim_buf_add_highlight(Buffer buffer,
   extmark_set(buf, ns_id, 0,
               (int)line, (colnr_T)col_start,
               end_line, (colnr_T)col_end,
-              decoration_hl(hl_id), kExtmarkNoUndo);
+              decor_hl(hl_id), kExtmarkNoUndo);
   return src_id;
 }
 
@@ -1681,7 +1746,7 @@ Integer nvim_buf_set_virtual_text(Buffer buffer,
   }
 
 
-  VirtText *existing = extmark_find_virttext(buf, (int)line, ns_id);
+  VirtText *existing = decor_find_virttext(buf, (int)line, ns_id);
 
   if (existing) {
     clear_virttext(existing);

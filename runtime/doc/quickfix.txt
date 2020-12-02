@@ -187,12 +187,17 @@ processing a quickfix or location list command, it will be aborted.
 			current window is used instead of the quickfix list.
 
 							*:cq* *:cquit*
-:[count]cq[uit]		Quit Nvim with an error code, or the code specified in
-			[count].  Useful when Nvim is called from another
-			program: e.g. `git commit` will abort the comitting
-			process, `fc` (built-in for shells like bash and zsh)
-			will not execute the command.
-
+:cq[uit][!]
+:{N}cq[uit][!]
+:cq[uit][!] {N}		Quit Vim with error code {N}.  {N} defaults to one.
+			Useful when Vim is called from another program:
+			e.g., a compiler will not compile the same file again,
+			`git commit` will abort the committing process, `fc`
+			(built-in for shells like bash and zsh) will not
+			execute the command, etc.  will not compile the same
+			file again.
+			{N} can also be zero, in which case Vim exits
+			normally.
 			WARNING: All changes in files are lost.  It works like
 			":qall!" |:qall|, except that Nvim exits non-zero or
 			[count].
@@ -540,7 +545,6 @@ location list.
 			second quickfix window.  If [height] is given the
 			existing window will be resized to it.
 
-							*quickfix-buffer*
 			The window will contain a special buffer, with
 			'buftype' equal to "quickfix".  Don't change this!
 			The window will have the w:quickfix_title variable set
@@ -549,11 +553,7 @@ location list.
 			status line if the value of 'statusline' is adjusted
 			properly. Whenever this buffer is modified by a
 			quickfix command or function, the |b:changedtick|
-			variable is incremented.  You can get the number of
-			this buffer using the getqflist() and getloclist()
-			functions by passing the 'qfbufnr' item. For a
-			location list, this buffer is wiped out when the
-			location list is removed.
+			variable is incremented.
 
 							*:lop* *:lopen*
 :lop[en] [height]	Open a window to show the location list for the
@@ -719,17 +719,11 @@ using these functions are below:
     " get the quickfix list window id
     :echo getqflist({'winid' : 0}).winid
 
-    " get the quickfix list window buffer number
-    :echo getqflist({'qfbufnr' : 0}).qfbufnr
-
     " get the context of the current location list
     :echo getloclist(0, {'context' : 0}).context
 
     " get the location list window id of the third window
     :echo getloclist(3, {'winid' : 0}).winid
-
-    " get the location list window buffer number of the third window
-    :echo getloclist(3, {'qfbufnr' : 0}).qfbufnr
 
     " get the file window id of a location list window (winnr: 4)
     :echo getloclist(4, {'filewinid' : 0}).filewinid
