@@ -7,9 +7,32 @@ local iswin = helpers.iswin
 local retry = helpers.retry
 local ok = helpers.ok
 local source = helpers.source
-local wait = helpers.wait
+local poke_eventloop = helpers.poke_eventloop
 local uname = helpers.uname
 local load_adjust = helpers.load_adjust
+local isCI = helpers.isCI
+
+local function isasan()
+  local version = eval('execute("version")')
+  return version:match('-fsanitize=[a-z,]*address')
+end
+
+clear()
+if isasan() then
+  pending('ASAN build is difficult to estimate memory usage', function() end)
+  return
+elseif iswin() then
+  if isCI('github') then
+    pending('Windows runners in Github Actions do not have a stable environment to estimate memory usage', function() end)
+    return
+  elseif eval("executable('wmic')") == 0 then
+    pending('missing "wmic" command', function() end)
+    return
+  end
+elseif eval("executable('ps')") == 0 then
+  pending('missing "ps" command', function() end)
+  return
+end
 
 local monitor_memory_usage = {
   memory_usage = function(self)
@@ -71,11 +94,6 @@ describe('memory usage', function()
     end
   end
 
-  local function isasan()
-    local version = eval('execute("version")')
-    return version:match('-fsanitize=[a-z,]*address')
-  end
-
   before_each(clear)
 
   --[[
@@ -83,15 +101,6 @@ describe('memory usage', function()
   just after it finishes.
   ]]--
   it('function capture vargs', function()
-    if isasan() then
-      pending('ASAN build is difficult to estimate memory usage')
-    end
-    if iswin() and eval("executable('wmic')")  == 0 then
-      pending('missing "wmic" command')
-    elseif eval("executable('ps')")  == 0 then
-      pending('missing "ps" command')
-    end
-
     local pid = eval('getpid()')
     local before = monitor_memory_usage(pid)
     source([[
@@ -102,7 +111,7 @@ describe('memory usage', function()
         call s:f(0)
       endfor
     ]])
-    wait()
+    poke_eventloop()
     local after = monitor_memory_usage(pid)
     -- Estimate the limit of max usage as 2x initial usage.
     -- The lower limit can fluctuate a bit, use 97%.
@@ -125,15 +134,6 @@ describe('memory usage', function()
   increase so much even when rerun Xtest.vim since system memory caches.
   ]]--
   it('function capture lvars', function()
-    if isasan() then
-      pending('ASAN build is difficult to estimate memory usage')
-    end
-    if iswin() and eval("executable('wmic')")  == 0 then
-      pending('missing "wmic" command')
-    elseif eval("executable('ps')")  == 0 then
-      pending('missing "ps" command')
-    end
-
     local pid = eval('getpid()')
     local before = monitor_memory_usage(pid)
     local fname = source([[
@@ -147,11 +147,11 @@ describe('memory usage', function()
         call s:f()
       endfor
     ]])
-    wait()
+    poke_eventloop()
     local after = monitor_memory_usage(pid)
     for _ = 1, 3 do
       feed_command('so '..fname)
-      wait()
+      poke_eventloop()
     end
     local last = monitor_memory_usage(pid)
     -- The usage may be a bit less than the last value, use 80%.

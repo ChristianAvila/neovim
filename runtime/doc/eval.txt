@@ -1600,7 +1600,7 @@ v:event		Dictionary of event data for the current |autocommand|.  Valid
 			regtype		Type of register as returned by
 					|getregtype()|.
 			visual		Selection is visual (as opposed to,
-					e.g., via motion).	
+					e.g., via motion).
 			completed_item    Current selected complete item on
 					|CompleteChanged|, Is `{}` when no complete
 					item selected.
@@ -1614,6 +1614,8 @@ v:event		Dictionary of event data for the current |autocommand|.  Valid
 					|CompleteChanged|.
 			scrollbar 	Is |v:true| if popup menu have scrollbar, or
 					|v:false| if not.
+			changed_window 	Is |v:true| if the the event fired
+					while changing window (or tab) on |DirChanged|.
 
 					*v:exception* *exception-variable*
 v:exception	The value of the exception most recently caught and not
@@ -1781,7 +1783,7 @@ v:msgpack_types	Dictionary containing msgpack types used by |msgpackparse()|
 		of msgpack types, use |is| operator.
 
 					*v:null* *null-variable*
-v:null		Special value used to put "null" in JSON and NIL in msgpack. 
+v:null		Special value used to put "null" in JSON and NIL in msgpack.
 		See |json_encode()|.  This value is converted to "v:null" when
 		used as a String (e.g. in |expr5| with string concatenation
 		operator) and to zero when used as a Number (e.g. in |expr5|
@@ -2182,6 +2184,7 @@ getjumplist([{winnr} [, {tabnr}]])
 getline({lnum})			String	line {lnum} of current buffer
 getline({lnum}, {end})		List	lines {lnum} to {end} of current buffer
 getloclist({nr} [, {what}])	List	list of location list items
+getmarklist([{expr}])		List	list of global/local marks
 getmatches([{win}])		List	list of current matches
 getpid()			Number	process ID of Vim
 getpos({expr})			List	position of cursor, mark, etc.
@@ -2336,6 +2339,7 @@ repeat({expr}, {count})		String	repeat {expr} {count} times
 resolve({filename})		String	get filename a shortcut points to
 reverse({list})			List	reverse {list} in-place
 round({expr})			Float	round off {expr}
+rubyeval({expr})		any	evaluate |Ruby| expression
 rpcnotify({channel}, {event}[, {args}...])
 				Sends an |RPC| notification to {channel}
 rpcrequest({channel}, {method}[, {args}...])
@@ -2484,6 +2488,7 @@ wait({timeout}, {condition}[, {interval}])
 wildmenumode()			Number	whether 'wildmenu' mode is active
 win_findbuf({bufnr})		List	find windows containing {bufnr}
 win_getid([{win} [, {tab}]])	Number	get |window-ID| for {win} in {tab}
+win_gettype([{nr}])		String	type of window {nr}
 win_gotoid({expr})		Number	go to |window-ID| {expr}
 win_id2tabwin({expr})		List	get tab and window nr from |window-ID|
 win_id2win({expr})		Number	get window nr from |window-ID|
@@ -3171,7 +3176,7 @@ complete_info([{what}])
 <
 						*confirm()*
 confirm({msg} [, {choices} [, {default} [, {type}]]])
-		confirm() offers the user a dialog, from which a choice can be
+		Confirm() offers the user a dialog, from which a choice can be
 		made.  It returns the number of the choice.  For the first
 		choice this is 1.
 
@@ -4145,7 +4150,7 @@ function({name} [, {arglist}] [, {dict}])
 garbagecollect([{atexit}])				*garbagecollect()*
 		Cleanup unused |Lists| and |Dictionaries| that have circular
 		references.
-		
+
 		There is hardly ever a need to invoke this function, as it is
 		automatically done when Vim runs out of memory or is waiting
 		for the user to press a key after 'updatetime'.  Items without
@@ -4640,16 +4645,28 @@ getloclist({nr},[, {what}])				*getloclist()*
 		If the optional {what} dictionary argument is supplied, then
 		returns the items listed in {what} as a dictionary. Refer to
 		|getqflist()| for the supported items in {what}.
+		If {what} contains 'filewinid', then returns the id of the
+		window used to display files from the location list. This
+		field is applicable only when called from a location list
+		window. See |location-list-file-window| for more details.
 
-		In addition to the items supported by |getqflist()| in {what},
-		the following item is supported by |getloclist()|:
+getmarklist([{expr}]					*getmarklist()*
+		Without the {expr} argument returns a |List| with information
+		about all the global marks. |mark|
 
-			filewinid 	id of the window used to display files
-					from the location list. This field is
-					applicable only when called from a
-					location list window. See
-					|location-list-file-window| for more
-					details.
+		If the optional {expr} argument is specified, returns the
+		local marks defined in buffer {expr}.  For the use of {expr},
+		see |bufname()|.
+
+		Each item in the retuned List is a |Dict| with the following:
+		    name - name of the mark prefixed by "'"
+		    pos - a |List| with the position of the mark:
+				[bufnum, lnum, col, off]
+			  Refer to |getpos()| for more information.
+		    file - file name
+
+		Refer to |getpos()| for getting information about a specific
+		mark.
 
 getmatches([{win}])					*getmatches()*
 		Returns a |List| with all matches previously defined for the
@@ -4751,9 +4768,6 @@ getqflist([{what}])					*getqflist()*
 			nr	get information for this quickfix list; zero
 				means the current quickfix list and "$" means
 				the last quickfix list
-			qfbufnr number of the buffer displayed in the quickfix
-				window. Returns 0 if the quickfix buffer is
-				not present. See |quickfix-buffer|.
 			size	number of entries in the quickfix list
 			title	get the list title |quickfix-title|
 			winid	get the quickfix |window-ID|
@@ -4782,8 +4796,6 @@ getqflist([{what}])					*getqflist()*
 			items	quickfix list entries. If not present, set to
 				an empty list.
 			nr	quickfix list number. If not present, set to 0
-			qfbufnr	number of the buffer displayed in the quickfix
-				window. If not present, set to 0.
 			size	number of entries in the quickfix list. If not
 				present, set to 0.
 			title	quickfix list title text. If not present, set
@@ -4922,7 +4934,7 @@ getwininfo([{winid}])					*getwininfo()*
 			quickfix	1 if quickfix or location list window
 			terminal	1 if a terminal window
 			tabnr		tab page number
-			topline		first displayed buffer line 
+			topline		first displayed buffer line
 			variables	a reference to the dictionary with
 					window-local variables
 			width		window width
@@ -5062,7 +5074,7 @@ has({feature})	Returns 1 if {feature} is supported, 0 otherwise.  The
 
 		Vim's compile-time feature-names (prefixed with "+") are not
 		recognized because Nvim is always compiled with all possible
-		features. |feature-compile| 
+		features. |feature-compile|
 
 		Feature names can be:
 		1.  Nvim version. For example the "nvim-0.2.1" feature means
@@ -5087,7 +5099,7 @@ has({feature})	Returns 1 if {feature} is supported, 0 otherwise.  The
 			ttyin		input is a terminal (tty)
 			ttyout		output is a terminal (tty)
 			unix		Unix system.
-			*vim_starting*	True during |startup|. 
+			*vim_starting*	True during |startup|.
 			win32		Windows system (32 or 64 bit).
 			win64		Windows system (64 bit).
 			wsl		WSL (Windows Subsystem for Linux) system
@@ -5672,7 +5684,7 @@ json_encode({expr})					*json_encode()*
 		|msgpack-special-dict|), values with self-referencing
 		containers, strings which contain non-UTF-8 characters,
 		pseudo-UTF-8 strings which contain codepoints reserved for
-		surrogate pairs (such strings are not valid UTF-8 strings). 
+		surrogate pairs (such strings are not valid UTF-8 strings).
 		Non-printable characters are converted into "\u1234" escapes
 		or special escapes like "\t", other are dumped as-is.
 
@@ -5706,7 +5718,6 @@ libcall({libname}, {funcname}, {argument})
 		If {argument} is a number, it is passed to the function as an
 		int; if {argument} is a string, it is passed as a
 		null-terminated string.
-		This function will fail in |restricted-mode|.
 
 		libcall() allows you to write your own 'plug-in' extensions to
 		Vim without having to recompile the program.  It is NOT a
@@ -5836,7 +5847,7 @@ map({expr1}, {expr2})					*map()*
 		{expr1} must be a |List| or a |Dictionary|.
 		Replace each item in {expr1} with the result of evaluating
 		{expr2}. {expr2} must be a |string| or |Funcref|.
-		
+
 		If {expr2} is a |string|, inside {expr2} |v:val| has the value
 		of the current item. For a |Dictionary| |v:key| has the key
 		of the current item and for a |List| |v:key| has the index of
@@ -6103,8 +6114,8 @@ matchaddpos({group}, {pos} [, {priority} [, {id} [, {dict}]]])
 		- A list with three numbers, e.g., [23, 11, 3]. As above, but
 		  the third number gives the length of the highlight in bytes.
 
-		Entries with zero and negative line numbers are silently 
-		ignored, as well as entries with negative column numbers and 
+		Entries with zero and negative line numbers are silently
+		ignored, as well as entries with negative column numbers and
 		lengths.
 
 		The maximum number of positions is 8.
@@ -7081,6 +7092,17 @@ rpcstart({prog}[, {argv}])					*rpcstart()*
 <		with >
 			:let id = jobstart(['prog', 'arg1', 'arg2'], {'rpc': v:true})
 
+rubyeval({expr})					*rubyeval()*
+		Evaluate Ruby expression {expr} and return its result
+		converted to Vim data structures.
+		Numbers, floats and strings are returned as they are (strings
+		are copied though).
+		Arrays are represented as Vim |List| type.
+		Hashes are represented as Vim |Dictionary| type.
+		Other objects are represented as strings resulted from their
+		"Object#to_s" method.
+		{only available when compiled with the |+ruby| feature}
+
 screenattr({row}, {col})					*screenattr()*
 		Like |screenchar()|, but return the attribute.  This is a rather
 		arbitrary number that can only be used to compare to the
@@ -7586,7 +7608,7 @@ setpos({expr}, {list})
 
 setqflist({list} [, {action}[, {what}]])		*setqflist()*
 		Create or replace or add to the quickfix list.
-		
+
 		When {what} is not present, use the items in {list}.  Each
 		item must be a dictionary.  Non-dictionary items in {list} are
 		ignored.  Each dictionary item can contain the following
@@ -7627,12 +7649,12 @@ setqflist({list} [, {action}[, {what}]])		*setqflist()*
 		'a'	The items from {list} are added to the existing
 			quickfix list. If there is no existing list, then a
 			new list is created.
-		
+
 		'r'	The items from the current quickfix list are replaced
 			with the items from {list}.  This can also be used to
 			clear the list: >
 				:call setqflist([], 'r')
-<	
+<
 		'f'	All the quickfix lists in the quickfix stack are
 			freed.
 
@@ -8001,7 +8023,7 @@ sign_place({id}, {group}, {name}, {expr} [, {dict}])
 		empty string.  {group} functions as a namespace for {id}, thus
 		two groups can use the same IDs. Refer to |sign-identifier|
 		for more information.
-		
+
 		{name} refers to a defined sign.
 		{expr} refers to a buffer name or number. For the accepted
 		values, see |bufname()|.
@@ -8438,8 +8460,6 @@ strftime({format} [, {time}])				*strftime()*
 		  :echo strftime("%H:%M")	   11:55
 		  :echo strftime("%c", getftime("file.c"))
 						   Show mod time of file.c.
-<		Not available on all systems.  To check use: >
-			:if exists("*strftime")
 
 strgetchar({str}, {index})				*strgetchar()*
 		Get character {index} from {str}.  This uses a character
@@ -8783,7 +8803,7 @@ system({cmd} [, {input}])				*system()* *E677*
 
 		Note: Use |shellescape()| or |::S| with |expand()| or
 		|fnamemodify()| to escape special characters in a command
-		argument.  Newlines in {cmd} may cause the command to fail. 
+		argument.  Newlines in {cmd} may cause the command to fail.
 		The characters in 'shellquote' and 'shellxquote' may also
 		cause trouble.
 
@@ -8801,7 +8821,6 @@ system({cmd} [, {input}])				*system()* *E677*
 		{cmd} is a string: 'shell' 'shellcmdflag' {cmd}
 
 		The resulting error code can be found in |v:shell_error|.
-		This function will fail in |restricted-mode|.
 
 		Note that any wrong value in the options mentioned above may
 		make the function fail.  It has also been reported to fail
@@ -9276,6 +9295,24 @@ win_getid([{win} [, {tab}]])				*win_getid()*
 		number {tab}.  The first tab has number one.
 		Return zero if the window cannot be found.
 
+win_gettype([{nr}])					*win_gettype()*
+		Return the type of the window:
+			"autocmd"	autocommand window. Temporary window
+					used to execute autocommands.
+			"popup"		popup window |popup|
+			"preview"	preview window |preview-window|
+			"command"	command-line window |cmdwin|
+			(empty)		normal window
+			"unknown"	window {nr} not found
+
+		When {nr} is omitted return the type of the current window.
+		When {nr} is given return the type of this window by number or
+		|window-ID|.
+
+		Also see the 'buftype' option.  When running a terminal in a
+		popup window then 'buftype' is "terminal" and win_gettype()
+		returns "popup".
+
 win_gotoid({expr})					*win_gotoid()*
 		Go to window with ID {expr}.  This may also change the current
 		tabpage.
@@ -9312,6 +9349,13 @@ winbufnr({nr})	The result is a Number, which is the number of the buffer
 wincol()	The result is a Number, which is the virtual column of the
 		cursor in the window.  This is counting screen cells from the
 		left side of the window.  The leftmost column is one.
+
+							*windowsversion()*
+windowsversion()
+		The result is a String.  For MS-Windows it indicates the OS
+		version.  E.g, Windows 10 is "10.0", Windows 8 is "6.2",
+		Windows XP is "5.1".  For non-MS-Windows systems the result is
+		an empty string.
 
 winheight({nr})						*winheight()*
 		The result is a Number, which is the height of window {nr}.
@@ -10397,14 +10441,14 @@ text...
 			commands are skipped.
 			When {pattern} is omitted all errors are caught.
 			Examples: >
-		:catch /^Vim:Interrupt$/	 " catch interrupts (CTRL-C)
-		:catch /^Vim\%((\a\+)\)\=:E/	 " catch all Vim errors
-		:catch /^Vim\%((\a\+)\)\=:/	 " catch errors and interrupts
-		:catch /^Vim(write):/		 " catch all errors in :write
-		:catch /^Vim\%((\a\+)\)\=:E123:/ " catch error E123
-		:catch /my-exception/		 " catch user exception
-		:catch /.*/			 " catch everything
-		:catch				 " same as /.*/
+		:catch /^Vim:Interrupt$/	" catch interrupts (CTRL-C)
+		:catch /^Vim\%((\a\+)\)\=:E/	" catch all Vim errors
+		:catch /^Vim\%((\a\+)\)\=:/	" catch errors and interrupts
+		:catch /^Vim(write):/		" catch all errors in :write
+		:catch /^Vim\%((\a\+)\)\=:E123/	" catch error E123
+		:catch /my-exception/		" catch user exception
+		:catch /.*/			" catch everything
+		:catch				" same as /.*/
 <
 			Another character can be used instead of / around the
 			{pattern}, so long as it does not have a special

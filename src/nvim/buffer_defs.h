@@ -361,12 +361,34 @@ struct mapblock {
   sctx_T m_script_ctx;          // SCTX where map was defined
 };
 
-/*
- * Used for highlighting in the status line.
- */
+/// Used for highlighting in the status line.
+typedef struct stl_hlrec stl_hlrec_t;
 struct stl_hlrec {
   char_u      *start;
   int userhl;                   // 0: no HL, 1-9: User HL, < 0 for syn ID
+};
+
+/// Used for building the status line.
+typedef struct stl_item stl_item_t;
+struct stl_item {
+  // Where the item starts in the status line output buffer
+  char_u *start;
+  // Function to run for ClickFunc items.
+  char *cmd;
+  // The minimum width of the item
+  int minwid;
+  // The maximum width of the item
+  int maxwid;
+  enum {
+    Normal,
+    Empty,
+    Group,
+    Separate,
+    Highlight,
+    TabPage,
+    ClickFunc,
+    Trunc
+  } type;
 };
 
 // values for b_syn_spell: what to do with toplevel text
@@ -469,9 +491,10 @@ typedef struct {
   LuaRef on_changedtick;
   LuaRef on_detach;
   bool utf_sizes;
+  bool preview;
 } BufUpdateCallbacks;
 #define BUF_UPDATE_CALLBACKS_INIT { LUA_NOREF, LUA_NOREF, LUA_NOREF, \
-                                    LUA_NOREF, false }
+                                    LUA_NOREF, false, false }
 
 EXTERN int curbuf_splice_pending INIT(= 0);
 
@@ -510,15 +533,20 @@ struct file_buffer {
   // b_fname    is the same as b_sfname, unless ":cd" has been done,
   //            then it is the same as b_ffname (NULL for no name).
   //
-  char_u      *b_ffname;        // full path file name
-  char_u      *b_sfname;        // short file name
-  char_u      *b_fname;         // current file name
+  char_u      *b_ffname;        // full path file name, allocated
+  char_u      *b_sfname;        // short file name, allocated, may be equal to
+                                // b_ffname
+  char_u      *b_fname;         // current file name, points to b_ffname or
+                                // b_sfname
 
   bool file_id_valid;
   FileID file_id;
 
   int b_changed;                // 'modified': Set to true if something in the
                                 // file has been changed and not written out.
+  bool b_changed_invalid;       // Set if BufModified autocmd has not been
+                                // triggered since the last time b_changed was
+                                // modified.
 
   /// Change-identifier incremented for each change, including undo.
   ///
@@ -546,7 +574,7 @@ struct file_buffer {
                                 // negative when lines were deleted
   wininfo_T   *b_wininfo;       // list of last used info for each window
   int b_mod_tick_syn;           // last display tick syntax was updated
-  int b_mod_tick_deco;          // last display tick decoration providers
+  int b_mod_tick_decor;         // last display tick decoration providers
                                 // where invoked
 
   long b_mtime;                 // last change time of original file
@@ -661,6 +689,9 @@ struct file_buffer {
   char_u *b_p_com;              ///< 'comments'
   char_u *b_p_cms;              ///< 'commentstring'
   char_u *b_p_cpt;              ///< 'complete'
+#ifdef BACKSLASH_IN_FILENAME
+  char_u *b_p_csl;              ///< 'completeslash'
+#endif
   char_u *b_p_cfu;              ///< 'completefunc'
   char_u *b_p_ofu;              ///< 'omnifunc'
   char_u *b_p_tfu;              ///< 'tagfunc'
@@ -770,6 +801,7 @@ struct file_buffer {
   int b_ind_cpp_namespace;
   int b_ind_if_for_while;
   int b_ind_cpp_extern_c;
+  int b_ind_pragma;
 
   linenr_T b_no_eol_lnum;       /* non-zero lnum when last line of next binary
                                  * write should not have an end-of-line */
@@ -1103,12 +1135,6 @@ struct VimMenu {
   vimmenu_T   *next;                 ///< Next item in menu
 };
 
-typedef struct {
-  int wb_startcol;
-  int wb_endcol;
-  vimmenu_T *wb_menu;
-} winbar_item_T;
-
 /// Structure which contains all information that belongs to a window.
 ///
 /// All row numbers are relative to the start of the window, except w_winrow.
@@ -1203,6 +1229,13 @@ struct window_S {
                                     // 'wrap' is off
   colnr_T w_skipcol;                // starting column when a single line
                                     // doesn't fit in the window
+
+  // "w_last_topline" and "w_last_leftcol" are used to determine if
+  // a Scroll autocommand should be emitted.
+  linenr_T w_last_topline;          ///< last known value for topline
+  colnr_T w_last_leftcol;          ///< last known value for leftcol
+  int w_last_width;                 ///< last known value for width
+  int w_last_height;                ///< last known value for height
 
   //
   // Layout of the window in the screen.
@@ -1318,10 +1351,6 @@ struct window_S {
 
   char_u      *w_localdir;          /* absolute path of local directory or
                                        NULL */
-  vimmenu_T *w_winbar;            // The root of the WinBar menu hierarchy.
-  winbar_item_T *w_winbar_items;  // list of items in the WinBar
-  int w_winbar_height;            // 1 if there is a window toolbar
-
   // Options local to a window.
   // They are local because they influence the layout of the window or
   // depend on the window layout.

@@ -1197,7 +1197,13 @@ int insert_reg(
       retval = FAIL;
     } else {
       for (size_t i = 0; i < reg->y_size; i++) {
-        stuffescaped((const char *)reg->y_array[i], literally);
+        if (regname == '-') {
+          AppendCharToRedobuff(Ctrl_R);
+          AppendCharToRedobuff(regname);
+          do_put(regname, NULL, BACKWARD, 1L, PUT_CURSEND);
+        } else {
+          stuffescaped((const char *)reg->y_array[i], literally);
+        }
         // Insert a newline between lines and after last line if
         // y_type is kMTLineWise.
         if (reg->y_type == kMTLineWise || i < reg->y_size - 1) {
@@ -1683,6 +1689,7 @@ int op_delete(oparg_T *oap)
                      (int)oap->line_count-1, n, deleted_bytes,
                      0, 0, 0, kExtmarkUndo);
     }
+    auto_format(false, true);
   }
 
   msgmore(curbuf->b_ml.ml_line_count - old_lcount);
@@ -2652,7 +2659,7 @@ static void op_yank_reg(oparg_T *oap, bool message, yankreg_T *reg, bool append)
     xfree(reg->y_array);
   }
   if (curwin->w_p_rnu) {
-    redraw_later(SOME_VALID);  // cursor moved to start
+    redraw_later(curwin, SOME_VALID);  // cursor moved to start
   }
   if (message) {  // Display message about yank?
     if (yank_type == kMTCharWise && yanklines == 1) {
@@ -3547,15 +3554,21 @@ void ex_display(exarg_T *eap)
   int name;
   char_u *arg = eap->arg;
   int clen;
+  char_u type[2];
 
   if (arg != NULL && *arg == NUL)
     arg = NULL;
   int attr = HL_ATTR(HLF_8);
 
-  /* Highlight title */
-  MSG_PUTS_TITLE(_("\n--- Registers ---"));
+  // Highlight title
+  msg_puts_title(_("\nType Name Content"));
   for (int i = -1; i < NUM_REGISTERS && !got_int; i++) {
     name = get_register_name(i);
+    switch (get_reg_type(name, NULL)) {
+      case kMTLineWise: type[0] = 'l'; break;
+      case kMTCharWise: type[0] = 'c'; break;
+      default: type[0] = 'b'; break;
+    }
 
     if (arg != NULL && vim_strchr(arg, name) == NULL) {
       continue;             /* did not ask for this register */
@@ -3580,11 +3593,14 @@ void ex_display(exarg_T *eap)
 
     if (yb->y_array != NULL) {
       msg_putchar('\n');
+      msg_puts("  ");
+      msg_putchar(type[0]);
+      msg_puts("  ");
       msg_putchar('"');
       msg_putchar(name);
       MSG_PUTS("   ");
 
-      int n = Columns - 6;
+      int n = Columns - 11;
       for (size_t j = 0; j < yb->y_size && n > 1; j++) {
         if (j) {
           MSG_PUTS_ATTR("^J", attr);
@@ -3609,8 +3625,8 @@ void ex_display(exarg_T *eap)
    */
   if ((p = get_last_insert()) != NULL
       && (arg == NULL || vim_strchr(arg, '.') != NULL) && !got_int) {
-    MSG_PUTS("\n\".   ");
-    dis_msg(p, TRUE);
+    msg_puts("\n  c  \".   ");
+    dis_msg(p, true);
   }
 
   /*
@@ -3618,8 +3634,8 @@ void ex_display(exarg_T *eap)
    */
   if (last_cmdline != NULL && (arg == NULL || vim_strchr(arg, ':') != NULL)
       && !got_int) {
-    MSG_PUTS("\n\":   ");
-    dis_msg(last_cmdline, FALSE);
+    msg_puts("\n  c  \":   ");
+    dis_msg(last_cmdline, false);
   }
 
   /*
@@ -3627,8 +3643,8 @@ void ex_display(exarg_T *eap)
    */
   if (curbuf->b_fname != NULL
       && (arg == NULL || vim_strchr(arg, '%') != NULL) && !got_int) {
-    MSG_PUTS("\n\"%   ");
-    dis_msg(curbuf->b_fname, FALSE);
+    msg_puts("\n  c  \"%   ");
+    dis_msg(curbuf->b_fname, false);
   }
 
   /*
@@ -3639,8 +3655,8 @@ void ex_display(exarg_T *eap)
     linenr_T dummy;
 
     if (buflist_name_nr(0, &fname, &dummy) != FAIL) {
-      MSG_PUTS("\n\"#   ");
-      dis_msg(fname, FALSE);
+      msg_puts("\n  c  \"#   ");
+      dis_msg(fname, false);
     }
   }
 
@@ -3649,8 +3665,8 @@ void ex_display(exarg_T *eap)
    */
   if (last_search_pat() != NULL
       && (arg == NULL || vim_strchr(arg, '/') != NULL) && !got_int) {
-    MSG_PUTS("\n\"/   ");
-    dis_msg(last_search_pat(), FALSE);
+    msg_puts("\n  c  \"/   ");
+    dis_msg(last_search_pat(), false);
   }
 
   /*
@@ -3658,8 +3674,8 @@ void ex_display(exarg_T *eap)
    */
   if (expr_line != NULL && (arg == NULL || vim_strchr(arg, '=') != NULL)
       && !got_int) {
-    MSG_PUTS("\n\"=   ");
-    dis_msg(expr_line, FALSE);
+    msg_puts("\n  c  \"=   ");
+    dis_msg(expr_line, false);
   }
 }
 
@@ -3669,9 +3685,10 @@ void ex_display(exarg_T *eap)
  */
 static void
 dis_msg(
-    char_u *p,
-    int skip_esc                       /* if TRUE, ignore trailing ESC */
+    const char_u *p,
+    bool skip_esc     // if true, ignore trailing ESC
 )
+  FUNC_ATTR_NONNULL_ALL
 {
   int n;
   int l;
@@ -3833,7 +3850,8 @@ int do_join(size_t count,
           && (!has_format_option(FO_MBYTE_JOIN)
               || (utf_ptr2char(curr) < 0x100 && endcurr1 < 0x100))
           && (!has_format_option(FO_MBYTE_JOIN2)
-              || utf_ptr2char(curr) < 0x100 || endcurr1 < 0x100)
+              || (utf_ptr2char(curr) < 0x100 && !utf_eat_space(endcurr1))
+              || (endcurr1 < 0x100 && !utf_eat_space(utf_ptr2char(curr))))
           ) {
         /* don't add a space if the line is ending in a space */
         if (endcurr1 == ' ')
@@ -4116,8 +4134,8 @@ fex_format(
     int c                  /* character to be inserted */
 )
 {
-  int use_sandbox = was_set_insecurely((char_u *)"formatexpr",
-      OPT_LOCAL);
+  int use_sandbox = was_set_insecurely(
+      curwin, (char_u *)"formatexpr", OPT_LOCAL);
   int r;
   char_u *fex;
 
@@ -4158,49 +4176,41 @@ format_lines(
     int avoid_fex                          /* don't use 'formatexpr' */
 )
 {
-  int max_len;
-  int is_not_par;                       /* current line not part of parag. */
-  int next_is_not_par;                  /* next line not part of paragraph */
-  int is_end_par;                       /* at end of paragraph */
-  int prev_is_end_par = FALSE;          /* prev. line not part of parag. */
-  int next_is_start_par = FALSE;
-  int leader_len = 0;                   /* leader len of current line */
-  int next_leader_len;                  /* leader len of next line */
-  char_u      *leader_flags = NULL;     /* flags for leader of current line */
-  char_u      *next_leader_flags;       /* flags for leader of next line */
-  int do_comments;                      /* format comments */
-  int do_comments_list = 0;             /* format comments with 'n' or '2' */
-  int advance = TRUE;
-  int second_indent = -1;               /* indent for second line (comment
-                                         * aware) */
-  int do_second_indent;
-  int do_number_indent;
-  int do_trail_white;
-  int first_par_line = TRUE;
+  bool is_not_par;                  // current line not part of parag.
+  bool next_is_not_par;             // next line not part of paragraph
+  bool is_end_par;                  // at end of paragraph
+  bool prev_is_end_par = false;     // prev. line not part of parag.
+  bool next_is_start_par = false;
+  int leader_len = 0;               // leader len of current line
+  int next_leader_len;              // leader len of next line
+  char_u *leader_flags = NULL;      // flags for leader of current line
+  char_u *next_leader_flags;        // flags for leader of next line
+  bool advance = true;
+  int second_indent = -1;           // indent for second line (comment aware)
+  bool first_par_line = true;
   int smd_save;
   long count;
-  int need_set_indent = TRUE;           /* set indent of next paragraph */
-  int force_format = FALSE;
-  int old_State = State;
+  bool need_set_indent = true;      // set indent of next paragraph
+  bool force_format = false;
+  const int old_State = State;
 
-  /* length of a line to force formatting: 3 * 'tw' */
-  max_len = comp_textwidth(TRUE) * 3;
+  // length of a line to force formatting: 3 * 'tw'
+  const int max_len = comp_textwidth(true) * 3;
 
-  /* check for 'q', '2' and '1' in 'formatoptions' */
-  do_comments = has_format_option(FO_Q_COMS);
-  do_second_indent = has_format_option(FO_Q_SECOND);
-  do_number_indent = has_format_option(FO_Q_NUMBER);
-  do_trail_white = has_format_option(FO_WHITE_PAR);
+  // check for 'q', '2' and '1' in 'formatoptions'
+  const bool do_comments = has_format_option(FO_Q_COMS);  // format comments
+  int do_comments_list = 0;  // format comments with 'n' or '2'
+  const bool do_second_indent = has_format_option(FO_Q_SECOND);
+  const bool do_number_indent = has_format_option(FO_Q_NUMBER);
+  const bool do_trail_white = has_format_option(FO_WHITE_PAR);
 
-  /*
-   * Get info about the previous and current line.
-   */
-  if (curwin->w_cursor.lnum > 1)
-    is_not_par = fmt_check_par(curwin->w_cursor.lnum - 1
-        , &leader_len, &leader_flags, do_comments
-        );
-  else
-    is_not_par = TRUE;
+  // Get info about the previous and current line.
+  if (curwin->w_cursor.lnum > 1) {
+    is_not_par = fmt_check_par(curwin->w_cursor.lnum - 1,
+                               &leader_len, &leader_flags, do_comments);
+  } else {
+    is_not_par = true;
+  }
   next_is_not_par = fmt_check_par(curwin->w_cursor.lnum
       , &next_leader_len, &next_leader_flags, do_comments
       );
@@ -4225,7 +4235,7 @@ format_lines(
      * The last line to be formatted.
      */
     if (count == 1 || curwin->w_cursor.lnum == curbuf->b_ml.ml_line_count) {
-      next_is_not_par = TRUE;
+      next_is_not_par = true;
       next_leader_len = 0;
       next_leader_flags = NULL;
     } else {
@@ -4236,7 +4246,7 @@ format_lines(
         next_is_start_par =
           (get_number_indent(curwin->w_cursor.lnum + 1) > 0);
     }
-    advance = TRUE;
+    advance = true;
     is_end_par = (is_not_par || next_is_not_par || next_is_start_par);
     if (!is_end_par && do_trail_white)
       is_end_par = !ends_in_white(curwin->w_cursor.lnum);
@@ -4287,7 +4297,7 @@ format_lines(
               leader_len, leader_flags,
               next_leader_len, next_leader_flags)
           )
-        is_end_par = TRUE;
+        is_end_par = true;
 
       /*
        * If we have got to the end of a paragraph, or the line is
@@ -4324,9 +4334,9 @@ format_lines(
            * end of the paragraph. */
           if (line_count < 0)
             break;
-          first_par_line = TRUE;
+          first_par_line = true;
         }
-        force_format = FALSE;
+        force_format = false;
       }
 
       /*
@@ -4334,7 +4344,7 @@ format_lines(
        * first delete the leader from the second line.
        */
       if (!is_end_par) {
-        advance = FALSE;
+        advance = false;
         curwin->w_cursor.lnum++;
         curwin->w_cursor.col = 0;
         if (line_count < 0 && u_save_cursor() == FAIL)
@@ -4357,12 +4367,13 @@ format_lines(
           beep_flush();
           break;
         }
-        first_par_line = FALSE;
-        /* If the line is getting long, format it next time */
-        if (STRLEN(get_cursor_line_ptr()) > (size_t)max_len)
-          force_format = TRUE;
-        else
-          force_format = FALSE;
+        first_par_line = false;
+        // If the line is getting long, format it next time
+        if (STRLEN(get_cursor_line_ptr()) > (size_t)max_len) {
+          force_format = true;
+        } else {
+          force_format = false;
+        }
       }
     }
     line_breakcheck();
@@ -4423,11 +4434,10 @@ static int fmt_check_par(linenr_T lnum, int *leader_len, char_u **leader_flags, 
 int paragraph_start(linenr_T lnum)
 {
   char_u *p;
-  int leader_len = 0;                   /* leader len of current line */
-  char_u *leader_flags = NULL;          /* flags for leader of current line */
-  int next_leader_len = 0;              /* leader len of next line */
-  char_u *next_leader_flags = NULL;     /* flags for leader of next line */
-  int do_comments;                      /* format comments */
+  int leader_len = 0;                // leader len of current line
+  char_u *leader_flags = NULL;       // flags for leader of current line
+  int next_leader_len = 0;           // leader len of next line
+  char_u *next_leader_flags = NULL;  // flags for leader of next line
 
   if (lnum <= 1)
     return TRUE;                /* start of the file */
@@ -4436,7 +4446,7 @@ int paragraph_start(linenr_T lnum)
   if (*p == NUL)
     return TRUE;                /* after empty line */
 
-  do_comments = has_format_option(FO_Q_COMS);
+  const bool do_comments = has_format_option(FO_Q_COMS);  // format comments
   if (fmt_check_par(lnum - 1, &leader_len, &leader_flags, do_comments)) {
     return true;  // after non-paragraph line
   }
