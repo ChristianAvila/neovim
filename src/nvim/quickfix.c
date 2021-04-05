@@ -2798,7 +2798,7 @@ static void qf_jump_goto_line(linenr_T qf_lnum, int qf_col, char_u qf_viscol,
     // Move the cursor to the first line in the buffer
     pos_T save_cursor = curwin->w_cursor;
     curwin->w_cursor.lnum = 0;
-    if (!do_search(NULL, '/', qf_pattern, (long)1, SEARCH_KEEP, NULL)) {
+    if (!do_search(NULL, '/', '/', qf_pattern, (long)1, SEARCH_KEEP, NULL)) {
       curwin->w_cursor = save_cursor;
     }
   }
@@ -3617,6 +3617,15 @@ static int qf_open_new_cwindow(qf_info_T *qi, int height)
   if (win_split(height, flags) == FAIL) {
     return FAIL;  // not enough room for window
   }
+
+  // User autocommands may have invalidated the previous window after calling
+  // win_split, so add a check to ensure that the win is still here
+  if (IS_LL_STACK(qi) && !win_valid(win)) {
+    // close the window that was supposed to be for the loclist
+    win_close(curwin, false);
+    return FAIL;
+  }
+
   RESET_BINDING(curwin);
 
   if (IS_LL_STACK(qi)) {
@@ -3665,7 +3674,7 @@ static int qf_open_new_cwindow(qf_info_T *qi, int height)
 static void qf_set_title_var(qf_list_T *qfl)
 {
   if (qfl->qf_title != NULL) {
-    set_internal_string_var((char_u *)"w:quickfix_title", qfl->qf_title);
+    set_internal_string_var("w:quickfix_title", qfl->qf_title);
   }
 }
 
@@ -4951,7 +4960,7 @@ void ex_cfile(exarg_T *eap)
     }
   }
   if (*eap->arg != NUL) {
-    set_string_option_direct((char_u *)"ef", -1, eap->arg, OPT_FREE, 0);
+    set_string_option_direct("ef", -1, eap->arg, OPT_FREE, 0);
   }
 
   char_u *enc = (*curbuf->b_p_menc != NUL) ? curbuf->b_p_menc : p_menc;
@@ -5264,7 +5273,7 @@ void ex_vimgrep(exarg_T *eap)
     qf_new_list(qi, title);
   }
 
-  // parse the list of arguments
+  // Parse the list of arguments, wildcards have already been expanded.
   if (get_arglist_exp(p, &fcount, &fnames, true) == FAIL) {
     goto theend;
   }
@@ -5648,7 +5657,7 @@ static int get_qfline_items(qfline_T *qfp, list_T *list)
           == FAIL)) {
     // tv_dict_add* fail only if key already exist, but this is a newly
     // allocated dictionary which is thus guaranteed to have no existing keys.
-    assert(false);
+    abort();
   }
 
   return OK;

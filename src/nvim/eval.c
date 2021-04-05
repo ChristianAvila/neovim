@@ -176,7 +176,6 @@ static struct vimvar {
   VV(VV_DYING,          "dying",            VAR_NUMBER, VV_RO),
   VV(VV_EXCEPTION,      "exception",        VAR_STRING, VV_RO),
   VV(VV_THROWPOINT,     "throwpoint",       VAR_STRING, VV_RO),
-  VV(VV_STDERR,         "stderr",           VAR_NUMBER, VV_RO),
   VV(VV_REG,            "register",         VAR_STRING, VV_RO),
   VV(VV_CMDBANG,        "cmdbang",          VAR_NUMBER, VV_RO),
   VV(VV_INSERTMODE,     "insertmode",       VAR_STRING, VV_RO),
@@ -211,13 +210,9 @@ static struct vimvar {
   VV(VV_OPTION_OLD,     "option_old",       VAR_STRING, VV_RO),
   VV(VV_OPTION_TYPE,    "option_type",      VAR_STRING, VV_RO),
   VV(VV_ERRORS,         "errors",           VAR_LIST, 0),
-  VV(VV_MSGPACK_TYPES,  "msgpack_types",    VAR_DICT, VV_RO),
-  VV(VV_EVENT,          "event",            VAR_DICT, VV_RO),
   VV(VV_FALSE,          "false",            VAR_BOOL, VV_RO),
   VV(VV_TRUE,           "true",             VAR_BOOL, VV_RO),
   VV(VV_NULL,           "null",             VAR_SPECIAL, VV_RO),
-  VV(VV__NULL_LIST,     "_null_list",       VAR_LIST, VV_RO),
-  VV(VV__NULL_DICT,     "_null_dict",       VAR_DICT, VV_RO),
   VV(VV_VIM_DID_ENTER,  "vim_did_enter",    VAR_NUMBER, VV_RO),
   VV(VV_TESTING,        "testing",          VAR_NUMBER, 0),
   VV(VV_TYPE_NUMBER,    "t_number",         VAR_NUMBER, VV_RO),
@@ -227,10 +222,16 @@ static struct vimvar {
   VV(VV_TYPE_DICT,      "t_dict",           VAR_NUMBER, VV_RO),
   VV(VV_TYPE_FLOAT,     "t_float",          VAR_NUMBER, VV_RO),
   VV(VV_TYPE_BOOL,      "t_bool",           VAR_NUMBER, VV_RO),
+  VV(VV_EVENT,          "event",            VAR_DICT, VV_RO),
   VV(VV_ECHOSPACE,      "echospace",        VAR_NUMBER, VV_RO),
-  VV(VV_EXITING,        "exiting",          VAR_NUMBER, VV_RO),
-  VV(VV_LUA,            "lua",              VAR_PARTIAL, VV_RO),
   VV(VV_ARGV,           "argv",             VAR_LIST, VV_RO),
+  VV(VV_EXITING,        "exiting",          VAR_NUMBER, VV_RO),
+  // Neovim
+  VV(VV_STDERR,         "stderr",           VAR_NUMBER, VV_RO),
+  VV(VV_MSGPACK_TYPES,  "msgpack_types",    VAR_DICT, VV_RO),
+  VV(VV__NULL_LIST,     "_null_list",       VAR_LIST, VV_RO),
+  VV(VV__NULL_DICT,     "_null_dict",       VAR_DICT, VV_RO),
+  VV(VV_LUA,            "lua",              VAR_PARTIAL, VV_RO),
 };
 #undef VV
 
@@ -365,7 +366,7 @@ void eval_init(void)
     eval_msgpack_type_lists[i] = type_list;
     if (tv_dict_add(msgpack_types_dict, di) == FAIL) {
       // There must not be duplicate items in this dictionary by definition.
-      assert(false);
+      abort();
     }
   }
   msgpack_types_dict->dv_lock = VAR_FIXED;
@@ -455,14 +456,15 @@ void eval_clear(void)
  * Set an internal variable to a string value. Creates the variable if it does
  * not already exist.
  */
-void set_internal_string_var(char_u *name, char_u *value)
+void set_internal_string_var(const char *name, char_u *value)
+  FUNC_ATTR_NONNULL_ARG(1)
 {
-  const typval_T tv = {
+  typval_T tv = {
     .v_type = VAR_STRING,
     .vval.v_string = value,
   };
 
-  set_var((const char *)name, STRLEN(name), (typval_T *)&tv, true);
+  set_var(name, strlen(name), &tv, true);
 }
 
 static lval_T   *redir_lval = NULL;
@@ -522,9 +524,9 @@ var_redir_start(
   tv.v_type = VAR_STRING;
   tv.vval.v_string = (char_u *)"";
   if (append) {
-    set_var_lval(redir_lval, redir_endp, &tv, true, false, (char_u *)".");
+    set_var_lval(redir_lval, redir_endp, &tv, true, false, ".");
   } else {
-    set_var_lval(redir_lval, redir_endp, &tv, true, false, (char_u *)"=");
+    set_var_lval(redir_lval, redir_endp, &tv, true, false, "=");
   }
   clear_lval(redir_lval);
   err = did_emsg;
@@ -584,7 +586,7 @@ void var_redir_stop(void)
       redir_endp = (char_u *)get_lval(redir_varname, NULL, redir_lval,
                                       false, false, 0, FNE_CHECK_START);
       if (redir_endp != NULL && redir_lval->ll_name != NULL) {
-        set_var_lval(redir_lval, redir_endp, &tv, false, false, (char_u *)".");
+        set_var_lval(redir_lval, redir_endp, &tv, false, false, ".");
       }
       clear_lval(redir_lval);
     }
@@ -1847,7 +1849,7 @@ static char_u *ex_let_one(char_u *arg, typval_T *const tv,
         s = tv_get_string_chk(tv);  // != NULL if number or string.
       }
       if (s != NULL && op != NULL && *op != '=') {
-        opt_type = get_option_value(arg, &numval, (char_u **)&stringval,
+        opt_type = get_option_value((char *)arg, &numval, (char_u **)&stringval,
                                     opt_flags);
         if ((opt_type == 1 && *op == '.')
             || (opt_type == 0 && *op != '.')) {
@@ -1924,7 +1926,7 @@ static char_u *ex_let_one(char_u *arg, typval_T *const tv,
       if (endchars != NULL && vim_strchr(endchars, *skipwhite(p)) == NULL) {
         EMSG(_(e_letunexp));
       } else {
-        set_var_lval(&lv, p, tv, copy, is_const, op);
+        set_var_lval(&lv, p, tv, copy, is_const, (const char *)op);
         arg_end = p;
       }
     }
@@ -2121,9 +2123,10 @@ char_u *get_lval(char_u *const name, typval_T *const rettv,
             return NULL;
           }
         }
-        lp->ll_range = TRUE;
-      } else
-        lp->ll_range = FALSE;
+        lp->ll_range = true;
+      } else {
+        lp->ll_range = false;
+      }
 
       if (*p != ']') {
         if (!quiet) {
@@ -2240,12 +2243,10 @@ char_u *get_lval(char_u *const name, typval_T *const rettv,
         return NULL;
       }
 
-      /*
-       * May need to find the item or absolute index for the second
-       * index of a range.
-       * When no index given: "lp->ll_empty2" is TRUE.
-       * Otherwise "lp->ll_n2" is set to the second index.
-       */
+      // May need to find the item or absolute index for the second
+      // index of a range.
+      // When no index given: "lp->ll_empty2" is true.
+      // Otherwise "lp->ll_n2" is set to the second index.
       if (lp->ll_range && !lp->ll_empty2) {
         lp->ll_n2 = (long)tv_get_number(&var2);  // Is number or string.
         tv_clear(&var2);
@@ -2299,7 +2300,7 @@ void clear_lval(lval_T *lp)
  * "%" for "%=", "." for ".=" or "=" for "=".
  */
 static void set_var_lval(lval_T *lp, char_u *endp, typval_T *rettv,
-                         int copy, const bool is_const, const char_u *op)
+                         int copy, const bool is_const, const char *op)
 {
   int cc;
   listitem_T  *ri;
@@ -2326,7 +2327,7 @@ static void set_var_lval(lval_T *lp, char_u *endp, typval_T *rettv,
                                TV_CSTRING)
                  && !tv_check_lock(di->di_tv.v_lock, (const char *)lp->ll_name,
                                    TV_CSTRING)))
-            && eexe_mod_op(&tv, rettv, (const char *)op) == OK) {
+            && eexe_mod_op(&tv, rettv, op) == OK) {
           set_var(lp->ll_name, lp->ll_name_len, &tv, false);
         }
         tv_clear(&tv);
@@ -2369,8 +2370,7 @@ static void set_var_lval(lval_T *lp, char_u *endp, typval_T *rettv,
      */
     for (ri = tv_list_first(rettv->vval.v_list); ri != NULL; ) {
       if (op != NULL && *op != '=') {
-        eexe_mod_op(TV_LIST_ITEM_TV(lp->ll_li), TV_LIST_ITEM_TV(ri),
-                    (const char *)op);
+        eexe_mod_op(TV_LIST_ITEM_TV(lp->ll_li), TV_LIST_ITEM_TV(ri), op);
       } else {
         tv_clear(TV_LIST_ITEM_TV(lp->ll_li));
         tv_copy(TV_LIST_ITEM_TV(ri), TV_LIST_ITEM_TV(lp->ll_li));
@@ -2428,7 +2428,7 @@ static void set_var_lval(lval_T *lp, char_u *endp, typval_T *rettv,
       }
 
       if (op != NULL && *op != '=') {
-        eexe_mod_op(lp->ll_tv, rettv, (const char *)op);
+        eexe_mod_op(lp->ll_tv, rettv, op);
         goto notify;
       } else {
         tv_clear(lp->ll_tv);
@@ -3007,7 +3007,8 @@ static size_t varnamebuflen = 0;
 /*
  * Function to concatenate a prefix and a variable name.
  */
-static char_u *cat_prefix_varname(int prefix, char_u *name)
+char_u *cat_prefix_varname(int prefix, const char_u *name)
+  FUNC_ATTR_NONNULL_ALL
 {
   size_t len = STRLEN(name) + 3;
 
@@ -4538,7 +4539,7 @@ int get_option_tv(const char **const arg, typval_T *const rettv,
 
   c = *option_end;
   *option_end = NUL;
-  opt_type = get_option_value((char_u *)(*arg), &numval,
+  opt_type = get_option_value(*arg, &numval,
                               rettv == NULL ? NULL : &stringval, opt_flags);
 
   if (opt_type == -3) {                 // invalid name
@@ -5280,22 +5281,18 @@ bool set_ref_in_item(typval_T *tv, int copyID, ht_stack_T **ht_stack,
         if (ht_stack == NULL) {
           abort = set_ref_in_ht(&dd->dv_hashtab, copyID, list_stack);
         } else {
-          ht_stack_T *newitem = try_malloc(sizeof(ht_stack_T));
-          if (newitem == NULL) {
-            abort = true;
-          } else {
-            newitem->ht = &dd->dv_hashtab;
-            newitem->prev = *ht_stack;
-            *ht_stack = newitem;
-          }
+          ht_stack_T *const newitem = xmalloc(sizeof(ht_stack_T));
+          newitem->ht = &dd->dv_hashtab;
+          newitem->prev = *ht_stack;
+          *ht_stack = newitem;
         }
 
         QUEUE *w = NULL;
         DictWatcher *watcher = NULL;
-        QUEUE_FOREACH(w, &dd->watchers) {
+        QUEUE_FOREACH(w, &dd->watchers, {
           watcher = tv_dict_watcher_node_data(w);
           set_ref_in_callback(&watcher->callback, copyID, ht_stack, list_stack);
-        }
+        })
       }
       break;
     }
@@ -5308,14 +5305,10 @@ bool set_ref_in_item(typval_T *tv, int copyID, ht_stack_T **ht_stack,
         if (list_stack == NULL) {
           abort = set_ref_in_list(ll, copyID, ht_stack);
         } else {
-          list_stack_T *newitem = try_malloc(sizeof(list_stack_T));
-          if (newitem == NULL) {
-            abort = true;
-          } else {
-            newitem->list = ll;
-            newitem->prev = *list_stack;
-            *list_stack = newitem;
-          }
+          list_stack_T *const newitem = xmalloc(sizeof(list_stack_T));
+          newitem->list = ll;
+          newitem->prev = *list_stack;
+          *list_stack = newitem;
         }
       }
       break;
@@ -5874,26 +5867,53 @@ int assert_inrange(typval_T *argvars)
   FUNC_ATTR_NONNULL_ALL
 {
   bool error = false;
-  const varnumber_T lower = tv_get_number_chk(&argvars[0], &error);
-  const varnumber_T upper = tv_get_number_chk(&argvars[1], &error);
-  const varnumber_T actual = tv_get_number_chk(&argvars[2], &error);
 
-  if (error) {
-    return 0;
-  }
-  if (actual < lower || actual > upper) {
-    garray_T ga;
-    prepare_assert_error(&ga);
+  if (argvars[0].v_type == VAR_FLOAT
+      || argvars[1].v_type == VAR_FLOAT
+      || argvars[2].v_type == VAR_FLOAT) {
+    const float_T flower = tv_get_float(&argvars[0]);
+    const float_T fupper = tv_get_float(&argvars[1]);
+    const float_T factual = tv_get_float(&argvars[2]);
 
-    char msg[55];
-    vim_snprintf(msg, sizeof(msg),
-                 "range %" PRIdVARNUMBER " - %" PRIdVARNUMBER ",",
-                 lower, upper);
-    fill_assert_error(&ga, &argvars[3], (char_u *)msg, NULL, &argvars[2],
-                      ASSERT_INRANGE);
-    assert_error(&ga);
-    ga_clear(&ga);
-    return 1;
+    if (factual < flower || factual > fupper) {
+      garray_T ga;
+      prepare_assert_error(&ga);
+      if (argvars[3].v_type != VAR_UNKNOWN) {
+        char_u *const tofree = (char_u *)encode_tv2string(&argvars[3], NULL);
+        ga_concat(&ga, tofree);
+        xfree(tofree);
+      } else {
+        char msg[80];
+        vim_snprintf(msg, sizeof(msg), "Expected range %g - %g, but got %g",
+                     flower, fupper, factual);
+        ga_concat(&ga, (char_u *)msg);
+      }
+      assert_error(&ga);
+      ga_clear(&ga);
+      return 1;
+    }
+  } else {
+    const varnumber_T lower = tv_get_number_chk(&argvars[0], &error);
+    const varnumber_T upper = tv_get_number_chk(&argvars[1], &error);
+    const varnumber_T actual = tv_get_number_chk(&argvars[2], &error);
+
+    if (error) {
+      return 0;
+    }
+    if (actual < lower || actual > upper) {
+      garray_T ga;
+      prepare_assert_error(&ga);
+
+      char msg[55];
+      vim_snprintf(msg, sizeof(msg),
+                   "range %" PRIdVARNUMBER " - %" PRIdVARNUMBER ",",
+                   lower, upper);
+      fill_assert_error(&ga, &argvars[3], (char_u *)msg, NULL, &argvars[2],
+                        ASSERT_INRANGE);
+      assert_error(&ga);
+      ga_clear(&ga);
+      return 1;
+    }
   }
   return 0;
 }
@@ -5959,6 +5979,35 @@ static void assert_append_cmd_or_arg(garray_T *gap, typval_T *argvars,
   } else {
     ga_concat(gap, (char_u *)cmd);
   }
+}
+
+int assert_beeps(typval_T *argvars, bool no_beep)
+  FUNC_ATTR_NONNULL_ALL
+{
+  const char *const cmd = tv_get_string_chk(&argvars[0]);
+  int ret = 0;
+
+  called_vim_beep = false;
+  suppress_errthrow = true;
+  emsg_silent = false;
+  do_cmdline_cmd(cmd);
+  if (no_beep ? called_vim_beep : !called_vim_beep) {
+    garray_T ga;
+    prepare_assert_error(&ga);
+    if (no_beep) {
+      ga_concat(&ga, (const char_u *)"command did beep: ");
+    } else {
+      ga_concat(&ga, (const char_u *)"command did not beep: ");
+    }
+    ga_concat(&ga, (const char_u *)cmd);
+    assert_error(&ga);
+    ga_clear(&ga);
+    ret = 1;
+  }
+
+  suppress_errthrow = false;
+  emsg_on_display = false;
+  return ret;
 }
 
 int assert_fails(typval_T *argvars)
@@ -6214,6 +6263,7 @@ void common_function(typval_T *argvars, typval_T *rettv,
     // function(dict.MyFunc, [arg])
     arg_pt = argvars[0].vval.v_partial;
     s = partial_name(arg_pt);
+    // TODO(bfredl): do the entire nlua_is_table_from_lua dance
   } else {
     // function('MyFunc', [arg], dict)
     s = (char_u *)tv_get_string(&argvars[0]);
@@ -7313,7 +7363,6 @@ bool callback_from_typval(Callback *const callback, typval_T *const arg)
     char_u *name = nlua_register_table_as_callable(arg);
 
     if (name != NULL) {
-      func_ref(name);
       callback->data.funcref = vim_strsave(name);
       callback->type = kCallbackFuncref;
     } else {
@@ -8508,7 +8557,7 @@ static bool tv_is_luafunc(typval_T *tv)
 int check_luafunc_name(const char *str, bool paren)
 {
   const char *p = str;
-  while (ASCII_ISALNUM(*p) || *p == '_' || *p == '.') {
+  while (ASCII_ISALNUM(*p) || *p == '_' || *p == '.' || *p == '\'') {
     p++;
   }
   if (*p != (paren ? '(' : NUL)) {

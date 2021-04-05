@@ -8,10 +8,33 @@ Query.__index = Query
 
 local M = {}
 
+local function dedupe_files(files)
+  local result = {}
+  local seen = {}
+
+  for _, path in ipairs(files) do
+    if not seen[path] then
+      table.insert(result, path)
+      seen[path] = true
+    end
+  end
+
+  return result
+end
+
+local function safe_read(filename, read_quantifier)
+  local file, err = io.open(filename, 'r')
+  if not file then
+    error(err)
+  end
+  local content = file:read(read_quantifier)
+  io.close(file)
+  return content
+end
 
 function M.get_query_files(lang, query_name, is_included)
   local query_path = string.format('queries/%s/%s.scm', lang, query_name)
-  local lang_files = a.nvim_get_runtime_file(query_path, true)
+  local lang_files = dedupe_files(a.nvim_get_runtime_file(query_path, true))
 
   if #lang_files == 0 then return {} end
 
@@ -25,7 +48,7 @@ function M.get_query_files(lang, query_name, is_included)
   local MODELINE_FORMAT = "^;+%s*inherits%s*:?%s*([a-z_,()]+)%s*$"
 
   for _, file in ipairs(lang_files) do
-    local modeline = io.open(file, 'r'):read('*l')
+    local modeline = safe_read(file, '*l')
 
     if modeline then
       local langlist = modeline:match(MODELINE_FORMAT)
@@ -60,7 +83,7 @@ local function read_query_files(filenames)
   local contents = {}
 
   for _,filename in ipairs(filenames) do
-    table.insert(contents, io.open(filename, 'r'):read('*a'))
+    table.insert(contents, safe_read(filename, '*a'))
   end
 
   return table.concat(contents, '')
@@ -77,6 +100,27 @@ local function new_match_metadata()
   return setmetatable({}, match_metatable)
 end
 
+--- The explicitly set queries from |vim.treesitter.query.set_query()|
+local explicit_queries = setmetatable({}, {
+  __index = function(t, k)
+    local lang_queries = {}
+    rawset(t, k, lang_queries)
+
+    return lang_queries
+  end,
+})
+
+--- Sets the runtime query {query_name} for {lang}
+---
+--- This allows users to override any runtime files and/or configuration
+--- set by plugins.
+---@param lang string: The language to use for the query
+---@param query_name string: The name of the query (i.e. "highlights")
+---@param text string: The query text (unparsed).
+function M.set_query(lang, query_name, text)
+  explicit_queries[lang][query_name] = M.parse_query(lang, text)
+end
+
 --- Returns the runtime query {query_name} for {lang}.
 --
 -- @param lang The language to use for the query
@@ -84,6 +128,10 @@ end
 --
 -- @return The corresponding query, parsed.
 function M.get_query(lang, query_name)
+  if explicit_queries[lang][query_name] then
+    return explicit_queries[lang][query_name]
+  end
+
   local query_files = M.get_query_files(lang, query_name)
   local query_string = read_query_files(query_files)
 
@@ -111,7 +159,7 @@ end
 
 --- Gets the text corresponding to a given node
 -- @param node the node
--- @param bufnr the buffer from which the node in extracted.
+-- @param bufnr the buffer from which the node is extracted.
 function M.get_node_text(node, source)
   local start_row, start_col, start_byte = node:start()
   local end_row, end_col, end_byte = node:end_()
@@ -215,10 +263,10 @@ predicate_handlers["vim-match?"] = predicate_handlers["match?"]
 local directive_handlers = {
   ["set!"] = function(_, _, _, pred, metadata)
     if #pred == 4 then
-      -- (set! @capture "key" "value")
+      -- (#set! @capture "key" "value")
       metadata[pred[2]][pred[3]] = pred[4]
     else
-      -- (set! "key" "value")
+      -- (#set! "key" "value")
       metadata[pred[2]] = pred[3]
     end
   end,
@@ -245,7 +293,7 @@ local directive_handlers = {
   end
 }
 
---- Adds a new predicates to be used in queries
+--- Adds a new predicate to be used in queries
 --
 -- @param name the name of the predicate, without leading #
 -- @param handler the handler function to be used
@@ -340,12 +388,25 @@ function Query:apply_directives(match, pattern, source, metadata)
   end
 end
 
+
+--- Returns the start and stop value if set else the node's range.
+-- When the node's range is used, the stop is incremented by 1
+-- to make the search inclusive.
+local function value_or_node_range(start, stop, node)
+  if start == nil and stop == nil then
+    local node_start, _, node_stop, _ = node:range()
+    return node_start, node_stop + 1 -- Make stop inclusive
+  end
+
+  return start, stop
+end
+
 --- Iterates of the captures of self on a given range.
 --
--- @param node The node under witch the search will occur
+-- @param node The node under which the search will occur
 -- @param buffer The source buffer to search
 -- @param start The starting line of the search
--- @param stop The stoping line of the search (end-exclusive)
+-- @param stop The stopping line of the search (end-exclusive)
 --
 -- @returns The matching capture id
 -- @returns The captured node
@@ -353,6 +414,9 @@ function Query:iter_captures(node, source, start, stop)
   if type(source) == "number" and source == 0 then
     source = vim.api.nvim_get_current_buf()
   end
+
+  start, stop = value_or_node_range(start, stop, node)
+
   local raw_iter = node:_rawquery(self.query, true, start, stop)
   local function iter()
     local capture, captured_node, match = raw_iter()
@@ -372,12 +436,12 @@ function Query:iter_captures(node, source, start, stop)
   return iter
 end
 
---- Iterates of the matches of self on a given range.
+--- Iterates the matches of self on a given range.
 --
--- @param node The node under witch the search will occur
+-- @param node The node under which the search will occur
 -- @param buffer The source buffer to search
 -- @param start The starting line of the search
--- @param stop The stoping line of the search (end-exclusive)
+-- @param stop The stopping line of the search (end-exclusive)
 --
 -- @returns The matching pattern id
 -- @returns The matching match
@@ -385,6 +449,9 @@ function Query:iter_matches(node, source, start, stop)
   if type(source) == "number" and source == 0 then
     source = vim.api.nvim_get_current_buf()
   end
+
+  start, stop = value_or_node_range(start, stop, node)
+
   local raw_iter = node:_rawquery(self.query, false, start, stop)
   local function iter()
     local pattern, match = raw_iter()

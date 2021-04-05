@@ -24,25 +24,34 @@ typedef struct signlist signlist_T;
 struct signlist
 {
     int id;                 // unique identifier for each placed sign
-    linenr_T lnum;          // line number which has this sign
     int typenr;             // typenr of sign
-    bool has_text_or_icon;  // has text or icon
-    signgroup_T *group;     // sign group
     int priority;           // priority for highlighting
+    bool has_text_or_icon;  // has text or icon
+    linenr_T lnum;          // line number which has this sign
+    signgroup_T *group;     // sign group
     signlist_T *next;       // next signlist entry
     signlist_T *prev;       // previous entry -- for easy reordering
 };
 
+/// Sign attributes. Used by the screen refresh routines.
+typedef struct sign_attrs_S {
+    int     typenr;
+    char_u *text;
+    int     texthl;
+    int     linehl;
+    int     numhl;
+} sign_attrs_T;
+
+#define SIGN_SHOW_MAX 9
+
 // Default sign priority for highlighting
 #define SIGN_DEF_PRIO 10
 
-// type argument for buf_getsigntype() and sign_get_attr()
+// type argument for sign_get_attr()
 typedef enum {
-  SIGN_ANY,
   SIGN_LINEHL,
-  SIGN_ICON,
-  SIGN_TEXT,
   SIGN_NUMHL,
+  SIGN_TEXT,
 } SignType;
 
 

@@ -13,7 +13,7 @@ local M = {}
 --- Writes to error buffer.
 --@param ... (table of strings) Will be concatenated before being written
 local function err_message(...)
-  api.nvim_err_writeln(table.concat(vim.tbl_flatten{...}))
+  vim.notify(table.concat(vim.tbl_flatten{...}), vim.log.levels.ERROR)
   api.nvim_command("redraw")
 end
 
@@ -26,7 +26,7 @@ end
 
 -- @msg of type ProgressParams
 -- Basically a token of type number/string
-local function progress_callback(_, _, params, client_id)
+local function progress_handler(_, _, params, client_id)
   local client = vim.lsp.get_client_by_id(client_id)
   local client_name = client and client.name or string.format("id=%d", client_id)
   if not client then
@@ -62,7 +62,7 @@ local function progress_callback(_, _, params, client_id)
 end
 
 --@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#progress
-M['$/progress'] = progress_callback
+M['$/progress'] = progress_handler
 
 --@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#window_workDoneProgress_create
 M['window/workDoneProgress/create'] =  function(_, _, params, client_id)
@@ -95,6 +95,18 @@ M['window/showMessageRequest'] = function(_, _, params)
   else
     return actions[choice]
   end
+end
+
+--@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#client_registerCapability
+M['client/registerCapability'] = function(_, _, _, client_id)
+  local warning_tpl = "The language server %s triggers a registerCapability "..
+                      "handler despite dynamicRegistration set to false. "..
+                      "Report upstream, this warning is harmless"
+  local client = vim.lsp.get_client_by_id(client_id)
+  local client_name = client and client.name or string.format("id=%d", client_id)
+  local warning = string.format(warning_tpl, client_name)
+  log.warn(warning)
+  return vim.NIL
 end
 
 --@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_codeAction
@@ -150,6 +162,7 @@ M['workspace/configuration'] = function(err, _, params, client_id)
   local client = vim.lsp.get_client_by_id(client_id)
   if not client then
     err_message("LSP[id=", client_id, "] client has shut down after sending the message")
+    return
   end
   if err then error(vim.inspect(err)) end
   if not params.items then
@@ -291,7 +304,7 @@ M['textDocument/typeDefinition'] = location_handler
 M['textDocument/implementation'] = location_handler
 
 --@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_signatureHelp
-M['textDocument/signatureHelp'] = function(_, method, result)
+M['textDocument/signatureHelp'] = function(_, method, result, _, bufnr)
   -- When use `autocmd CompleteDone <silent><buffer> lua vim.lsp.buf.signature_help()` to call signatureHelp handler
   -- If the completion item doesn't have signatures It will make noise. Change to use `print` that can use `<silent>` to ignore
   if not (result and result.signatures and result.signatures[1]) then
@@ -304,9 +317,11 @@ M['textDocument/signatureHelp'] = function(_, method, result)
     print('No signature help available')
     return
   end
-  util.focusable_preview(method, function()
+  local syntax = api.nvim_buf_get_option(bufnr, 'syntax')
+  local p_bufnr, _ = util.focusable_preview(method, function()
     return lines, util.try_trim_markdown_code_blocks(lines)
   end)
+  api.nvim_buf_set_option(p_bufnr, 'syntax', syntax)
 end
 
 --@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#textDocument_documentHighlight
@@ -396,7 +411,7 @@ for k, fn in pairs(M) do
     })
 
     if err then
-      error(tostring(err))
+      return err_message(tostring(err))
     end
 
     return fn(err, method, params, client_id, bufnr, config)

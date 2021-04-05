@@ -176,6 +176,12 @@ module.cmds = {
     func='ex_edit',
   },
   {
+    command='balt',
+    flags=bit.bor(NEEDARG, FILE1, CMDARG, TRLBAR, CMDWIN),
+    addr_type='ADDR_NONE',
+    func='ex_edit',
+  },
+  {
     command='bdelete',
     flags=bit.bor(BANG, RANGE, BUFNAME, COUNT, EXTRA, TRLBAR),
     addr_type='ADDR_BUFFERS',
@@ -2455,7 +2461,7 @@ module.cmds = {
   },
   {
     command='sleep',
-    flags=bit.bor(RANGE, COUNT, EXTRA, TRLBAR, CMDWIN),
+    flags=bit.bor(BANG, RANGE, COUNT, EXTRA, TRLBAR, CMDWIN),
     addr_type='ADDR_OTHER',
     func='ex_sleep',
   },
@@ -2515,8 +2521,8 @@ module.cmds = {
   },
   {
     command='source',
-    flags=bit.bor(BANG, FILE1, TRLBAR, SBOXOK, CMDWIN),
-    addr_type='ADDR_NONE',
+    flags=bit.bor(RANGE, DFLALL, WHOLEFOLD, BANG, FILE1, TRLBAR, SBOXOK, CMDWIN),
+    addr_type='ADDR_LINES',
     func='ex_source',
   },
   {

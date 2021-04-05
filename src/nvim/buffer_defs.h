@@ -296,13 +296,11 @@ typedef struct arglist {
   int id;                       ///< id of this arglist
 } alist_T;
 
-/*
- * For each argument remember the file name as it was given, and the buffer
- * number that contains the expanded file name (required for when ":cd" is
- * used.
- *
- * TODO: move aentry_T to another header
- */
+// For each argument remember the file name as it was given, and the buffer
+// number that contains the expanded file name (required for when ":cd" is
+// used).
+//
+// TODO(Felipe): move aentry_T to another header
 typedef struct argentry {
   char_u      *ae_fname;        // file name as specified
   int ae_fnum;                  // buffer number with expanded file name
@@ -490,11 +488,12 @@ typedef struct {
   LuaRef on_bytes;
   LuaRef on_changedtick;
   LuaRef on_detach;
+  LuaRef on_reload;
   bool utf_sizes;
   bool preview;
 } BufUpdateCallbacks;
 #define BUF_UPDATE_CALLBACKS_INIT { LUA_NOREF, LUA_NOREF, LUA_NOREF, \
-                                    LUA_NOREF, false, false }
+                                    LUA_NOREF, LUA_NOREF, false, false }
 
 EXTERN int curbuf_splice_pending INIT(= 0);
 
@@ -744,6 +743,11 @@ struct file_buffer {
   long b_p_wm;                  ///< 'wrapmargin'
   long b_p_wm_nobin;            ///< b_p_wm saved for binary mode
   long b_p_wm_nopaste;          ///< b_p_wm saved for paste mode
+  char_u *b_p_vsts;             ///< 'varsofttabstop'
+  long *b_p_vsts_array;          ///< 'varsofttabstop' in internal format
+  char_u *b_p_vsts_nopaste;     ///< b_p_vsts saved for paste mode
+  char_u *b_p_vts;              ///< 'vartabstop'
+  long *b_p_vts_array;           ///< 'vartabstop' in internal format
   char_u *b_p_keymap;           ///< 'keymap'
 
   // local values for options which are normally global
@@ -1036,10 +1040,10 @@ struct matchitem {
   int id;                   ///< match ID
   int priority;             ///< match priority
   char_u *pattern;          ///< pattern to highlight
-  int hlg_id;               ///< highlight group ID
   regmmatch_T match;        ///< regexp program for pattern
   posmatch_T pos;           ///< position matches
   match_T hl;               ///< struct for doing the actual highlighting
+  int hlg_id;               ///< highlight group ID
   int conceal_char;         ///< cchar for Conceal highlighting
 };
 
@@ -1080,6 +1084,11 @@ typedef struct {
   bool external;
   bool focusable;
   WinStyle style;
+  bool border;
+  bool shadow;
+  schar_T border_chars[8];
+  int border_hl_ids[8];
+  int border_attr[8];
 } FloatConfig;
 
 #define FLOAT_CONFIG_INIT ((FloatConfig){ .height = 0, .width = 0, \
@@ -1193,6 +1202,7 @@ struct window_S {
     int tab1;                       ///< first tab character
     int tab2;                       ///< second tab character
     int tab3;                       ///< third tab character
+    int lead;
     int trail;
     int conceal;
   } w_p_lcs_chars;
@@ -1256,6 +1266,11 @@ struct window_S {
   // external UI request. If non-zero, the inner size will use this.
   int w_height_request;
   int w_width_request;
+
+  int w_border_adj[4];  // top, right, bottom, left
+  // outer size of window grid, including border
+  int w_height_outer;
+  int w_width_outer;
 
   /*
    * === start of cached values ====
@@ -1332,7 +1347,8 @@ struct window_S {
                                     // w_redr_type is REDRAW_TOP
   linenr_T w_redraw_top;            // when != 0: first line needing redraw
   linenr_T w_redraw_bot;            // when != 0: last line needing redraw
-  int w_redr_status;                // if TRUE status line must be redrawn
+  bool w_redr_status;               // if true status line must be redrawn
+  bool w_redr_border;               // if true border must be redrawn
 
   // remember what is shown in the ruler for this window (if 'ruler' set)
   pos_T w_ru_cursor;                // cursor position shown in ruler
@@ -1410,6 +1426,7 @@ struct window_S {
   int w_tagstacklen;                    // number of tags on stack
 
   ScreenGrid w_grid;                    // the grid specific to the window
+  ScreenGrid w_grid_alloc;              // the grid specific to the window
   bool w_pos_changed;                   // true if window position changed
   bool w_floating;                       ///< whether the window is floating
   FloatConfig w_float_config;

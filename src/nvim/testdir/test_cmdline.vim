@@ -442,6 +442,7 @@ func Test_getcompletion()
   set tags&
 
   call assert_fails('call getcompletion("", "burp")', 'E475:')
+  call assert_fails('call getcompletion("abc", [])', 'E475:')
 endfunc
 
 func Test_shellcmd_completion()
@@ -566,6 +567,21 @@ func Test_cmdline_complete_user_cmd()
   call feedkeys(":Foo b\<Tab>\<Home>\"\<cr>", 'tx')
   call assert_equal('"Foo blue', @:)
   delcommand Foo
+endfunc
+
+func s:ScriptLocalFunction()
+  echo 'yes'
+endfunc
+
+func Test_cmdline_complete_user_func()
+  call feedkeys(":func Test_cmdline_complete_user\<Tab>\<Home>\"\<cr>", 'tx')
+  call assert_match('"func Test_cmdline_complete_user', @:)
+  call feedkeys(":func s:ScriptL\<Tab>\<Home>\"\<cr>", 'tx')
+  call assert_match('"func <SNR>\d\+_ScriptLocalFunction', @:)
+
+  " g: prefix also works
+  call feedkeys(":echo g:Test_cmdline_complete_user_f\<Tab>\<Home>\"\<cr>", 'tx')
+  call assert_match('"echo g:Test_cmdline_complete_user_func', @:)
 endfunc
 
 func Test_cmdline_complete_user_names()

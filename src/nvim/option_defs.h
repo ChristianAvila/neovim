@@ -165,8 +165,8 @@ enum {
   SHM_WRI            = 'w',  ///< "[w]" instead of "written".
   SHM_ABBREVIATIONS  = 'a',  ///< Use abbreviations from #SHM_ALL_ABBREVIATIONS.
   SHM_WRITE          = 'W',  ///< Don't use "written" at all.
-  SHM_TRUNC          = 't',  ///< Trunctate file messages.
-  SHM_TRUNCALL       = 'T',  ///< Trunctate all messages.
+  SHM_TRUNC          = 't',  ///< Truncate file messages.
+  SHM_TRUNCALL       = 'T',  ///< Truncate all messages.
   SHM_OVER           = 'o',  ///< Overwrite file messages.
   SHM_OVERALL        = 'O',  ///< Overwrite more messages.
   SHM_SEARCH         = 's',  ///< No search hit bottom messages.
@@ -621,6 +621,19 @@ EXTERN int p_sta;               // 'smarttab'
 EXTERN int p_sb;                // 'splitbelow'
 EXTERN long p_tpm;              // 'tabpagemax'
 EXTERN char_u   *p_tal;         // 'tabline'
+EXTERN char_u   *p_tpf;         // 'termpastefilter'
+EXTERN unsigned int tpf_flags;  ///< flags from 'termpastefilter'
+#ifdef IN_OPTION_C
+static char *(p_tpf_values[]) =
+  { "BS", "HT", "FF", "ESC", "DEL", "C0", "C1", NULL };
+#endif
+# define TPF_BS                 0x001
+# define TPF_HT                 0x002
+# define TPF_FF                 0x004
+# define TPF_ESC                0x008
+# define TPF_DEL                0x010
+# define TPF_C0                 0x020
+# define TPF_C1                 0x040
 EXTERN char_u   *p_sps;         // 'spellsuggest'
 EXTERN int p_spr;               // 'splitright'
 EXTERN int p_sol;               // 'startofline'
@@ -811,6 +824,8 @@ enum {
   , BV_UDF
   , BV_UL
   , BV_WM
+  , BV_VSTS
+  , BV_VTS
   , BV_COUNT        // must be the last one
 };
 

@@ -317,7 +317,9 @@ int do_cmdline(char_u *cmdline, LineGetter fgetline,
   int count = 0;                        /* line number count */
   int did_inc = FALSE;                  /* incremented RedrawingDisabled */
   int retval = OK;
-  cstack_T cstack;                      // conditional stack
+  cstack_T cstack = {                   // conditional stack
+    .cs_idx = -1,
+  };
   garray_T lines_ga;                    // keep lines for ":while"/":for"
   int current_line = 0;                 // active line in lines_ga
   char_u   *fname = NULL;               // function or script name
@@ -360,11 +362,6 @@ int do_cmdline(char_u *cmdline, LineGetter fgetline,
   call_depth++;
   start_batch_changes();
 
-  cstack.cs_idx = -1;
-  cstack.cs_looplevel = 0;
-  cstack.cs_trylevel = 0;
-  cstack.cs_emsg_silent_list = NULL;
-  cstack.cs_lflags = 0;
   ga_init(&lines_ga, (int)sizeof(wcmd_T), 10);
 
   real_cookie = getline_cookie(fgetline, cookie);
@@ -2182,7 +2179,7 @@ int parse_command_modifiers(exarg_T *eap, char_u **errormsg, bool skip_only)
           // Set 'eventignore' to "all". Restore the
           // existing option value later.
           cmdmod.save_ei = vim_strsave(p_ei);
-          set_string_option_direct((char_u *)"ei", -1,
+          set_string_option_direct("ei", -1,
                                    (char_u *)"all", OPT_FREE, SID_NONE);
         }
         continue;
@@ -2294,9 +2291,8 @@ static void undo_cmdmod(const exarg_T *eap, int save_msg_scroll)
   }
 
   if (cmdmod.save_ei != NULL) {
-    /* Restore 'eventignore' to the value before ":noautocmd". */
-    set_string_option_direct((char_u *)"ei", -1, cmdmod.save_ei,
-        OPT_FREE, SID_NONE);
+    // Restore 'eventignore' to the value before ":noautocmd".
+    set_string_option_direct("ei", -1, cmdmod.save_ei, OPT_FREE, SID_NONE);
     free_string_option(cmdmod.save_ei);
   }
 
@@ -3041,9 +3037,10 @@ const char * set_one_cmd_context(
     p = arg + 1;
     arg = (const char *)skip_cmd_arg((char_u *)arg, false);
 
-    /* Still touching the command after '+'? */
-    if (*arg == NUL)
+    // Still touching the command after '+'?
+    if (*arg == NUL) {
       return p;
+    }
 
     // Skip space(s) after +command to get to the real argument.
     arg = (const char *)skipwhite((const char_u *)arg);
@@ -3515,13 +3512,20 @@ const char * set_one_cmd_context(
     xp->xp_context = EXPAND_BUFFERS;
     xp->xp_pattern = (char_u *)arg;
     break;
+  case CMD_diffget:
+  case CMD_diffput:
+    // If current buffer is in diff mode, complete buffer names
+    // which are in diff mode, and different than current buffer.
+    xp->xp_context = EXPAND_DIFF_BUFFERS;
+    xp->xp_pattern = (char_u *)arg;
+    break;
   case CMD_USER:
   case CMD_USER_BUF:
     if (context != EXPAND_NOTHING) {
       // EX_XFILE: file names are handled above.
       if (!(ea.argt & EX_XFILE)) {
         if (context == EXPAND_MENUS) {
-          return (const char *)set_context_in_menu_cmd(xp, (char_u *)cmd,
+          return (const char *)set_context_in_menu_cmd(xp, cmd,
                                                        (char_u *)arg, forceit);
         } else if (context == EXPAND_COMMANDS) {
           return arg;
@@ -3601,7 +3605,7 @@ const char * set_one_cmd_context(
   case CMD_tmenu:                             case CMD_tunmenu:
   case CMD_popup:                             case CMD_emenu:
     return (const char *)set_context_in_menu_cmd(
-        xp, (char_u *)cmd, (char_u *)arg, forceit);
+        xp, cmd, (char_u *)arg, forceit);
 
   case CMD_colorscheme:
     xp->xp_context = EXPAND_COLORS;
@@ -3678,6 +3682,10 @@ const char * set_one_cmd_context(
     }
     xp->xp_context = EXPAND_ARGLIST;
     xp->xp_pattern = (char_u *)arg;
+    break;
+
+  case CMD_lua:
+    xp->xp_context = EXPAND_LUA;
     break;
 
   default:
@@ -3920,7 +3928,7 @@ static linenr_T get_address(exarg_T *eap,
         }
         searchcmdlen = 0;
         flags = silent ? 0 : SEARCH_HIS | SEARCH_MSG;
-        if (!do_search(NULL, c, cmd, 1L, flags, NULL)) {
+        if (!do_search(NULL, c, c, cmd, 1L, flags, NULL)) {
           curwin->w_cursor = pos;
           cmd = NULL;
           goto error;
@@ -3968,7 +3976,7 @@ static linenr_T get_address(exarg_T *eap,
       break;
 
     default:
-      if (ascii_isdigit(*cmd)) {  // absolute line number
+      if (ascii_isdigit(*cmd)) {                // absolute line number
         lnum = getdigits_long(&cmd, false, 0);
       }
     }
@@ -5173,6 +5181,7 @@ static const char *command_complete[] =
   [EXPAND_CSCOPE] = "cscope",
   [EXPAND_USER_DEFINED] = "custom",
   [EXPAND_USER_LIST] = "customlist",
+  [EXPAND_DIFF_BUFFERS] = "diff_buffer",
   [EXPAND_DIRECTORIES] = "dir",
   [EXPAND_ENV_VARS] = "environment",
   [EXPAND_EVENTS] = "event",
@@ -5187,6 +5196,7 @@ static const char *command_complete[] =
 #ifdef HAVE_WORKING_LIBINTL
   [EXPAND_LOCALES] = "locale",
 #endif
+  [EXPAND_LUA] = "lua",
   [EXPAND_MAPCLEAR] = "mapclear",
   [EXPAND_MAPPINGS] = "mapping",
   [EXPAND_MENUS] = "menu",
@@ -5400,8 +5410,8 @@ static int uc_scan_attr(char_u *attr, size_t len, uint32_t *argt, long *def,
     size_t vallen = 0;
     size_t attrlen = len;
 
-    /* Look for the attribute name - which is the part before any '=' */
-    for (i = 0; i < (int)len; ++i) {
+    // Look for the attribute name - which is the part before any '='
+    for (i = 0; i < (int)len; i++) {
       if (attr[i] == '=') {
         val = &attr[i + 1];
         vallen = len - i - 1;
@@ -6272,14 +6282,14 @@ int parse_compl_arg(const char_u *value, int vallen, int *complp,
   return OK;
 }
 
-int cmdcomplete_str_to_type(char_u *complete_str)
+int cmdcomplete_str_to_type(const char *complete_str)
 {
     for (int i = 0; i < (int)(ARRAY_SIZE(command_complete)); i++) {
       char *cmd_compl = get_command_complete(i);
       if (cmd_compl == NULL) {
         continue;
       }
-      if (STRCMP(complete_str, command_complete[i]) == 0) {
+      if (strcmp(complete_str, command_complete[i]) == 0) {
         return i;
       }
     }
@@ -7269,9 +7279,7 @@ static void ex_find(exarg_T *eap)
   }
 }
 
-/*
- * ":edit", ":badd", ":visual".
- */
+/// ":edit", ":badd", ":balt", ":visual".
 static void ex_edit(exarg_T *eap)
 {
   do_exedit(eap, NULL);
@@ -7345,7 +7353,9 @@ do_exedit(
     else if (eap->cmdidx == CMD_enew)
       readonlymode = FALSE;         /* 'readonly' doesn't make sense in an
                                        empty buffer */
-    setpcmark();
+    if (eap->cmdidx != CMD_balt && eap->cmdidx != CMD_badd) {
+      setpcmark();
+    }
     if (do_ecmd(0, (eap->cmdidx == CMD_enew ? NULL : eap->arg),
                 NULL, eap, eap->do_ecmd_lnum,
                 (buf_hide(curbuf) ? ECMD_HIDE : 0)
@@ -7353,6 +7363,7 @@ do_exedit(
                 // After a split we can use an existing buffer.
                 + (old_curwin != NULL ? ECMD_OLDBUF : 0)
                 + (eap->cmdidx == CMD_badd ? ECMD_ADDBUF : 0)
+                + (eap->cmdidx == CMD_balt ? ECMD_ALTBUF : 0)
                 , old_curwin == NULL ? curwin : NULL) == FAIL) {
       // Editing the file failed.  If the window was split, close it.
       if (old_curwin != NULL) {
@@ -7483,7 +7494,7 @@ static void ex_syncbind(exarg_T *eap)
 
       ctrl_o[0] = Ctrl_O;
       ctrl_o[1] = 0;
-      ins_typebuf(ctrl_o, REMAP_NONE, 0, TRUE, FALSE);
+      ins_typebuf(ctrl_o, REMAP_NONE, 0, true, false);
     }
   }
 }
@@ -7503,8 +7514,9 @@ static void ex_read(exarg_T *eap)
     }
 
     if (*eap->arg == NUL) {
-      if (check_fname() == FAIL)        /* check for no file name */
+      if (check_fname() == FAIL) {       // check for no file name
         return;
+      }
       i = readfile(curbuf->b_ffname, curbuf->b_fname,
           eap->line2, (linenr_T)0, (linenr_T)MAXLNUM, eap, 0);
     } else {
@@ -7587,7 +7599,7 @@ void post_chdir(CdScope scope, bool trigger_dirchanged)
     curwin->w_localdir = (char_u *)xstrdup(cwd);
     break;
   case kCdScopeInvalid:
-    assert(false);
+    abort();
   }
 
   shorten_fnames(true);
@@ -7752,6 +7764,11 @@ static void do_exmap(exarg_T *eap, int isabbrev)
 static void ex_winsize(exarg_T *eap)
 {
   char_u *arg = eap->arg;
+
+  if (!ascii_isdigit(*arg)) {
+    EMSG2(_(e_invarg2), arg);
+    return;
+  }
   int w = getdigits_int(&arg, false, 10);
   arg = skipwhite(arg);
   char_u *p = arg;
@@ -8717,7 +8734,7 @@ ssize_t find_cmdline_var(const char_u *src, size_t *usedlen)
  * Evaluate cmdline variables.
  *
  * change '%'	    to curbuf->b_ffname
- *	  '#'	    to curwin->w_altfile
+ *	  '#'	    to curwin->w_alt_fnum
  *	  '<cword>' to word under the cursor
  *	  '<cWORD>' to WORD under the cursor
  *	  '<cexpr>' to C-expression under the cursor

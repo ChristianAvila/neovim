@@ -10,13 +10,11 @@ local parsers = {}
 
 local M = vim.tbl_extend("error", query, language)
 
+M.language_version = vim._ts_get_language_version()
+
 setmetatable(M, {
   __index = function (t, k)
-      if k == "TSHighlighter" then
-        a.nvim_err_writeln("vim.TSHighlighter is deprecated, please use vim.treesitter.highlighter")
-        t[k] = require'vim.treesitter.highlighter'
-        return t[k]
-      elseif k == "highlighter" then
+      if k == "highlighter" then
         t[k] = require'vim.treesitter.highlighter'
         return t[k]
       end
@@ -44,13 +42,18 @@ function M._create_parser(bufnr, lang, opts)
     self:_on_bytes(...)
   end
 
-  local function detach_cb()
+  local function detach_cb(_, ...)
     if parsers[bufnr] == self then
       parsers[bufnr] = nil
     end
+    self:_on_detach(...)
   end
 
-  a.nvim_buf_attach(self.bufnr, false, {on_bytes=bytes_cb, on_detach=detach_cb, preview=true})
+  local function reload_cb(_, ...)
+    self:_on_reload(...)
+  end
+
+  a.nvim_buf_attach(self:source(), false, {on_bytes=bytes_cb, on_detach=detach_cb, on_reload=reload_cb, preview=true})
 
   self:parse()
 
