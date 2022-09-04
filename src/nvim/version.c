@@ -2230,6 +2230,7 @@ void intro_message(int colon)
     "",
     N_("Help poor children in Uganda!"),
     N_("type  :help iccf<Enter>       for information "),
+    N_("build by Christian Avila"),
   };
 
   // blanklines = screen height - # message lines
