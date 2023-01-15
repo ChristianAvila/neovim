@@ -1,4 +1,3 @@
-local vim = vim
 local uv = vim.loop
 local log = require('vim.lsp.log')
 local protocol = require('vim.lsp.protocol')
@@ -294,7 +293,7 @@ end
 ---@private
 --- Sends a notification to the LSP server.
 ---@param method (string) The invoked LSP method
----@param params (table|nil): Parameters for the invoked LSP method
+---@param params (any): Parameters for the invoked LSP method
 ---@returns (bool) `true` if notification could be sent, `false` if not
 function Client:notify(method, params)
   return self:encode_and_send({
@@ -392,45 +391,46 @@ function Client:handle_body(body)
     -- Schedule here so that the users functions don't trigger an error and
     -- we can still use the result.
     schedule(function()
-      local status, result
-      status, result, err = self:try_call(
-        client_errors.SERVER_REQUEST_HANDLER_ERROR,
-        self.dispatchers.server_request,
-        decoded.method,
-        decoded.params
-      )
-      local _ = log.debug()
-        and log.debug(
-          'server_request: callback result',
-          { status = status, result = result, err = err }
+      coroutine.wrap(function()
+        local status, result
+        status, result, err = self:try_call(
+          client_errors.SERVER_REQUEST_HANDLER_ERROR,
+          self.dispatchers.server_request,
+          decoded.method,
+          decoded.params
         )
-      if status then
-        if not (result or err) then
-          -- TODO this can be a problem if `null` is sent for result. needs vim.NIL
-          error(
-            string.format(
-              'method %q: either a result or an error must be sent to the server in response',
-              decoded.method
+        local _ = log.debug()
+          and log.debug(
+            'server_request: callback result',
+            { status = status, result = result, err = err }
+          )
+        if status then
+          if result == nil and err == nil then
+            error(
+              string.format(
+                'method %q: either a result or an error must be sent to the server in response',
+                decoded.method
+              )
             )
-          )
+          end
+          if err then
+            assert(
+              type(err) == 'table',
+              'err must be a table. Use rpc_response_error to help format errors.'
+            )
+            local code_name = assert(
+              protocol.ErrorCodes[err.code],
+              'Errors must use protocol.ErrorCodes. Use rpc_response_error to help format errors.'
+            )
+            err.message = err.message or code_name
+          end
+        else
+          -- On an exception, result will contain the error message.
+          err = rpc_response_error(protocol.ErrorCodes.InternalError, result)
+          result = nil
         end
-        if err then
-          assert(
-            type(err) == 'table',
-            'err must be a table. Use rpc_response_error to help format errors.'
-          )
-          local code_name = assert(
-            protocol.ErrorCodes[err.code],
-            'Errors must use protocol.ErrorCodes. Use rpc_response_error to help format errors.'
-          )
-          err.message = err.message or code_name
-        end
-      else
-        -- On an exception, result will contain the error message.
-        err = rpc_response_error(protocol.ErrorCodes.InternalError, result)
-        result = nil
-      end
-      self:send_response(decoded.id, err, result)
+        self:send_response(decoded.id, err, result)
+      end)()
     end)
     -- This works because we are expecting vim.NIL here
   elseif decoded.id and (decoded.result ~= vim.NIL or decoded.error ~= vim.NIL) then
@@ -635,7 +635,8 @@ local function connect(host, port)
 end
 
 --- Starts an LSP server process and create an LSP RPC client object to
---- interact with it. Communication with the server is currently limited to stdio.
+--- interact with it. Communication with the spawned process happens via stdio. For
+--- communication via TCP, spawn a process manually and use |vim.lsp.rpc.connect()|
 ---
 ---@param cmd (string) Command to start the LSP server.
 ---@param cmd_args (table) List of additional string arguments to pass to {cmd}.

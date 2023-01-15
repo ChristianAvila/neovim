@@ -5,9 +5,13 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "klib/kvec.h"
+#include "lauxlib.h"
 #include "nvim/api/buffer.h"
 #include "nvim/api/deprecated.h"
 #include "nvim/api/private/converter.h"
@@ -15,58 +19,55 @@
 #include "nvim/api/private/dispatch.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/vim.h"
-#include "nvim/api/window.h"
 #include "nvim/ascii.h"
+#include "nvim/autocmd.h"
 #include "nvim/buffer.h"
-#include "nvim/buffer_defs.h"
-#include "nvim/charset.h"
+#include "nvim/channel.h"
 #include "nvim/context.h"
-#include "nvim/decoration.h"
-#include "nvim/decoration_provider.h"
 #include "nvim/drawscreen.h"
-#include "nvim/edit.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
-#include "nvim/eval/userfunc.h"
-#include "nvim/ex_cmds_defs.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
-#include "nvim/file_search.h"
-#include "nvim/fileio.h"
 #include "nvim/getchar.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/highlight.h"
-#include "nvim/highlight_defs.h"
 #include "nvim/highlight_group.h"
-#include "nvim/insexpand.h"
+#include "nvim/keycodes.h"
+#include "nvim/log.h"
 #include "nvim/lua/executor.h"
+#include "nvim/macros.h"
 #include "nvim/mapping.h"
 #include "nvim/mark.h"
+#include "nvim/mbyte.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/move.h"
 #include "nvim/msgpack_rpc/channel.h"
-#include "nvim/msgpack_rpc/helpers.h"
+#include "nvim/msgpack_rpc/channel_defs.h"
 #include "nvim/msgpack_rpc/unpacker.h"
 #include "nvim/ops.h"
 #include "nvim/option.h"
 #include "nvim/optionstr.h"
 #include "nvim/os/input.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/os/process.h"
 #include "nvim/popupmenu.h"
+#include "nvim/pos.h"
 #include "nvim/runtime.h"
 #include "nvim/state.h"
 #include "nvim/statusline.h"
+#include "nvim/strings.h"
+#include "nvim/terminal.h"
 #include "nvim/types.h"
 #include "nvim/ui.h"
 #include "nvim/vim.h"
-#include "nvim/viml/parser/expressions.h"
-#include "nvim/viml/parser/parser.h"
 #include "nvim/window.h"
 
-#define LINE_BUFFER_SIZE 4096
+#define LINE_BUFFER_MIN_SIZE 4096
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/vim.c.generated.h"
@@ -160,8 +161,8 @@ Dictionary nvim__get_hl_defs(Integer ns_id, Arena *arena, Error *err)
 ///                - nocombine: boolean
 ///                - link: name of another highlight group to link to, see |:hi-link|.
 ///                - default: Don't override existing definition |:hi-default|
-///                - ctermfg: Sets foreground of cterm color |highlight-ctermfg|
-///                - ctermbg: Sets background of cterm color |highlight-ctermbg|
+///                - ctermfg: Sets foreground of cterm color |ctermfg|
+///                - ctermbg: Sets background of cterm color |ctermbg|
 ///                - cterm: cterm attribute map, like |highlight-args|. If not set,
 ///                         cterm attributes will match those from the attribute map
 ///                         documented above.
@@ -185,7 +186,7 @@ void nvim_set_hl(Integer ns_id, String name, Dict(highlight) *val, Error *err)
 }
 
 /// Set active namespace for highlights. This can be set for a single window,
-/// see |nvim_win_set_hl_ns|.
+/// see |nvim_win_set_hl_ns()|.
 ///
 /// @param ns_id the namespace to use
 /// @param[out] err Error details, if any
@@ -205,7 +206,7 @@ void nvim_set_hl_ns(Integer ns_id, Error *err)
 /// Set active namespace for highlights while redrawing.
 ///
 /// This function meant to be called while redrawing, primarily from
-/// |nvim_set_decoration_provider| on_win and on_line callbacks, which
+/// |nvim_set_decoration_provider()| on_win and on_line callbacks, which
 /// are allowed to change the namespace during a redraw cycle.
 ///
 /// @param ns_id the namespace to activate
@@ -228,14 +229,14 @@ void nvim_set_hl_ns_fast(Integer ns_id, Error *err)
 /// nvim_feedkeys().
 ///
 /// Example:
-/// <pre>
+/// <pre>vim
 ///     :let key = nvim_replace_termcodes("<C-o>", v:true, v:false, v:true)
 ///     :call nvim_feedkeys(key, 'n', v:false)
 /// </pre>
 ///
 /// @param keys         to be typed
 /// @param mode         behavior flags, see |feedkeys()|
-/// @param escape_ks    If true, escape K_SPECIAL bytes in `keys`
+/// @param escape_ks    If true, escape K_SPECIAL bytes in `keys`.
 ///                     This should be false if you already used
 ///                     |nvim_replace_termcodes()|, and true otherwise.
 /// @see feedkeys()
@@ -523,7 +524,7 @@ Array nvim__runtime_inspect(void)
 
 /// Find files in runtime directories
 ///
-/// 'name' can contain wildcards. For example
+/// "name" can contain wildcards. For example
 /// nvim_get_runtime_file("colors/*.vim", true) will return all color
 /// scheme files. Always use forward slashes (/) in the search pattern for
 /// subdirectories regardless of platform.
@@ -725,8 +726,11 @@ void nvim_set_vvar(String name, Object value, Error *err)
 ///                text chunk with specified highlight. `hl_group` element
 ///                can be omitted for no highlight.
 /// @param history  if true, add to |message-history|.
-/// @param opts  Optional parameters. Reserved for future use.
-void nvim_echo(Array chunks, Boolean history, Dictionary opts, Error *err)
+/// @param opts  Optional parameters.
+///          - verbose: Message was printed as a result of 'verbose' option
+///            if Nvim was invoked with -V3log_file, the message will be
+///            redirected to the log_file and suppressed from direct output.
+void nvim_echo(Array chunks, Boolean history, Dict(echo_opts) *opts, Error *err)
   FUNC_API_SINCE(7)
 {
   HlMessage hl_msg = parse_hl_msg(chunks, err);
@@ -734,12 +738,18 @@ void nvim_echo(Array chunks, Boolean history, Dictionary opts, Error *err)
     goto error;
   }
 
-  if (opts.size > 0) {
-    api_set_error(err, kErrorTypeValidation, "opts dict isn't empty");
-    goto error;
+  bool verbose = api_object_to_bool(opts->verbose, "verbose", false, err);
+
+  if (verbose) {
+    verbose_enter();
   }
 
   msg_multiattr(hl_msg, history ? "echomsg" : "echo", history);
+
+  if (verbose) {
+    verbose_leave();
+    verbose_stop();  // flush now
+  }
 
   if (history) {
     // history takes ownership
@@ -964,7 +974,7 @@ fail:
 ///            mode. Note: keypresses are sent raw as they would be to the pty
 ///            master end. For instance, a carriage return is sent
 ///            as a "\r", not as a "\n". |textlock| applies. It is possible
-///            to call |nvim_chan_send| directly in the callback however.
+///            to call |nvim_chan_send()| directly in the callback however.
 ///                 ["input", term, bufnr, data]
 /// @param[out] err Error details, if any
 /// @return Channel id, or 0 on error
@@ -1012,7 +1022,7 @@ Integer nvim_open_term(Buffer buffer, DictionaryOf(LuaRef) opts, Error *err)
   return (Integer)chan->id;
 }
 
-static void term_write(char *buf, size_t size, void *data)
+static void term_write(char *buf, size_t size, void *data)  // NOLINT(readability-non-const-parameter)
 {
   Channel *chan = data;
   LuaRef cb = chan->stream.internal.cb;
@@ -1294,7 +1304,7 @@ void nvim_unsubscribe(uint64_t channel_id, String event)
 /// "#rrggbb" hexadecimal string.
 ///
 /// Example:
-/// <pre>
+/// <pre>vim
 ///     :echo nvim_get_color_by_name("Pink")
 ///     :echo nvim_get_color_by_name("#cbcbcb")
 /// </pre>
@@ -1436,12 +1446,12 @@ ArrayOf(Dictionary) nvim_get_keymap(String mode)
 /// Empty {rhs} is |<Nop>|. |keycodes| are replaced as usual.
 ///
 /// Example:
-/// <pre>
+/// <pre>vim
 ///     call nvim_set_keymap('n', ' <NL>', '', {'nowait': v:true})
 /// </pre>
 ///
 /// is equivalent to:
-/// <pre>
+/// <pre>vim
 ///     nmap <nowait> <Space><NL> <Nop>
 /// </pre>
 ///
@@ -1452,7 +1462,7 @@ ArrayOf(Dictionary) nvim_get_keymap(String mode)
 /// @param  rhs   Right-hand-side |{rhs}| of the mapping.
 /// @param  opts  Optional parameters map: keys are |:map-arguments|, values are booleans (default
 ///               false). Accepts all |:map-arguments| as keys excluding |<buffer>| but including
-///               |noremap| and "desc". Unknown key is an error.
+///               |:noremap| and "desc". Unknown key is an error.
 ///               "desc" can be used to give a description to the mapping.
 ///               When called from Lua, also accepts a "callback" key that takes a Lua function to
 ///               call when the mapping is executed.
@@ -1685,7 +1695,7 @@ Array nvim_call_atomic(uint64_t channel_id, Array calls, Arena *arena, Error *er
       // error handled after loop
       break;
     }
-    // TODO(bfredl): wastefull copy. It could be avoided to encoding to msgpack
+    // TODO(bfredl): wasteful copy. It could be avoided to encoding to msgpack
     // directly here. But `result` might become invalid when next api function
     // is called in the loop.
     ADD_C(results, copy_object(result, arena));
@@ -1718,17 +1728,21 @@ theend:
 /// @param to_err   true: message is an error (uses `emsg` instead of `msg`)
 static void write_msg(String message, bool to_err)
 {
-  static size_t out_pos = 0, err_pos = 0;
-  static char out_line_buf[LINE_BUFFER_SIZE], err_line_buf[LINE_BUFFER_SIZE];
+  static StringBuilder out_line_buf = KV_INITIAL_VALUE;
+  static StringBuilder err_line_buf = KV_INITIAL_VALUE;
 
-#define PUSH_CHAR(i, pos, line_buf, msg) \
-  if (message.data[i] == NL || (pos) == LINE_BUFFER_SIZE - 1) { \
-    (line_buf)[pos] = NUL; \
-    msg(line_buf); \
-    (pos) = 0; \
+#define PUSH_CHAR(i, line_buf, msg) \
+  if (kv_max(line_buf) == 0) { \
+    kv_resize(line_buf, LINE_BUFFER_MIN_SIZE); \
+  } \
+  if (message.data[i] == NL) { \
+    kv_push(line_buf, NUL); \
+    msg(line_buf.items); \
+    kv_drop(line_buf, kv_size(line_buf)); \
+    kv_resize(line_buf, LINE_BUFFER_MIN_SIZE); \
     continue; \
   } \
-  (line_buf)[(pos)++] = message.data[i];
+  kv_push(line_buf, message.data[i]);
 
   no_wait_return++;
   for (uint32_t i = 0; i < message.size; i++) {
@@ -1736,9 +1750,9 @@ static void write_msg(String message, bool to_err)
       break;
     }
     if (to_err) {
-      PUSH_CHAR(i, err_pos, err_line_buf, emsg);
+      PUSH_CHAR(i, err_line_buf, emsg);
     } else {
-      PUSH_CHAR(i, out_pos, out_line_buf, msg);
+      PUSH_CHAR(i, out_line_buf, msg);
     }
   }
   no_wait_return--;
@@ -1820,7 +1834,7 @@ Dictionary nvim__stats(void)
 ///   - "width"   Requested width of the UI
 ///   - "rgb"     true if the UI uses RGB colors (false implies |cterm-colors|)
 ///   - "ext_..." Requested UI extensions, see |ui-option|
-///   - "chan"    Channel id of remote UI (not present for TUI)
+///   - "chan"    |channel-id| of remote UI
 Array nvim_list_uis(void)
   FUNC_API_SINCE(4)
 {
@@ -1882,7 +1896,7 @@ Object nvim_get_proc(Integer pid, Error *err)
     api_set_error(err, kErrorTypeException, "Invalid pid: %" PRId64, pid);
     return NIL;
   }
-#ifdef WIN32
+#ifdef MSWIN
   rvobj.data.dictionary = os_proc_info((int)pid);
   if (rvobj.data.dictionary.size == 0) {  // Process not found.
     return NIL;
@@ -1904,19 +1918,20 @@ Object nvim_get_proc(Integer pid, Error *err)
   return rvobj;
 }
 
-/// Selects an item in the completion popupmenu.
+/// Selects an item in the completion popup menu.
 ///
-/// If |ins-completion| is not active this API call is silently ignored.
-/// Useful for an external UI using |ui-popupmenu| to control the popupmenu
-/// with the mouse. Can also be used in a mapping; use <cmd> |:map-cmd| to
-/// ensure the mapping doesn't end completion mode.
+/// If neither |ins-completion| nor |cmdline-completion| popup menu is active
+/// this API call is silently ignored.
+/// Useful for an external UI using |ui-popupmenu| to control the popup menu with the mouse.
+/// Can also be used in a mapping; use <Cmd> |:map-cmd| or a Lua mapping to ensure the mapping
+/// doesn't end completion mode.
 ///
-/// @param item   Index (zero-based) of the item to select. Value of -1 selects
-///               nothing and restores the original text.
-/// @param insert Whether the selection should be inserted in the buffer.
-/// @param finish Finish the completion and dismiss the popupmenu. Implies
-///               `insert`.
-/// @param  opts  Optional parameters. Reserved for future use.
+/// @param item    Index (zero-based) of the item to select. Value of -1 selects nothing
+///                and restores the original text.
+/// @param insert  For |ins-completion|, whether the selection should be inserted in the buffer.
+///                Ignored for |cmdline-completion|.
+/// @param finish  Finish the completion and dismiss the popup menu. Implies {insert}.
+/// @param opts    Optional parameters. Reserved for future use.
 /// @param[out] err Error details, if any
 void nvim_select_popupmenu_item(Integer item, Boolean insert, Boolean finish, Dictionary opts,
                                 Error *err)
@@ -2120,7 +2135,7 @@ Dictionary nvim_eval_statusline(String str, Dict(eval_statusline) *opts, Error *
   bool use_tabline = false;
   bool highlights = false;
 
-  if (str.size < 2 || memcmp(str.data, "%!", 2)) {
+  if (str.size < 2 || memcmp(str.data, "%!", 2) != 0) {
     const char *const errmsg = check_stl_option(str.data);
     if (errmsg) {
       api_set_error(err, kErrorTypeValidation, "%s", errmsg);
@@ -2218,10 +2233,12 @@ Dictionary nvim_eval_statusline(String str, Dict(eval_statusline) *opts, Error *
                                buf,
                                sizeof(buf),
                                str.data,
-                               false,
+                               NULL,
+                               0,
                                fillchar,
                                maxwidth,
                                hltab_ptr,
+                               NULL,
                                NULL);
 
   PUT(result, "width", INTEGER_OBJ(width));

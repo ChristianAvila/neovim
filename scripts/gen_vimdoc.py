@@ -2,9 +2,7 @@
 """Generates Nvim :help docs from C/Lua docstrings, using Doxygen.
 
 Also generates *.mpack files. To inspect the *.mpack structure:
-
-    :new | put=v:lua.vim.inspect(msgpackparse(readfile('runtime/doc/api.mpack')))
-
+    :new | put=v:lua.vim.inspect(v:lua.vim.mpack.unpack(readfile('runtime/doc/api.mpack','B')))
 
 Flow:
     main
@@ -14,15 +12,10 @@ Flow:
             update_params_map /
               render_node
 
-This would be easier using lxml and XSLT, but:
+TODO: eliminate this script and use Lua+treesitter (requires parsers for C and
+Lua markdown-style docstrings).
 
-  1. This should avoid needing Python dependencies, especially ones that are
-     C modules that have library dependencies (lxml requires libxml and
-     libxslt).
-  2. I wouldn't know how to deal with nested indentation in <para> tags using
-     XSLT.
-
-Each function :help block is formatted as follows:
+The generated :help text for each function is formatted as follows:
 
   - Max width of 78 columns (`text_width`).
   - Indent with spaces (not tabs).
@@ -62,9 +55,17 @@ if sys.version_info < MIN_PYTHON_VERSION:
 doxygen_version = tuple((int(i) for i in subprocess.check_output(["doxygen", "-v"],
                         universal_newlines=True).split()[0].split('.')))
 
+# Until 0.9 is released, need this hacky way to check that "nvim -l foo.lua" works.
+nvim_version = list(line for line in subprocess.check_output(['nvim', '-h'], universal_newlines=True).split('\n')
+                     if '-l ' in line)
+
 if doxygen_version < MIN_DOXYGEN_VERSION:
     print("\nRequires doxygen {}.{}.{}+".format(*MIN_DOXYGEN_VERSION))
     print("Your doxygen version is {}.{}.{}\n".format(*doxygen_version))
+    sys.exit(1)
+
+if len(nvim_version) == 0:
+    print("\nRequires 'nvim -l' feature, see https://github.com/neovim/neovim/pull/18706")
     sys.exit(1)
 
 # DEBUG = ('DEBUG' in os.environ)
@@ -86,7 +87,7 @@ base_dir = os.path.dirname(os.path.dirname(script_path))
 out_dir = os.path.join(base_dir, 'tmp-{target}-doc')
 filter_cmd = '%s %s' % (sys.executable, script_path)
 msgs = []  # Messages to show on exit.
-lua2dox_filter = os.path.join(base_dir, 'scripts', 'lua2dox_filter')
+lua2dox = os.path.join(base_dir, 'scripts', 'lua2dox.lua')
 
 CONFIG = {
     'api': {
@@ -132,12 +133,14 @@ CONFIG = {
         'filename': 'lua.txt',
         'section_order': [
             '_editor.lua',
+            '_inspector.lua',
             'shared.lua',
             'uri.lua',
             'ui.lua',
             'filetype.lua',
             'keymap.lua',
             'fs.lua',
+            'secure.lua',
         ],
         'files': [
             'runtime/lua/vim/_editor.lua',
@@ -147,11 +150,14 @@ CONFIG = {
             'runtime/lua/vim/filetype.lua',
             'runtime/lua/vim/keymap.lua',
             'runtime/lua/vim/fs.lua',
+            'runtime/lua/vim/secure.lua',
+            'runtime/lua/vim/_inspector.lua',
         ],
         'file_patterns': '*.lua',
         'fn_name_prefix': '',
         'section_name': {
             'lsp.lua': 'core',
+            '_inspector.lua': 'inspector',
         },
         'section_fmt': lambda name: (
             'Lua module: vim'
@@ -168,11 +174,13 @@ CONFIG = {
         'module_override': {
             # `shared` functions are exposed on the `vim` module.
             'shared': 'vim',
+            '_inspector': 'vim',
             'uri': 'vim',
             'ui': 'vim.ui',
             'filetype': 'vim.filetype',
             'keymap': 'vim.keymap',
             'fs': 'vim.fs',
+            'secure': 'vim.secure',
         },
         'append_only': [
             'shared.lua',
@@ -187,6 +195,7 @@ CONFIG = {
             'diagnostic.lua',
             'codelens.lua',
             'tagfunc.lua',
+            'semantic_tokens.lua',
             'handlers.lua',
             'util.lua',
             'log.lua',
@@ -260,19 +269,13 @@ CONFIG = {
         'helptag_fmt': lambda name: (
             '*lua-treesitter-core*'
             if name.lower() == 'treesitter'
-            else f'*treesitter-{name.lower()}*'),
+            else f'*lua-treesitter-{name.lower()}*'),
         'fn_helptag_fmt': lambda fstem, name: (
-            f'*{name}()*'
-            if name != 'new'
-            else f'*{fstem}.{name}()*'),
-        # 'fn_helptag_fmt': lambda fstem, name: (
-        #     f'*vim.treesitter.{name}()*'
-        #     if fstem == 'treesitter'
-        #     else (
-        #         '*vim.lsp.client*'
-        #         # HACK. TODO(justinmk): class/structure support in lua2dox
-        #         if 'lsp.client' == f'{fstem}.{name}'
-        #         else f'*vim.lsp.{fstem}.{name}()*')),
+            f'*vim.{fstem}.{name}()*'
+            if fstem == 'treesitter'
+            else f'*{name}()*'
+            if name[0].isupper()
+            else f'*vim.treesitter.{fstem}.{name}()*'),
         'module_override': {},
         'append_only': [],
     }
@@ -287,7 +290,7 @@ annotation_map = {
     'FUNC_API_FAST': '|api-fast|',
     'FUNC_API_CHECK_TEXTLOCK': 'not allowed when |textlock| is active',
     'FUNC_API_REMOTE_ONLY': '|RPC| only',
-    'FUNC_API_LUA_ONLY': '|vim.api| only',
+    'FUNC_API_LUA_ONLY': 'Lua |vim.api| only',
 }
 
 
@@ -295,14 +298,16 @@ annotation_map = {
 # or if `cond()` is callable and returns True.
 def debug_this(o, cond=True):
     name = ''
+    if cond is False:
+        return
     if not isinstance(o, str):
         try:
             name = o.nodeName
             o = o.toprettyxml(indent='  ', newl='\n')
         except Exception:
             pass
-    if ((callable(cond) and cond())
-            or (not callable(cond) and cond)
+    if (cond is True
+            or (callable(cond) and cond())
             or (not callable(cond) and cond in o)):
         raise RuntimeError('xxx: {}\n{}'.format(name, o))
 
@@ -351,6 +356,17 @@ def self_or_child(n):
     if len(n.childNodes) == 0:
         return n
     return n.childNodes[0]
+
+
+def align_tags(line):
+    tag_regex = r"\s(\*.+?\*)(?:\s|$)"
+    tags = re.findall(tag_regex, line)
+
+    if len(tags) > 0:
+        line = re.sub(tag_regex, "", line)
+        tags = " " + " ".join(tags)
+        line = line + (" " * (78 - len(line) - len(tags))) + tags
+    return line
 
 
 def clean_lines(text):
@@ -498,7 +514,12 @@ def render_node(n, text, prefix='', indent='', width=text_width - indentation,
     if n.nodeName == 'preformatted':
         o = get_text(n, preformatted=True)
         ensure_nl = '' if o[-1] == '\n' else '\n'
-        text += '>{}{}\n<'.format(ensure_nl, o)
+        if o[0:4] == 'lua\n':
+            text += '>lua{}{}\n<'.format(ensure_nl, o[3:-1])
+        elif o[0:4] == 'vim\n':
+            text += '>vim{}{}\n<'.format(ensure_nl, o[3:-1])
+        else:
+            text += '>{}{}\n<'.format(ensure_nl, o)
 
     elif is_inline(n):
         text = doc_wrap(get_text(n), indent=indent, width=width)
@@ -671,7 +692,7 @@ def fmt_node_as_vimhelp(parent, width=text_width - indentation, indent='',
         max_name_len = max_name(m.keys()) + 4
         out = ''
         for name, desc in m.items():
-            name = '    {}'.format('{{{}}}'.format(name).ljust(max_name_len))
+            name = '  • {}'.format('{{{}}}'.format(name).ljust(max_name_len))
             out += '{}{}\n'.format(name, desc)
         return out.rstrip()
 
@@ -801,7 +822,8 @@ def extract_from_xml(filename, target, width, fmt_vimhelp):
 
         prefix = '%s(' % name
         suffix = '%s)' % ', '.join('{%s}' % a[1] for a in params
-                                   if a[0] not in ('void', 'Error', 'Arena'))
+                                   if a[0] not in ('void', 'Error', 'Arena',
+                                                   'lua_State'))
 
         if not fmt_vimhelp:
             c_decl = '%s %s(%s);' % (return_type, name, ', '.join(c_args))
@@ -887,7 +909,7 @@ def extract_from_xml(filename, target, width, fmt_vimhelp):
 def fmt_doxygen_xml_as_vimhelp(filename, target):
     """Entrypoint for generating Vim :help from from Doxygen XML.
 
-    Returns 3 items:
+    Returns 2 items:
       1. Vim help text for functions found in `filename`.
       2. Vim help text for deprecated functions.
     """
@@ -951,7 +973,7 @@ def fmt_doxygen_xml_as_vimhelp(filename, target):
 
             start = end
 
-        func_doc = "\n".join(split_lines)
+        func_doc = "\n".join(map(align_tags, split_lines))
 
         if (name.startswith(CONFIG[target]['fn_name_prefix'])
            and name != "nvim_error_event"):
@@ -979,7 +1001,7 @@ def delete_lines_below(filename, tokenstr):
         fp.writelines(lines[0:i])
 
 
-def main(config, args):
+def main(doxygen_config, args):
     """Generates:
 
     1. Vim :help docs
@@ -1007,7 +1029,7 @@ def main(config, args):
                 # runtime/lua/vim/lsp.lua:209: warning: argument 'foo' not found
                 stderr=(subprocess.STDOUT if debug else subprocess.DEVNULL))
         p.communicate(
-            config.format(
+            doxygen_config.format(
                 input=' '.join(
                     [f'"{file}"' for file in CONFIG[target]['files']]),
                 output=output_dir,
@@ -1094,7 +1116,7 @@ def main(config, args):
                         fn_map_full.update(fn_map)
 
         if len(sections) == 0:
-            fail(f'no sections for target: {target}')
+            fail(f'no sections for target: {target} (look for errors near "Preprocessing" log lines above)')
         if len(sections) > len(CONFIG[target]['section_order']):
             raise RuntimeError(
                 'found new modules "{}"; update the "section_order" map'.format(
@@ -1141,7 +1163,7 @@ def main(config, args):
 def filter_source(filename):
     name, extension = os.path.splitext(filename)
     if extension == '.lua':
-        p = subprocess.run([lua2dox_filter, filename], stdout=subprocess.PIPE)
+        p = subprocess.run(['nvim', '-l', lua2dox, filename], stdout=subprocess.PIPE)
         op = ('?' if 0 != p.returncode else p.stdout.decode('utf-8'))
         print(op)
     else:

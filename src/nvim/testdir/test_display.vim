@@ -195,8 +195,6 @@ func Test_edit_long_file_name()
 
   call VerifyScreenDump(buf, 'Test_long_file_name_1', {})
 
-  call term_sendkeys(buf, ":q\<cr>")
-
   " clean up
   call StopVimInTerminal(buf)
   call delete(longName)
@@ -228,7 +226,6 @@ endfunc
 
 " Test for scrolling that modifies buffer during visual block
 func Test_visual_block_scroll()
-  " See test/functional/legacy/visual_mode_spec.lua
   CheckScreendump
 
   let lines =<< trim END
@@ -239,7 +236,7 @@ func Test_visual_block_scroll()
   END
 
   let filename = 'Xvisualblockmodifiedscroll'
-  call writefile(lines, filename)
+  call writefile(lines, filename, 'D')
 
   let buf = RunVimInTerminal('-S '.filename, #{rows: 7})
   call term_sendkeys(buf, "V\<C-D>\<C-D>")
@@ -247,11 +244,40 @@ func Test_visual_block_scroll()
   call VerifyScreenDump(buf, 'Test_display_visual_block_scroll', {})
 
   call StopVimInTerminal(buf)
-  call delete(filename)
+endfunc
+
+" Test for clearing paren highlight when switching buffers
+func Test_matchparen_clear_highlight()
+  CheckScreendump
+
+  let lines =<< trim END
+    source $VIMRUNTIME/plugin/matchparen.vim
+    set hidden
+    call setline(1, ['()'])
+    normal 0
+
+    func OtherBuffer()
+       enew
+       exe "normal iaa\<Esc>0"
+    endfunc
+  END
+  call writefile(lines, 'XMatchparenClear', 'D')
+  let buf = RunVimInTerminal('-S XMatchparenClear', #{rows: 5})
+  call VerifyScreenDump(buf, 'Test_matchparen_clear_highlight_1', {})
+
+  call term_sendkeys(buf, ":call OtherBuffer()\<CR>:\<Esc>")
+  call VerifyScreenDump(buf, 'Test_matchparen_clear_highlight_2', {})
+
+  call term_sendkeys(buf, "\<C-^>:\<Esc>")
+  call VerifyScreenDump(buf, 'Test_matchparen_clear_highlight_1', {})
+
+  call term_sendkeys(buf, "\<C-^>:\<Esc>")
+  call VerifyScreenDump(buf, 'Test_matchparen_clear_highlight_2', {})
+
+  call StopVimInTerminal(buf)
 endfunc
 
 func Test_display_scroll_at_topline()
-  " See test/functional/legacy/display_spec.lua
   CheckScreendump
 
   let buf = RunVimInTerminal('', #{cols: 20})
@@ -407,30 +433,49 @@ func Test_display_linebreak_breakat()
   let &breakat=_breakat
 endfunc
 
-func Test_display_lastline()
-  CheckScreendump
-
+func Run_Test_display_lastline(euro)
   let lines =<< trim END
-      call setline(1, ['aaa', 'b'->repeat(100)])
+      call setline(1, ['aaa', 'b'->repeat(200)])
       set display=truncate
+
       vsplit
       100wincmd <
   END
-  call writefile(lines, 'XdispLastline')
+  if a:euro != ''
+    let lines[2] = 'set fillchars=vert:\|,lastline:€'
+  endif
+  call writefile(lines, 'XdispLastline', 'D')
   let buf = RunVimInTerminal('-S XdispLastline', #{rows: 10})
-  call VerifyScreenDump(buf, 'Test_display_lastline_1', {})
+  call VerifyScreenDump(buf, $'Test_display_lastline_{a:euro}1', {})
 
   call term_sendkeys(buf, ":set display=lastline\<CR>")
-  call VerifyScreenDump(buf, 'Test_display_lastline_2', {})
+  call VerifyScreenDump(buf, $'Test_display_lastline_{a:euro}2', {})
 
   call term_sendkeys(buf, ":100wincmd >\<CR>")
-  call VerifyScreenDump(buf, 'Test_display_lastline_3', {})
+  call VerifyScreenDump(buf, $'Test_display_lastline_{a:euro}3', {})
 
   call term_sendkeys(buf, ":set display=truncate\<CR>")
-  call VerifyScreenDump(buf, 'Test_display_lastline_4', {})
+  call VerifyScreenDump(buf, $'Test_display_lastline_{a:euro}4', {})
+
+  call term_sendkeys(buf, ":close\<CR>")
+  call term_sendkeys(buf, ":3split\<CR>")
+  call VerifyScreenDump(buf, $'Test_display_lastline_{a:euro}5', {})
+
+  call term_sendkeys(buf, ":close\<CR>")
+  call term_sendkeys(buf, ":2vsplit\<CR>")
+  call VerifyScreenDump(buf, $'Test_display_lastline_{a:euro}6', {})
 
   call StopVimInTerminal(buf)
-  call delete('XdispLastline')
+endfunc
+
+func Test_display_lastline()
+  CheckScreendump
+
+  call Run_Test_display_lastline('')
+  call Run_Test_display_lastline('euro_')
+
+  call assert_fails(':set fillchars=lastline:', 'E474:')
+  call assert_fails(':set fillchars=lastline:〇', 'E474:')
 endfunc
 
 

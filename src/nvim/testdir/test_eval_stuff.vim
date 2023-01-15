@@ -20,13 +20,8 @@ func Test_nocatch_restore_silent_emsg()
     throw 1
   catch
   endtry
-  echoerr 'wrong'
-  let c1 = nr2char(screenchar(&lines, 1))
-  let c2 = nr2char(screenchar(&lines, 2))
-  let c3 = nr2char(screenchar(&lines, 3))
-  let c4 = nr2char(screenchar(&lines, 4))
-  let c5 = nr2char(screenchar(&lines, 5))
-  call assert_equal('wrong', c1 . c2 . c3 . c4 . c5)
+  echoerr 'wrong again'
+  call assert_equal('wrong again', ScreenLine(&lines))
 endfunc
 
 func Test_mkdir_p()
@@ -118,6 +113,13 @@ func Test_readfile_binary()
 
   bwipe!
   call delete('XReadfile_bin')
+endfunc
+
+func Test_readfile_binary_empty()
+  call writefile([], 'Xempty-file')
+  " This used to compare uninitialized memory in Vim <= 8.2.4065
+  call assert_equal([''], readfile('Xempty-file', 'b'))
+  call delete('Xempty-file')
 endfunc
 
 func Test_readfile_bom()
@@ -358,6 +360,11 @@ func Test_curly_assignment()
   unlet s:svar
   unlet s:gvar
   unlet g:gvar
+endfunc
+
+func Test_deep_recursion()
+  " this was running out of stack
+  call assert_fails("exe 'if ' .. repeat('(', 1002)", 'E1169: Expression too recursive: ((')
 endfunc
 
 " K_SPECIAL in the modified character used be escaped, which causes

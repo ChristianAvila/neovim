@@ -3,12 +3,12 @@ local helpers = require('test.functional.helpers')(after_each)
 local clear = helpers.clear
 local eq = helpers.eq
 local funcs = helpers.funcs
-local iswin = helpers.iswin
 local neq = helpers.neq
 local nvim_argv = helpers.nvim_argv
 local request = helpers.request
 local retry = helpers.retry
 local NIL = helpers.NIL
+local is_os = helpers.is_os
 
 describe('API', function()
   before_each(clear)
@@ -19,26 +19,26 @@ describe('API', function()
 
       -- Might be non-zero already (left-over from some other test?),
       -- but this is not what is tested here.
-      local initial_childs = request('nvim_get_proc_children', this_pid)
+      local initial_children = request('nvim_get_proc_children', this_pid)
 
       local job1 = funcs.jobstart(nvim_argv)
       retry(nil, nil, function()
-        eq(#initial_childs + 1, #request('nvim_get_proc_children', this_pid))
+        eq(#initial_children + 1, #request('nvim_get_proc_children', this_pid))
       end)
 
       local job2 = funcs.jobstart(nvim_argv)
       retry(nil, nil, function()
-        eq(#initial_childs + 2, #request('nvim_get_proc_children', this_pid))
+        eq(#initial_children + 2, #request('nvim_get_proc_children', this_pid))
       end)
 
       funcs.jobstop(job1)
       retry(nil, nil, function()
-        eq(#initial_childs + 1, #request('nvim_get_proc_children', this_pid))
+        eq(#initial_children + 1, #request('nvim_get_proc_children', this_pid))
       end)
 
       funcs.jobstop(job2)
       retry(nil, nil, function()
-        eq(#initial_childs, #request('nvim_get_proc_children', this_pid))
+        eq(#initial_children, #request('nvim_get_proc_children', this_pid))
       end)
     end)
 
@@ -62,7 +62,7 @@ describe('API', function()
     it('returns process info', function()
       local pid = funcs.getpid()
       local pinfo = request('nvim_get_proc', pid)
-      eq((iswin() and 'nvim.exe' or 'nvim'), pinfo.name)
+      eq((is_os('win') and 'nvim.exe' or 'nvim'), pinfo.name)
       eq(pid, pinfo.pid)
       eq('number', type(pinfo.ppid))
       neq(pid, pinfo.ppid)

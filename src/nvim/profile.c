@@ -3,20 +3,34 @@
 
 #include <assert.h>
 #include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-#include "nvim/assert.h"
+#include "nvim/ascii.h"
 #include "nvim/charset.h"
 #include "nvim/debugger.h"
 #include "nvim/eval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
+#include "nvim/ex_cmds_defs.h"
 #include "nvim/fileio.h"
-#include "nvim/func_attr.h"
-#include "nvim/globals.h"  // for the global `time_fd` (startuptime)
+#include "nvim/garray.h"
+#include "nvim/gettext.h"
+#include "nvim/globals.h"
+#include "nvim/hashtab.h"
+#include "nvim/keycodes.h"
+#include "nvim/memory.h"
+#include "nvim/message.h"
+#include "nvim/option_defs.h"
 #include "nvim/os/os.h"
 #include "nvim/os/time.h"
+#include "nvim/pos.h"
 #include "nvim/profile.h"
 #include "nvim/runtime.h"
+#include "nvim/types.h"
 #include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -283,31 +297,31 @@ void ex_profile(exarg_T *eap)
   len = (int)(e - eap->arg);
   e = skipwhite(e);
 
-  if (len == 5 && STRNCMP(eap->arg, "start", 5) == 0 && *e != NUL) {
+  if (len == 5 && strncmp(eap->arg, "start", 5) == 0 && *e != NUL) {
     xfree(profile_fname);
-    profile_fname = (char *)expand_env_save_opt((char_u *)e, true);
+    profile_fname = (char *)expand_env_save_opt(e, true);
     do_profiling = PROF_YES;
     profile_set_wait(profile_zero());
     set_vim_var_nr(VV_PROFILING, 1L);
   } else if (do_profiling == PROF_NONE) {
     emsg(_("E750: First use \":profile start {fname}\""));
-  } else if (STRCMP(eap->arg, "stop") == 0) {
+  } else if (strcmp(eap->arg, "stop") == 0) {
     profile_dump();
     do_profiling = PROF_NONE;
     set_vim_var_nr(VV_PROFILING, 0L);
     profile_reset();
-  } else if (STRCMP(eap->arg, "pause") == 0) {
+  } else if (strcmp(eap->arg, "pause") == 0) {
     if (do_profiling == PROF_YES) {
       pause_time = profile_start();
     }
     do_profiling = PROF_PAUSED;
-  } else if (STRCMP(eap->arg, "continue") == 0) {
+  } else if (strcmp(eap->arg, "continue") == 0) {
     if (do_profiling == PROF_PAUSED) {
       pause_time = profile_end(pause_time);
       profile_set_wait(profile_add(profile_get_wait(), pause_time));
     }
     do_profiling = PROF_YES;
-  } else if (STRCMP(eap->arg, "dump") == 0) {
+  } else if (strcmp(eap->arg, "dump") == 0) {
     profile_dump();
   } else {
     // The rest is similar to ":breakadd".
@@ -340,7 +354,6 @@ char *get_profile_name(expand_T *xp, int idx)
   switch (pexpand_what) {
   case PEXP_SUBCMD:
     return pexpand_cmds[idx];
-  // case PEXP_FUNC: TODO
   default:
     return NULL;
   }
@@ -354,18 +367,22 @@ void set_context_in_profile_cmd(expand_T *xp, const char *arg)
   pexpand_what = PEXP_SUBCMD;
   xp->xp_pattern = (char *)arg;
 
-  char_u *const end_subcmd = (char_u *)skiptowhite(arg);
+  char *const end_subcmd = skiptowhite(arg);
   if (*end_subcmd == NUL) {
     return;
   }
 
-  if ((const char *)end_subcmd - arg == 5 && strncmp(arg, "start", 5) == 0) {
+  if ((end_subcmd - arg == 5 && strncmp(arg, "start", 5) == 0)
+      || (end_subcmd - arg == 4 && strncmp(arg, "file", 4) == 0)) {
     xp->xp_context = EXPAND_FILES;
-    xp->xp_pattern = skipwhite((char *)end_subcmd);
+    xp->xp_pattern = skipwhite(end_subcmd);
+    return;
+  } else if (end_subcmd - arg == 4 && strncmp(arg, "func", 4) == 0) {
+    xp->xp_context = EXPAND_USER_FUNC;
+    xp->xp_pattern = skipwhite(end_subcmd);
     return;
   }
 
-  // TODO(tarruda): expand function names after "func"
   xp->xp_context = EXPAND_NOTHING;
 }
 
@@ -398,7 +415,7 @@ bool prof_def_func(void)
 /// Print the count and times for one function or function line.
 ///
 /// @param prefer_self  when equal print only self time
-static void prof_func_line(FILE *fd, int count, proftime_T *total, proftime_T *self,
+static void prof_func_line(FILE *fd, int count, const proftime_T *total, const proftime_T *self,
                            bool prefer_self)
 {
   if (count > 0) {
@@ -430,7 +447,7 @@ static void prof_sort_list(FILE *fd, ufunc_T **sorttab, int st_len, char *title,
     fp = sorttab[i];
     prof_func_line(fd, fp->uf_tm_count, &fp->uf_tm_total, &fp->uf_tm_self,
                    prefer_self);
-    if (fp->uf_name[0] == K_SPECIAL) {
+    if ((uint8_t)fp->uf_name[0] == K_SPECIAL) {
       fprintf(fd, " <SNR>%s()\n", fp->uf_name + 3);
     } else {
       fprintf(fd, " %s()\n", fp->uf_name);
@@ -601,7 +618,7 @@ static void func_dump_profile(FILE *fd)
       if (fp->uf_prof_initialized) {
         sorttab[st_len++] = fp;
 
-        if (fp->uf_name[0] == K_SPECIAL) {
+        if ((uint8_t)fp->uf_name[0] == K_SPECIAL) {
           fprintf(fd, "FUNCTION  <SNR>%s()\n", fp->uf_name + 3);
         } else {
           fprintf(fd, "FUNCTION  %s()\n", fp->uf_name);
@@ -684,7 +701,7 @@ void script_prof_save(proftime_T *tm)
 }
 
 /// Count time spent in children after invoking another script or function.
-void script_prof_restore(proftime_T *tm)
+void script_prof_restore(const proftime_T *tm)
 {
   scriptitem_T *si;
 

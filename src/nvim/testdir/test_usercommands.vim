@@ -79,6 +79,19 @@ function Test_cmdmods()
   call assert_equal('silent!', g:mods)
   tab MyCmd
   call assert_equal('tab', g:mods)
+  0tab MyCmd
+  call assert_equal('0tab', g:mods)
+  tab split
+  tab MyCmd
+  call assert_equal('tab', g:mods)
+  1tab MyCmd
+  call assert_equal('1tab', g:mods)
+  tabprev
+  tab MyCmd
+  call assert_equal('tab', g:mods)
+  2tab MyCmd
+  call assert_equal('2tab', g:mods)
+  2tabclose
   topleft MyCmd
   call assert_equal('topleft', g:mods)
   to MyCmd
@@ -310,6 +323,11 @@ func Test_CmdErrors()
   call assert_fails('com DoCmd :', 'E174:')
   comclear
   call assert_fails('delcom DoCmd', 'E184:')
+
+  " These used to leak memory
+  call assert_fails('com! -complete=custom,CustomComplete _ :', 'E182:')
+  call assert_fails('com! -complete=custom,CustomComplete docmd :', 'E183:')
+  call assert_fails('com! -complete=custom,CustomComplete -xxx DoCmd :', 'E181:')
 endfunc
 
 func CustomComplete(A, L, P)
@@ -317,7 +335,7 @@ func CustomComplete(A, L, P)
 endfunc
 
 func CustomCompleteList(A, L, P)
-  return [ "Monday", "Tuesday", "Wednesday", {}]
+  return [ "Monday", "Tuesday", "Wednesday", {}, v:_null_string]
 endfunc
 
 func Test_CmdCompletion()
@@ -336,6 +354,14 @@ func Test_CmdCompletion()
   call feedkeys(":com -complete=co\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal('"com -complete=color command compiler', @:)
 
+  " try completion for unsupported argument values
+  call feedkeys(":com -newarg=\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"com -newarg=\t", @:)
+
+  " command completion after the name in a user defined command
+  call feedkeys(":com MyCmd chist\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"com MyCmd chistory", @:)
+
   command! DoCmd1 :
   command! DoCmd2 :
   call feedkeys(":com \<C-A>\<C-B>\"\<CR>", 'tx')
@@ -346,6 +372,10 @@ func Test_CmdCompletion()
 
   call feedkeys(":delcom DoC\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal('"delcom DoCmd1 DoCmd2', @:)
+
+  " try argument completion for a command without completion
+  call feedkeys(":DoCmd1 \<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal("\"DoCmd1 \t", @:)
 
   delcom DoCmd1
   call feedkeys(":delcom DoC\<C-A>\<C-B>\"\<CR>", 'tx')
@@ -364,6 +394,21 @@ func Test_CmdCompletion()
   com! -nargs=1 -complete=behave DoCmd :
   call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal('"DoCmd mswin xterm', @:)
+
+  " Test for file name completion
+  com! -nargs=1 -complete=file DoCmd :
+  call feedkeys(":DoCmd READM\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd README.txt', @:)
+
+  " Test for buffer name completion
+  com! -nargs=1 -complete=buffer DoCmd :
+  let bnum = bufadd('BufForUserCmd')
+  call setbufvar(bnum, '&buflisted', 1)
+  call feedkeys(":DoCmd BufFor\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd BufForUserCmd', @:)
+  bwipe BufForUserCmd
+  call feedkeys(":DoCmd BufFor\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd BufFor', @:)
 
   com! -nargs=* -complete=custom,CustomComplete DoCmd :
   call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
@@ -386,6 +431,17 @@ func Test_CmdCompletion()
   " custom completion failure with the wrong function
   com! -nargs=? -complete=custom,min DoCmd
   call assert_fails("call feedkeys(':DoCmd \t', 'tx')", 'E118:')
+
+  " custom completion for a pattern with a backslash
+  let g:ArgLead = ''
+  func! CustCompl(A, L, P)
+    let g:ArgLead = a:A
+    return ['one', 'two', 'three']
+  endfunc
+  com! -nargs=? -complete=customlist,CustCompl DoCmd
+  call feedkeys(":DoCmd a\\\t", 'xt')
+  call assert_equal('a\', g:ArgLead)
+  delfunc CustCompl
 
   delcom DoCmd
 endfunc
@@ -604,6 +660,27 @@ func Test_command_list()
   call assert_equal("\nNo user-defined commands found", execute('command'))
 endfunc
 
+" Test for a custom user completion returning the wrong value type
+func Test_usercmd_custom()
+  func T1(a, c, p)
+    return "a\nb\n"
+  endfunc
+  command -nargs=* -complete=customlist,T1 TCmd1
+  call feedkeys(":TCmd1 \<C-A>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"TCmd1 ', @:)
+  delcommand TCmd1
+  delfunc T1
+
+  func T2(a, c, p)
+    return {}
+  endfunc
+  command -nargs=* -complete=customlist,T2 TCmd2
+  call feedkeys(":TCmd2 \<C-A>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"TCmd2 ', @:)
+  delcommand TCmd2
+  delfunc T2
+endfunc
+
 func Test_delcommand_buffer()
   command Global echo 'global'
   command -buffer OneBuffer echo 'one'
@@ -644,5 +721,30 @@ func Test_recursive_define()
   endwhile
 endfunc
 
+" Test for using buffer-local ambiguous user-defined commands
+func Test_buflocal_ambiguous_usercmd()
+  new
+  command -buffer -nargs=1 -complete=sign TestCmd1 echo "Hello"
+  command -buffer -nargs=1 -complete=sign TestCmd2 echo "World"
+
+  call assert_fails("call feedkeys(':TestCmd\<CR>', 'xt')", 'E464:')
+  call feedkeys(":TestCmd \<Tab>\<C-B>\"\<CR>", 'xt')
+  call assert_equal('"TestCmd ', @:)
+
+  delcommand TestCmd1
+  delcommand TestCmd2
+  bw!
+endfunc
+
+" Test for using a multibyte character in a user command
+func Test_multibyte_in_usercmd()
+  command SubJapanesePeriodToDot exe "%s/\u3002/./g"
+  new
+  call setline(1, "Hello\u3002")
+  SubJapanesePeriodToDot
+  call assert_equal('Hello.', getline(1))
+  bw!
+  delcommand SubJapanesePeriodToDot
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -2,22 +2,22 @@
 cmake_minimum_required (VERSION 3.10)
 project(NVIM_DEPS C)
 
-# Needed for: check_c_compiler_flag()
-include(CheckCCompilerFlag)
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
 
 # Point CMake at any custom modules we may ship
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" "${PROJECT_SOURCE_DIR}/../cmake")
+
+include(CheckCCompilerFlag)
+include(Util)
 
 get_property(isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(NOT isMultiConfig)
   set(BUILD_TYPE_STRING -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
 endif()
 
-# In Windows/MSVC CMAKE_BUILD_TYPE changes the paths/linking of the build
-# recipes (libuv, msgpack), make sure it is set
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
-endif()
+set_default_buildtype()
 
 set(DEFAULT_MAKE_CFLAGS CFLAGS+=-g)
 
@@ -105,11 +105,7 @@ if(MINGW AND CMAKE_GENERATOR MATCHES "Ninja")
   endif()
 endif()
 
-if(CMAKE_C_COMPILER_ARG1)
-  set(DEPS_C_COMPILER "${CMAKE_C_COMPILER} ${CMAKE_C_COMPILER_ARG1}")
-else()
-  set(DEPS_C_COMPILER "${CMAKE_C_COMPILER}")
-endif()
+set(DEPS_C_COMPILER "${CMAKE_C_COMPILER}")
 
 if(CMAKE_CXX_COMPILER)
   set(DEPS_CXX_COMPILER "${CMAKE_CXX_COMPILER}")
@@ -147,23 +143,18 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   message("-- Using deployment target ${CMAKE_OSX_DEPLOYMENT_TARGET}")
 endif()
 
-set(HOSTDEPS_INSTALL_DIR "${DEPS_INSTALL_DIR}")
-set(HOSTDEPS_BIN_DIR "${DEPS_BIN_DIR}")
-set(HOSTDEPS_LIB_DIR "${DEPS_LIB_DIR}")
-set(HOSTDEPS_C_COMPILER "${DEPS_C_COMPILER}")
-set(HOSTDEPS_CXX_COMPILER "${DEPS_CXX_COMPILER}")
-
 include(ExternalProject)
+set_directory_properties(PROPERTIES EP_PREFIX "${DEPS_BUILD_DIR}")
 
-set(LIBUV_URL https://github.com/libuv/libuv/archive/v1.44.2.tar.gz)
-set(LIBUV_SHA256 e6e2ba8b4c349a4182a33370bb9be5e23c51b32efb9b9e209d0e8556b73a48da)
+set(LIBUV_URL https://github.com/libuv/libuv/archive/f610339f74f7f0fcd183533d2c965ce1468b44c6.tar.gz)
+set(LIBUV_SHA256 d5f22303ba44ac60d3232b1977b404d23a349ae4e8cb83f00e7122fafe38d8c9)
 
 set(MSGPACK_URL https://github.com/msgpack/msgpack-c/releases/download/c-4.0.0/msgpack-c-4.0.0.tar.gz)
 set(MSGPACK_SHA256 420fe35e7572f2a168d17e660ef981a589c9cbe77faa25eb34a520e1fcc032c8)
 
 # https://github.com/LuaJIT/LuaJIT/tree/v2.1
-set(LUAJIT_URL https://github.com/LuaJIT/LuaJIT/archive/633f265f67f322cbe2c5fd11d3e46d968ac220f7.tar.gz)
-set(LUAJIT_SHA256 2681f0a6f624a64a8dfb70a5a377d494daf38960442c547d9c468674c1afa3c2)
+set(LUAJIT_URL https://github.com/LuaJIT/LuaJIT/archive/a04480e311f93d3ceb2f92549cad3fffa38250ef.tar.gz)
+set(LUAJIT_SHA256 297e9c06d934753f9553fa7d1c1e43381e20094ed3289e0e145dd5f3c203a27e)
 
 set(LUA_URL https://www.lua.org/ftp/lua-5.1.5.tar.gz)
 set(LUA_SHA256 2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333)
@@ -177,25 +168,23 @@ set(UNIBILIUM_SHA256 29815283c654277ef77a3adcc8840db79ddbb20a0f0b0c8f648bd8cd49a
 set(LIBTERMKEY_URL https://www.leonerd.org.uk/code/libtermkey/libtermkey-0.22.tar.gz)
 set(LIBTERMKEY_SHA256 6945bd3c4aaa83da83d80a045c5563da4edd7d0374c62c0d35aec09eb3014600)
 
-set(LIBVTERM_URL https://www.leonerd.org.uk/code/libvterm/libvterm-0.1.4.tar.gz)
-set(LIBVTERM_SHA256 bc70349e95559c667672fc8c55b9527d9db9ada0fb80a3beda533418d782d3dd)
+set(LIBVTERM_URL https://www.leonerd.org.uk/code/libvterm/libvterm-0.3.tar.gz)
+set(LIBVTERM_SHA256 61eb0d6628c52bdf02900dfd4468aa86a1a7125228bab8a67328981887483358)
 
-set(LUV_VERSION 1.44.2-0)
-set(LUV_URL https://github.com/luvit/luv/archive/1.44.2-0.tar.gz)
-set(LUV_SHA256 44ccda27035bfe683e6325a2a93f2c254be1eb76bde6efc2bd37c56a7af7b00a)
+set(LUV_VERSION 1.44.2-1)
+set(LUV_URL https://github.com/luvit/luv/archive/80c8c00baebe3e994d1616d4b54097c2d6e14834.tar.gz)
+set(LUV_SHA256 bcd3ffc7bc80053ab0ec87f0fe83c7632c7619879b2eb75fba88ddb3bee620e8)
 
 set(LUA_COMPAT53_URL https://github.com/keplerproject/lua-compat-5.3/archive/v0.9.tar.gz)
 set(LUA_COMPAT53_SHA256 ad05540d2d96a48725bb79a1def35cf6652a4e2ec26376e2617c8ce2baa6f416)
 
 # cat.exe curl.exe curl-ca-bundle.crt diff.exe tee.exe xxd.exe
-set(WINTOOLS_URL https://github.com/neovim/deps/raw/d66e306abf5b846484b4f2adffd896bce7e065d2/opt/win32tools.zip)
-set(WINTOOLS_SHA256 2fb2f8d69070b3f16e029913fb95008e6be33893d77fc358012396c275a0fdb7)
+set(WINTOOLS_URL https://github.com/neovim/deps/raw/c1e7dd8de9e1b18d11dcfa0a192cd029262e5303/opt/win32tools.zip)
+set(WINTOOLS_SHA256 3c4c490a3d392ceeb1347cb77cc821a31900b688a2189276d3a1131a3f21daf1)
 
-set(WINGUI_URL https://github.com/equalsraf/neovim-qt/releases/download/v0.2.16.1/neovim-qt.zip)
-set(WINGUI_SHA256 ddb4492db03da407703fb0ab271c4eb060250d1a7d71200e2b3b981cb0de59de)
+set(WINGUI_URL https://github.com/equalsraf/neovim-qt/releases/download/v0.2.17/neovim-qt.zip)
+set(WINGUI_SHA256 502e386eef677c2c2e0c11d8cbb27f3e12b4d96818369417e8da4129c4580c25)
 
-set(WIN32YANK_X86_URL https://github.com/equalsraf/win32yank/releases/download/v0.0.4/win32yank-x86.zip)
-set(WIN32YANK_X86_SHA256 62f34e5a46c5d4a7b3f3b512e1ff7b77fedd432f42581cbe825233a996eed62c)
 set(WIN32YANK_X86_64_URL https://github.com/equalsraf/win32yank/releases/download/v0.0.4/win32yank-x64.zip)
 set(WIN32YANK_X86_64_SHA256 33a747a92da60fb65e668edbf7661d3d902411a2d545fe9dc08623cecd142a20)
 
@@ -207,6 +196,15 @@ set(LIBICONV_SHA256 ccf536620a45458d26ba83887a983b96827001e92a13847b45e4925cc891
 
 set(TREESITTER_C_URL https://github.com/tree-sitter/tree-sitter-c/archive/v0.20.2.tar.gz)
 set(TREESITTER_C_SHA256 af66fde03feb0df4faf03750102a0d265b007e5d957057b6b293c13116a70af2 )
+
+set(TREESITTER_LUA_URL https://github.com/MunifTanjim/tree-sitter-lua/archive/v0.0.14.tar.gz)
+set(TREESITTER_LUA_SHA256 930d0370dc15b66389869355c8e14305b9ba7aafd36edbfdb468c8023395016d)
+
+set(TREESITTER_VIM_URL https://github.com/vigoux/tree-sitter-viml/archive/55ff1b080c09edeced9b748cf4c16d0b49d17fb9.tar.gz)
+set(TREESITTER_VIM_SHA256 1b1cd39e33c8fb02fa7fe3977e844883c2a8508a7edd621f2d21e39a9aeefa92)
+
+set(TREESITTER_HELP_URL https://github.com/neovim/tree-sitter-vimdoc/archive/ce20f13c3f12506185754888feaae3f2ad54c287.tar.gz)
+set(TREESITTER_HELP_SHA256 2b8b166438cce66064aab56a744430b1f44871f43e47f70b51246d14bb826609)
 
 set(TREESITTER_URL https://github.com/tree-sitter/tree-sitter/archive/v0.20.7.tar.gz)
 set(TREESITTER_SHA256 b355e968ec2d0241bbd96748e00a9038f83968f85d822ecb9940cbe4c42e182e)
@@ -276,15 +274,8 @@ if(WIN32)
     INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory bin ${DEPS_INSTALL_DIR}/bin
       COMMAND ${CMAKE_COMMAND} -E copy_directory share ${DEPS_INSTALL_DIR}/share)
 
-  include(TargetArch)
-  GetBinaryDep(TARGET "win32yank_${TARGET_ARCH}"
+  GetBinaryDep(TARGET win32yank_X86_64
     INSTALL_COMMAND ${CMAKE_COMMAND} -E copy win32yank.exe ${DEPS_INSTALL_DIR}/bin)
-
-  if("${TARGET_ARCH}" STREQUAL "X86_64")
-    set(TARGET_ARCH x64)
-  elseif(TARGET_ARCH STREQUAL "X86")
-    set(TARGET_ARCH ia32)
-  endif()
 endif()
 
 # clean-shared-libraries removes ${DEPS_INSTALL_DIR}/lib/nvim/parser/c.dll,

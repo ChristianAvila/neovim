@@ -4,16 +4,25 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "nvim/ascii.h"
 #include "nvim/charset.h"
-#include "nvim/edit.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/eval/vars.h"
+#include "nvim/gettext.h"
+#include "nvim/globals.h"
 #include "nvim/keycodes.h"
+#include "nvim/log.h"
+#include "nvim/macros.h"
+#include "nvim/mbyte.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/mouse.h"
 #include "nvim/strings.h"
+#include "nvim/types.h"
 #include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -46,8 +55,7 @@ static const struct modmasktable {
 
 #define MOD_KEYS_ENTRY_SIZE 5
 
-static char_u modifier_keys_table[] =
-{
+static uint8_t modifier_keys_table[] = {
   //  mod mask      with modifier               without modifier
   MOD_MASK_SHIFT, '&', '9',                   '@', '1',         // begin
   MOD_MASK_SHIFT, '&', '0',                   '@', '2',         // cancel
@@ -347,8 +355,7 @@ static struct mousetable {
   int button;                 // Which mouse button is it?
   bool is_click;              // Is it a mouse button click event?
   bool is_drag;               // Is it a mouse drag event?
-} mouse_table[] =
-{
+} mouse_table[] = {
   { KE_LEFTMOUSE,        MOUSE_LEFT,     true,   false },
   { KE_LEFTDRAG,         MOUSE_LEFT,     false,  true },
   { KE_LEFTRELEASE,      MOUSE_LEFT,     false,  false },
@@ -396,22 +403,24 @@ int name_to_mod_mask(int c)
 int simplify_key(const int key, int *modifiers)
   FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
-  if (*modifiers & (MOD_MASK_SHIFT | MOD_MASK_CTRL | MOD_MASK_ALT)) {
-    // TAB is a special case.
-    if (key == TAB && (*modifiers & MOD_MASK_SHIFT)) {
-      *modifiers &= ~MOD_MASK_SHIFT;
-      return K_S_TAB;
-    }
-    const int key0 = KEY2TERMCAP0(key);
-    const int key1 = KEY2TERMCAP1(key);
-    for (int i = 0; modifier_keys_table[i] != NUL; i += MOD_KEYS_ENTRY_SIZE) {
-      if (key0 == modifier_keys_table[i + 3]
-          && key1 == modifier_keys_table[i + 4]
-          && (*modifiers & modifier_keys_table[i])) {
-        *modifiers &= ~modifier_keys_table[i];
-        return TERMCAP2KEY(modifier_keys_table[i + 1],
-                           modifier_keys_table[i + 2]);
-      }
+  if (!(*modifiers & (MOD_MASK_SHIFT | MOD_MASK_CTRL | MOD_MASK_ALT))) {
+    return key;
+  }
+
+  // TAB is a special case.
+  if (key == TAB && (*modifiers & MOD_MASK_SHIFT)) {
+    *modifiers &= ~MOD_MASK_SHIFT;
+    return K_S_TAB;
+  }
+  const int key0 = KEY2TERMCAP0(key);
+  const int key1 = KEY2TERMCAP1(key);
+  for (int i = 0; modifier_keys_table[i] != NUL; i += MOD_KEYS_ENTRY_SIZE) {
+    if (key0 == modifier_keys_table[i + 3]
+        && key1 == modifier_keys_table[i + 4]
+        && (*modifiers & modifier_keys_table[i])) {
+      *modifiers &= ~modifier_keys_table[i];
+      return TERMCAP2KEY(modifier_keys_table[i + 1],
+                         modifier_keys_table[i + 2]);
     }
   }
   return key;
@@ -539,7 +548,7 @@ char_u *get_special_key_name(int c, int modifiers)
       }
     }
   } else {            // use name of special key
-    size_t len = STRLEN(key_names_table[table_idx].name);
+    size_t len = strlen(key_names_table[table_idx].name);
 
     if ((int)len + idx + 2 <= MAX_KEY_NAME_LEN) {
       STRCPY(string + idx, key_names_table[table_idx].name);
@@ -563,7 +572,7 @@ char_u *get_special_key_name(int c, int modifiers)
 /// @param[out]  did_simplify  found <C-H>, etc.
 ///
 /// @return Number of characters added to dst, zero for no match.
-unsigned int trans_special(const char_u **const srcp, const size_t src_len, char_u *const dst,
+unsigned int trans_special(const char **const srcp, const size_t src_len, char_u *const dst,
                            const int flags, const bool escape_ks, bool *const did_simplify)
   FUNC_ATTR_NONNULL_ARG(1, 3) FUNC_ATTR_WARN_UNUSED_RESULT
 {
@@ -616,7 +625,7 @@ unsigned int special_to_buf(int key, int modifiers, bool escape_ks, char_u *dst)
 /// @param[out]  did_simplify  FSK_SIMPLIFY and found <C-H>, etc.
 ///
 /// @return Key and modifiers or 0 if there is no match.
-int find_special_key(const char_u **const srcp, const size_t src_len, int *const modp,
+int find_special_key(const char **const srcp, const size_t src_len, int *const modp,
                      const int flags, bool *const did_simplify)
   FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ARG(1, 3)
 {
@@ -624,7 +633,7 @@ int find_special_key(const char_u **const srcp, const size_t src_len, int *const
   const char_u *end_of_name;
   const char_u *src;
   const char_u *bp;
-  const char_u *const end = *srcp + src_len - 1;
+  const char_u *const end = (char_u *)(*srcp) + src_len - 1;
   const bool in_string = flags & FSK_IN_STRING;
   int modifiers;
   int bit;
@@ -636,7 +645,7 @@ int find_special_key(const char_u **const srcp, const size_t src_len, int *const
     return 0;
   }
 
-  src = *srcp;
+  src = (char_u *)(*srcp);
   if (src[0] != '<') {
     return 0;
   }
@@ -744,7 +753,7 @@ int find_special_key(const char_u **const srcp, const size_t src_len, int *const
         }
 
         *modp = modifiers;
-        *srcp = end_of_name;
+        *srcp = (char *)end_of_name;
         return key;
       }  // else { ELOG("unknown key: '%s'", src); }
     }
@@ -861,10 +870,9 @@ int get_mouse_button(int code, bool *is_click, bool *is_drag)
 /// @param[in]  from  What characters to replace.
 /// @param[in]  from_len  Length of the "from" argument.
 /// @param[out]  bufp  Location where results were saved in case of success (allocated).
-///                    if *bufp is non-NULL, it will be used directly. it is
-///                    assumed to be 128 bytes long (enough for transcoding LHS
-///                    of mapping)
-///                    Will be set to NULL in case of failure.
+///                    If `*bufp` is non-NULL, it will be used directly,
+///                    and is assumed to be 128 bytes long (enough for transcoding LHS of mapping),
+///                    and will be set to NULL in case of failure.
 /// @param[in]  flags  REPTERM_FROM_PART    see above
 ///                    REPTERM_DO_LT        also translate <lt>
 ///                    REPTERM_NO_SPECIAL   do not accept <key> notation
@@ -872,18 +880,18 @@ int get_mouse_button(int code, bool *is_click, bool *is_drag)
 /// @param[out]  did_simplify  set when some <C-H> code was simplied, unless it is NULL.
 /// @param[in]  cpo_flags  Relevant flags derived from p_cpo, see CPO_TO_CPO_FLAGS.
 ///
-/// @return  Pointer to an allocated memory, which is also saved to "bufp".
+/// @return  The same as what `*bufp` is set to.
 char *replace_termcodes(const char *const from, const size_t from_len, char **const bufp,
                         const int flags, bool *const did_simplify, const int cpo_flags)
   FUNC_ATTR_NONNULL_ARG(1, 3)
 {
   ssize_t i;
   size_t slen;
-  char_u key;
+  char key;
   size_t dlen = 0;
-  const char_u *src;
-  const char_u *const end = (char_u *)from + from_len - 1;
-  char_u *result;          // buffer for resulting string
+  const char *src;
+  const char *const end = from + from_len - 1;
+  char *result;          // buffer for resulting string
 
   const bool do_backslash = !(cpo_flags & FLAG_CPO_BSLASH);  // backslash is a special character
   const bool do_special = !(flags & REPTERM_NO_SPECIAL);
@@ -895,12 +903,12 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
   const size_t buf_len = allocated ? from_len * 6 + 1 : 128;
   result = allocated ? xmalloc(buf_len) : *bufp;
 
-  src = (char_u *)from;
+  src = from;
 
   // Check for #n at start only: function key n
   if ((flags & REPTERM_FROM_PART) && from_len > 1 && src[0] == '#'
       && ascii_isdigit(src[1])) {  // function key
-    result[dlen++] = K_SPECIAL;
+    result[dlen++] = (char)K_SPECIAL;
     result[dlen++] = 'k';
     if (src[1] == '0') {
       result[dlen++] = ';';     // #0 is F10 is "k;"
@@ -917,7 +925,7 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
     }
     // Check for special <> keycodes, like "<C-S-LeftMouse>"
     if (do_special && ((flags & REPTERM_DO_LT) || ((end - src) >= 3
-                                                   && STRNCMP(src, "<lt>", 4) != 0))) {
+                                                   && strncmp(src, "<lt>", 4) != 0))) {
       // Replace <SID> by K_SNR <script-nr> _.
       // (room: 5 * 6 = 30 bytes; needed: 3 + <nr> + 1 <= 14)
       if (end - src >= 4 && STRNICMP(src, "<SID>", 5) == 0) {
@@ -925,18 +933,18 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
           emsg(_(e_usingsid));
         } else {
           src += 5;
-          result[dlen++] = K_SPECIAL;
-          result[dlen++] = KS_EXTRA;
+          result[dlen++] = (char)K_SPECIAL;
+          result[dlen++] = (char)KS_EXTRA;
           result[dlen++] = KE_SNR;
-          snprintf((char *)result + dlen, buf_len - dlen, "%" PRId64,
+          snprintf(result + dlen, buf_len - dlen, "%" PRId64,
                    (int64_t)current_sctx.sc_sid);
-          dlen += STRLEN(result + dlen);
+          dlen += strlen(result + dlen);
           result[dlen++] = '_';
           continue;
         }
       }
 
-      slen = trans_special(&src, (size_t)(end - src) + 1, result + dlen,
+      slen = trans_special(&src, (size_t)(end - src) + 1, (char_u *)result + dlen,
                            FSK_KEYCODE | ((flags & REPTERM_NO_SIMPLIFY) ? 0 : FSK_SIMPLIFY),
                            true, did_simplify);
       if (slen) {
@@ -946,7 +954,8 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
     }
 
     if (do_special) {
-      char_u *p, *s, len;
+      char *p, *s;
+      int len;
 
       // Replace <Leader> by the value of "mapleader".
       // Replace <LocalLeader> by the value of "maplocalleader".
@@ -964,8 +973,8 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
 
       if (len != 0) {
         // Allow up to 8 * 6 characters for "mapleader".
-        if (p == NULL || *p == NUL || STRLEN(p) > 8 * 6) {
-          s = (char_u *)"\\";
+        if (p == NULL || *p == NUL || strlen(p) > 8 * 6) {
+          s = "\\";
         } else {
           s = p;
         }
@@ -996,9 +1005,9 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
     for (i = utfc_ptr2len_len((char *)src, (int)(end - src) + 1); i > 0; i--) {
       // If the character is K_SPECIAL, replace it with K_SPECIAL
       // KS_SPECIAL KE_FILLER.
-      if (*src == K_SPECIAL) {
-        result[dlen++] = K_SPECIAL;
-        result[dlen++] = KS_SPECIAL;
+      if (*src == (char)K_SPECIAL) {
+        result[dlen++] = (char)K_SPECIAL;
+        result[dlen++] = (char)KS_SPECIAL;
         result[dlen++] = KE_FILLER;
       } else {
         result[dlen++] = *src;
@@ -1050,7 +1059,7 @@ char *vim_strsave_escape_ks(char *p)
   // Need a buffer to hold up to three times as much.  Four in case of an
   // illegal utf-8 byte:
   // 0xc0 -> 0xc3 - 0x80 -> 0xc3 K_SPECIAL KS_SPECIAL KE_FILLER
-  char_u *res = xmalloc(STRLEN(p) * 4 + 1);
+  char_u *res = xmalloc(strlen(p) * 4 + 1);
   char_u *d = res;
   for (char_u *s = (char_u *)p; *s != NUL;) {
     if (s[0] == K_SPECIAL && s[1] != NUL && s[2] != NUL) {

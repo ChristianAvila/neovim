@@ -76,41 +76,56 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <limits.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <uv.h>
 
 #include "auto/config.h"
+#include "klib/kvec.h"
 #include "nvim/ascii.h"
+#include "nvim/autocmd.h"
 #include "nvim/buffer.h"
 #include "nvim/buffer_updates.h"
 #include "nvim/change.h"
 #include "nvim/cursor.h"
 #include "nvim/drawscreen.h"
 #include "nvim/edit.h"
+#include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
+#include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_getln.h"
 #include "nvim/extmark.h"
 #include "nvim/fileio.h"
 #include "nvim/fold.h"
 #include "nvim/garray.h"
 #include "nvim/getchar.h"
-#include "nvim/lib/kvec.h"
+#include "nvim/gettext.h"
+#include "nvim/globals.h"
+#include "nvim/highlight_defs.h"
+#include "nvim/macros.h"
 #include "nvim/mark.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/os/fs_defs.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/os/time.h"
-#include "nvim/os_unix.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"  // MAXLNUM
+#include "nvim/pos.h"
+#include "nvim/screen.h"
 #include "nvim/sha256.h"
 #include "nvim/state.h"
 #include "nvim/strings.h"
 #include "nvim/types.h"
 #include "nvim/undo.h"
+#include "nvim/undo_defs.h"
+#include "nvim/vim.h"
 
 /// Structure passed around between undofile functions.
 typedef struct {
@@ -558,7 +573,7 @@ int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, int re
   }
 
   if (size > 0) {
-    uep->ue_array = xmalloc(sizeof(char_u *) * (size_t)size);
+    uep->ue_array = xmalloc(sizeof(char *) * (size_t)size);
     linenr_T lnum;
     long i;
     for (i = 0, lnum = top + 1; i < size; i++) {
@@ -621,8 +636,8 @@ void u_compute_hash(buf_T *buf, char_u *hash)
   context_sha256_T ctx;
   sha256_start(&ctx);
   for (linenr_T lnum = 1; lnum <= buf->b_ml.ml_line_count; lnum++) {
-    char_u *p = ml_get_buf(buf, lnum, false);
-    sha256_update(&ctx, p, (uint32_t)(STRLEN(p) + 1));
+    char *p = ml_get_buf(buf, lnum, false);
+    sha256_update(&ctx, (char_u *)p, (uint32_t)(strlen(p) + 1));
   }
   sha256_finish(&ctx, hash);
 }
@@ -771,7 +786,7 @@ static bool serialize_header(bufinfo_T *bi, char_u *hash)
 
   // Write buffer-specific data.
   undo_write_bytes(bi, (uintmax_t)buf->b_ml.ml_line_count, 4);
-  size_t len = buf->b_u_line_ptr ? STRLEN(buf->b_u_line_ptr) : 0;
+  size_t len = buf->b_u_line_ptr ? strlen(buf->b_u_line_ptr) : 0;
   undo_write_bytes(bi, len, 4);
   if (len > 0 && !undo_write(bi, (char_u *)buf->b_u_line_ptr, len)) {
     return false;
@@ -1034,11 +1049,11 @@ static bool serialize_uep(bufinfo_T *bi, u_entry_T *uep)
   undo_write_bytes(bi, (uintmax_t)uep->ue_size, 4);
 
   for (size_t i = 0; i < (size_t)uep->ue_size; i++) {
-    size_t len = STRLEN(uep->ue_array[i]);
+    size_t len = strlen(uep->ue_array[i]);
     if (!undo_write_bytes(bi, len, 4)) {
       return false;
     }
-    if (len > 0 && !undo_write(bi, uep->ue_array[i], len)) {
+    if (len > 0 && !undo_write(bi, (char_u *)uep->ue_array[i], len)) {
       return false;
     }
   }
@@ -1064,7 +1079,7 @@ static u_entry_T *unserialize_uep(bufinfo_T *bi, bool *error, const char *file_n
       memset(array, 0, sizeof(char_u *) * (size_t)uep->ue_size);
     }
   }
-  uep->ue_array = array;
+  uep->ue_array = (char **)array;
 
   for (size_t i = 0; i < (size_t)uep->ue_size; i++) {
     int line_len = undo_read_4c(bi);
@@ -1327,9 +1342,9 @@ write_error:
 #ifdef HAVE_ACL
   if (buf->b_ffname != NULL) {
     // For systems that support ACL: get the ACL from the original file.
-    vim_acl_T acl = mch_get_acl((char_u *)buf->b_ffname);
-    mch_set_acl((char_u *)file_name, acl);
-    mch_free_acl(acl);
+    vim_acl_T acl = os_get_acl((char_u *)buf->b_ffname);
+    os_set_acl((char_u *)file_name, acl);
+    os_free_acl(acl);
   }
 #endif
 
@@ -1771,16 +1786,16 @@ void u_redo(int count)
 
 /// Undo and remove the branch from the undo tree.
 /// Also moves the cursor (as a "normal" undo would).
-bool u_undo_and_forget(int count)
+///
+/// @param do_buf_event If `true`, send the changedtick with the buffer updates
+bool u_undo_and_forget(int count, bool do_buf_event)
 {
   if (curbuf->b_u_synced == false) {
     u_sync(true);
     count = 1;
   }
   undo_undoes = true;
-  u_doit(count, true,
-         // Don't send nvim_buf_lines_event for u_undo_and_forget().
-         false);
+  u_doit(count, true, do_buf_event);
 
   if (curbuf->b_u_curhead == NULL) {
     // nothing was undone.
@@ -2283,7 +2298,7 @@ static void u_undoredo(int undo, bool do_buf_event)
         // line.
         long i;
         for (i = 0; i < newsize && i < oldsize; i++) {
-          if (STRCMP(uep->ue_array[i], ml_get(top + 1 + (linenr_T)i)) != 0) {
+          if (strcmp(uep->ue_array[i], ml_get(top + 1 + (linenr_T)i)) != 0) {
             break;
           }
         }
@@ -2307,7 +2322,7 @@ static void u_undoredo(int undo, bool do_buf_event)
       linenr_T lnum;
       for (lnum = bot - 1, i = oldsize; --i >= 0; lnum--) {
         // what can we do when we run out of memory?
-        newarray[i] = u_save_line(lnum);
+        newarray[i] = (char_u *)u_save_line(lnum);
         // remember we deleted the last line in the buffer, and a
         // dummy empty line will be inserted
         if (curbuf->b_ml.ml_line_count == 1) {
@@ -2327,9 +2342,9 @@ static void u_undoredo(int undo, bool do_buf_event)
         // If the file is empty, there is an empty line 1 that we
         // should get rid of, by replacing it with the new line
         if (empty_buffer && lnum == 0) {
-          ml_replace((linenr_T)1, (char *)uep->ue_array[i], true);
+          ml_replace((linenr_T)1, uep->ue_array[i], true);
         } else {
-          ml_append(lnum, (char *)uep->ue_array[i], (colnr_T)0, false);
+          ml_append(lnum, uep->ue_array[i], (colnr_T)0, false);
         }
         xfree(uep->ue_array[i]);
       }
@@ -2363,7 +2378,7 @@ static void u_undoredo(int undo, bool do_buf_event)
     u_newcount += newsize;
     u_oldcount += oldsize;
     uep->ue_size = oldsize;
-    uep->ue_array = newarray;
+    uep->ue_array = (char **)newarray;
     uep->ue_bot = top + newsize + 1;
 
     // insert this entry in front of the new entry list
@@ -2554,7 +2569,7 @@ static void u_undo_end(bool did_undo, bool absolute, bool quiet)
   if (uhp == NULL) {
     *msgbuf = NUL;
   } else {
-    undo_fmt_time(msgbuf, sizeof(msgbuf), uhp->uh_time);
+    undo_fmt_time((char *)msgbuf, sizeof(msgbuf), uhp->uh_time);
   }
 
   {
@@ -2579,21 +2594,25 @@ static void u_undo_end(bool did_undo, bool absolute, bool quiet)
 }
 
 /// Put the timestamp of an undo header in "buf[buflen]" in a nice format.
-void undo_fmt_time(char_u *buf, size_t buflen, time_t tt)
+void undo_fmt_time(char *buf, size_t buflen, time_t tt)
 {
   if (time(NULL) - tt >= 100) {
     struct tm curtime;
     os_localtime_r(&tt, &curtime);
+    size_t n;
     if (time(NULL) - tt < (60L * 60L * 12L)) {
       // within 12 hours
-      (void)strftime((char *)buf, buflen, "%H:%M:%S", &curtime);
+      n = strftime(buf, buflen, "%H:%M:%S", &curtime);
     } else {
       // longer ago
-      (void)strftime((char *)buf, buflen, "%Y/%m/%d %H:%M:%S", &curtime);
+      n = strftime(buf, buflen, "%Y/%m/%d %H:%M:%S", &curtime);
+    }
+    if (n == 0) {
+      buf[0] = NUL;
     }
   } else {
     int64_t seconds = time(NULL) - tt;
-    vim_snprintf((char *)buf, buflen,
+    vim_snprintf(buf, buflen,
                  NGETTEXT("%" PRId64 " second ago",
                           "%" PRId64 " seconds ago", (uint32_t)seconds),
                  seconds);
@@ -2635,15 +2654,15 @@ void ex_undolist(exarg_T *eap)
   while (uhp != NULL) {
     if (uhp->uh_prev.ptr == NULL && uhp->uh_walk != nomark
         && uhp->uh_walk != mark) {
-      vim_snprintf((char *)IObuff, IOSIZE, "%6ld %7d  ", uhp->uh_seq, changes);
-      undo_fmt_time(IObuff + STRLEN(IObuff), IOSIZE - STRLEN(IObuff), uhp->uh_time);
+      vim_snprintf(IObuff, IOSIZE, "%6ld %7d  ", uhp->uh_seq, changes);
+      undo_fmt_time(IObuff + strlen(IObuff), IOSIZE - strlen(IObuff), uhp->uh_time);
       if (uhp->uh_save_nr > 0) {
-        while (STRLEN(IObuff) < 33) {
+        while (strlen(IObuff) < 33) {
           STRCAT(IObuff, " ");
         }
-        vim_snprintf_add((char *)IObuff, IOSIZE, "  %3ld", uhp->uh_save_nr);
+        vim_snprintf_add(IObuff, IOSIZE, "  %3ld", uhp->uh_save_nr);
       }
-      GA_APPEND(char_u *, &ga, vim_strsave(IObuff));
+      GA_APPEND(char *, &ga, xstrdup(IObuff));
     }
 
     uhp->uh_walk = mark;
@@ -2713,9 +2732,8 @@ void ex_undojoin(exarg_T *eap)
   }
   if (get_undolevel(curbuf) < 0) {
     return;                 // no entries, nothing to do
-  } else {
-    curbuf->b_u_synced = false;  // Append next change to last entry
   }
+  curbuf->b_u_synced = false;  // Append next change to last entry
 }
 
 /// Called after writing or reloading the file and setting b_changed to false.
@@ -2744,7 +2762,7 @@ void u_find_first_changed(void)
   linenr_T lnum;
   for (lnum = 1; lnum < curbuf->b_ml.ml_line_count
        && lnum <= uep->ue_size; lnum++) {
-    if (STRCMP(ml_get_buf(curbuf, lnum, false), uep->ue_array[lnum - 1]) != 0) {
+    if (strcmp(ml_get_buf(curbuf, lnum, false), uep->ue_array[lnum - 1]) != 0) {
       clearpos(&(uhp->uh_cursor));
       uhp->uh_cursor.lnum = lnum;
       return;
@@ -2960,7 +2978,7 @@ void u_saveline(linenr_T lnum)
   } else {
     curbuf->b_u_line_colnr = 0;
   }
-  curbuf->b_u_line_ptr = (char *)u_save_line(lnum);
+  curbuf->b_u_line_ptr = u_save_line(lnum);
 }
 
 /// clear the line saved for the "U" command
@@ -2991,13 +3009,13 @@ void u_undoline(void)
     return;
   }
 
-  char_u *oldp = u_save_line(curbuf->b_u_line_lnum);
+  char *oldp = u_save_line(curbuf->b_u_line_lnum);
   ml_replace(curbuf->b_u_line_lnum, curbuf->b_u_line_ptr, true);
   changed_bytes(curbuf->b_u_line_lnum, 0);
-  extmark_splice_cols(curbuf, (int)curbuf->b_u_line_lnum - 1, 0, (colnr_T)STRLEN(oldp),
-                      (colnr_T)STRLEN(curbuf->b_u_line_ptr), kExtmarkUndo);
+  extmark_splice_cols(curbuf, (int)curbuf->b_u_line_lnum - 1, 0, (colnr_T)strlen(oldp),
+                      (colnr_T)strlen(curbuf->b_u_line_ptr), kExtmarkUndo);
   xfree(curbuf->b_u_line_ptr);
-  curbuf->b_u_line_ptr = (char *)oldp;
+  curbuf->b_u_line_ptr = oldp;
 
   colnr_T t = curbuf->b_u_line_colnr;
   if (curwin->w_cursor.lnum == curbuf->b_u_line_lnum) {
@@ -3025,7 +3043,7 @@ void u_blockfree(buf_T *buf)
 /// Allocate memory and copy curbuf line into it.
 ///
 /// @param lnum the line to copy
-static char_u *u_save_line(linenr_T lnum)
+static char *u_save_line(linenr_T lnum)
 {
   return u_save_line_buf(curbuf, lnum);
 }
@@ -3034,9 +3052,9 @@ static char_u *u_save_line(linenr_T lnum)
 ///
 /// @param lnum line to copy
 /// @param buf buffer to copy from
-static char_u *u_save_line_buf(buf_T *buf, linenr_T lnum)
+static char *u_save_line_buf(buf_T *buf, linenr_T lnum)
 {
-  return vim_strsave(ml_get_buf(buf, lnum, false));
+  return xstrdup(ml_get_buf(buf, lnum, false));
 }
 
 /// Check if the 'modified' flag is set, or 'ff' has changed (only need to

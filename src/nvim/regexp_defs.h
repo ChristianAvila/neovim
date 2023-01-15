@@ -1,13 +1,11 @@
-/*
- * NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE
- *
- * This is NOT the original regular expression code as written by Henry
- * Spencer.  This code has been modified specifically for use with Vim, and
- * should not be used apart from compiling Vim.  If you want a good regular
- * expression library, get the original code.
- *
- * NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE
- */
+// NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE
+//
+// This is NOT the original regular expression code as written by Henry
+// Spencer.  This code has been modified specifically for use with Vim, and
+// should not be used apart from compiling Vim.  If you want a good regular
+// expression library, get the original code.
+//
+// NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE
 
 #ifndef NVIM_REGEXP_DEFS_H
 #define NVIM_REGEXP_DEFS_H
@@ -17,18 +15,32 @@
 #include "nvim/pos.h"
 #include "nvim/types.h"
 
-/*
- * The number of sub-matches is limited to 10.
- * The first one (index 0) is the whole match, referenced with "\0".
- * The second one (index 1) is the first sub-match, referenced with "\1".
- * This goes up to the tenth (index 9), referenced with "\9".
- */
+/// Used for "magic_overruled".
+typedef enum {
+  OPTION_MAGIC_NOT_SET,  ///< p_magic not overruled
+  OPTION_MAGIC_ON,       ///< magic on inside regexp
+  OPTION_MAGIC_OFF,      ///< magic off inside regexp
+} optmagic_T;
+
+/// Magicness of a pattern, used by regexp code.
+/// The order and values matter:
+///  magic <= MAGIC_OFF includes MAGIC_NONE
+///  magic >= MAGIC_ON  includes MAGIC_ALL
+typedef enum {
+  MAGIC_NONE = 1,  ///< "\V" very unmagic
+  MAGIC_OFF = 2,   ///< "\M" or 'magic' off
+  MAGIC_ON = 3,    ///< "\m" or 'magic'
+  MAGIC_ALL = 4,   ///< "\v" very magic
+} magic_T;
+
+// The number of sub-matches is limited to 10.
+// The first one (index 0) is the whole match, referenced with "\0".
+// The second one (index 1) is the first sub-match, referenced with "\1".
+// This goes up to the tenth (index 9), referenced with "\9".
 #define NSUBEXP  10
 
-/*
- * In the NFA engine: how many braces are allowed.
- * TODO(RE): Use dynamic memory allocation instead of static, like here
- */
+// In the NFA engine: how many braces are allowed.
+// TODO(RE): Use dynamic memory allocation instead of static, like here
 #define NFA_MAX_BRACES 20
 
 // In the NFA engine: how many states are allowed.
@@ -55,17 +67,17 @@ typedef struct {
   regprog_T *regprog;
   lpos_T startpos[NSUBEXP];
   lpos_T endpos[NSUBEXP];
+
+  colnr_T rmm_matchcol;  ///< match start without "\zs"
   int rmm_ic;
   colnr_T rmm_maxcol;  /// when not zero: maximum column
 } regmmatch_T;
 
 #include "nvim/buffer_defs.h"
 
-/*
- * Structure returned by vim_regcomp() to pass on to vim_regexec().
- * This is the general structure. For the actual matcher, two specific
- * structures are used. See code below.
- */
+// Structure returned by vim_regcomp() to pass on to vim_regexec().
+// This is the general structure. For the actual matcher, two specific
+// structures are used. See code below.
 struct regprog {
   regengine_T *engine;
   unsigned regflags;
@@ -74,11 +86,9 @@ struct regprog {
   bool re_in_use;      ///< prog is being executed
 };
 
-/*
- * Structure used by the back track matcher.
- * These fields are only to be used in regexp.c!
- * See regexp.c for an explanation.
- */
+// Structure used by the back track matcher.
+// These fields are only to be used in regexp.c!
+// See regexp.c for an explanation.
 typedef struct {
   // These four members implement regprog_T.
   regengine_T *engine;
@@ -107,9 +117,7 @@ struct nfa_state {
   int val;
 };
 
-/*
- * Structure used by the NFA matcher.
- */
+// Structure used by the NFA matcher.
 typedef struct {
   // These four members implement regprog_T.
   regengine_T *engine;
@@ -127,29 +135,27 @@ typedef struct {
   int has_zend;                         // pattern contains \ze
   int has_backref;                      // pattern contains \1 .. \9
   int reghasz;
-  char_u *pattern;
+  char *pattern;
   int nsubexp;                          // number of ()
   int nstate;
   nfa_state_T state[1];                 // actually longer..
 } nfa_regprog_T;
 
-/*
- * Structure to be used for single-line matching.
- * Sub-match "no" starts at "startp[no]" and ends just before "endp[no]".
- * When there is no match, the pointer is NULL.
- */
+// Structure to be used for single-line matching.
+// Sub-match "no" starts at "startp[no]" and ends just before "endp[no]".
+// When there is no match, the pointer is NULL.
 typedef struct {
   regprog_T *regprog;
-  char_u *startp[NSUBEXP];
-  char_u *endp[NSUBEXP];
+  char *startp[NSUBEXP];
+  char *endp[NSUBEXP];
+
+  colnr_T rm_matchcol;  ///< match start without "\zs"
   bool rm_ic;
 } regmatch_T;
 
-/*
- * Structure used to store external references: "\z\(\)" to "\z\1".
- * Use a reference count to avoid the need to copy this around.  When it goes
- * from 1 to zero the matches need to be freed.
- */
+// Structure used to store external references: "\z\(\)" to "\z\1".
+// Use a reference count to avoid the need to copy this around.  When it goes
+// from 1 to zero the matches need to be freed.
 struct reg_extmatch {
   int16_t refcnt;
   char_u *matches[NSUBEXP];

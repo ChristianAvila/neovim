@@ -87,7 +87,7 @@ void hash_clear_all(hashtab_T *ht, unsigned int off)
 ///                  is changed in any way.
 hashitem_T *hash_find(const hashtab_T *const ht, const char *const key)
 {
-  return hash_lookup(ht, key, STRLEN(key), hash_hash((char_u *)key));
+  return hash_lookup(ht, key, strlen(key), hash_hash((char_u *)key));
 }
 
 /// Like hash_find, but key is not NUL-terminated
@@ -140,7 +140,7 @@ hashitem_T *hash_lookup(const hashtab_T *const ht, const char *const key, const 
   if (hi->hi_key == HI_KEY_REMOVED) {
     freeitem = hi;
   } else if ((hi->hi_hash == hash)
-             && (STRNCMP(hi->hi_key, key, key_len) == 0)
+             && (strncmp(hi->hi_key, key, key_len) == 0)
              && hi->hi_key[key_len] == NUL) {
     return hi;
   }
@@ -166,7 +166,7 @@ hashitem_T *hash_lookup(const hashtab_T *const ht, const char *const key, const 
 
     if ((hi->hi_hash == hash)
         && (hi->hi_key != HI_KEY_REMOVED)
-        && (STRNCMP(hi->hi_key, key, key_len) == 0)
+        && (strncmp(hi->hi_key, key, key_len) == 0)
         && hi->hi_key[key_len] == NUL) {
       return hi;
     }
@@ -194,22 +194,22 @@ void hash_debug_results(void)
 #endif  // ifdef HT_DEBUG
 }
 
-/// Add item for key "key" to hashtable "ht".
+/// Add (empty) item for key `key` to hashtable `ht`.
 ///
 /// @param key Pointer to the key for the new item. The key has to be contained
 ///            in the new item (@see hashitem_T). Must not be NULL.
 ///
 /// @return OK   if success.
 ///         FAIL if key already present
-int hash_add(hashtab_T *ht, char_u *key)
+int hash_add(hashtab_T *ht, char *key)
 {
-  hash_T hash = hash_hash(key);
-  hashitem_T *hi = hash_lookup(ht, (const char *)key, STRLEN(key), hash);
+  hash_T hash = hash_hash((char_u *)key);
+  hashitem_T *hi = hash_lookup(ht, key, strlen(key), hash);
   if (!HASHITEM_EMPTY(hi)) {
     internal_error("hash_add()");
     return FAIL;
   }
-  hash_add_item(ht, hi, key, hash);
+  hash_add_item(ht, hi, (char_u *)key, hash);
   return OK;
 }
 
@@ -223,10 +223,11 @@ int hash_add(hashtab_T *ht, char_u *key)
 void hash_add_item(hashtab_T *ht, hashitem_T *hi, char_u *key, hash_T hash)
 {
   ht->ht_used++;
+  ht->ht_changed++;
   if (hi->hi_key == NULL) {
     ht->ht_filled++;
   }
-  hi->hi_key = key;
+  hi->hi_key = (char *)key;
   hi->hi_hash = hash;
 
   // When the space gets low may resize the array.
@@ -242,6 +243,7 @@ void hash_add_item(hashtab_T *ht, hashitem_T *hi, char_u *key, hash_T hash)
 void hash_remove(hashtab_T *ht, hashitem_T *hi)
 {
   ht->ht_used--;
+  ht->ht_changed++;
   hi->hi_key = HI_KEY_REMOVED;
   hash_may_resize(ht, 0);
 }
@@ -265,7 +267,7 @@ void hash_unlock(hashtab_T *ht)
   hash_may_resize(ht, 0);
 }
 
-/// Resize hastable (new size can be given or automatically computed).
+/// Resize hashtable (new size can be given or automatically computed).
 ///
 /// @param minitems Minimum number of items the new table should hold.
 ///                 If zero, new size will depend on currently used items:
@@ -290,6 +292,7 @@ static void hash_may_resize(hashtab_T *ht, size_t minitems)
 #endif  // ifdef HT_DEBUG
 
   size_t minsize;
+  const size_t oldsize = ht->ht_mask + 1;
   if (minitems == 0) {
     // Return quickly for small tables with at least two NULL items.
     // items are required for the lookup to decide a key isn't there.
@@ -302,7 +305,6 @@ static void hash_may_resize(hashtab_T *ht, size_t minitems)
     // removed items, so that they get cleaned up).
     // Shrink the array when it's less than 1/5 full. When growing it is
     // at least 1/4 full (avoids repeated grow-shrink operations)
-    size_t oldsize = ht->ht_mask + 1;
     if ((ht->ht_filled * 3 < oldsize * 2) && (ht->ht_used > oldsize / 5)) {
       return;
     }
@@ -333,6 +335,13 @@ static void hash_may_resize(hashtab_T *ht, size_t minitems)
   }
 
   bool newarray_is_small = newsize == HT_INIT_SIZE;
+
+  if (!newarray_is_small && newsize == oldsize && ht->ht_filled * 3 < oldsize * 2) {
+    // The hashtab is already at the desired size, and there are not too
+    // many removed items, bail out.
+    return;
+  }
+
   bool keep_smallarray = newarray_is_small
                          && ht->ht_array == ht->ht_smallarray;
 
@@ -384,6 +393,7 @@ static void hash_may_resize(hashtab_T *ht, size_t minitems)
   ht->ht_array = newarray;
   ht->ht_mask = newmask;
   ht->ht_filled = ht->ht_used;
+  ht->ht_changed++;
 }
 
 #define HASH_CYCLE_BODY(hash, p) \
@@ -449,5 +459,5 @@ hash_T hash_hash_len(const char *key, const size_t len)
 const char_u *_hash_key_removed(void)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  return HI_KEY_REMOVED;
+  return (char_u *)HI_KEY_REMOVED;
 }

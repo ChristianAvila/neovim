@@ -3,10 +3,15 @@
 
 #include <stdbool.h>
 
+#include "klib/kvec.h"
 #include "nvim/autocmd.h"
 #include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_eval_defs.h"
+#include "nvim/garray.h"
+#include "nvim/pos.h"
+#include "nvim/types.h"
 
 typedef enum {
   ETYPE_TOP,       ///< toplevel
@@ -74,6 +79,7 @@ typedef struct scriptitem_S {
 /// Growarray to store info about already sourced scripts.
 extern garray_T script_items;
 #define SCRIPT_ITEM(id) (((scriptitem_T *)script_items.ga_data)[(id) - 1])
+#define SCRIPT_ID_VALID(id) ((id) > 0 && (id) <= script_items.ga_len)
 
 typedef void (*DoInRuntimepathCB)(char *, void *);
 

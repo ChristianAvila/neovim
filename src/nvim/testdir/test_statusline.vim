@@ -565,4 +565,45 @@ func Test_statusline_highlight_truncate()
   call delete('XTest_statusline')
 endfunc
 
+func Test_statusline_showcmd()
+  CheckScreendump
+
+  let lines =<< trim END
+    func MyStatusLine()
+      return '%S'
+    endfunc
+
+    set laststatus=2
+    set statusline=%!MyStatusLine()
+    set showcmdloc=statusline
+    call setline(1, ['a', 'b', 'c'])
+    set foldopen+=jump
+    1,2fold
+    3
+  END
+  call writefile(lines, 'XTest_statusline', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline', {'rows': 6})
+
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_1', {})
+
+  " typing "gg" should open the fold
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_2', {})
+
+  call term_sendkeys(buf, "\<C-V>Gl")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_3', {})
+
+  call term_sendkeys(buf, "\<Esc>1234")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_4', {})
+
+  call term_sendkeys(buf, "\<Esc>:set statusline=\<CR>")
+  call term_sendkeys(buf, ":\<CR>")
+  call term_sendkeys(buf, "1234")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_5', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
 " vim: shiftwidth=2 sts=2 expandtab

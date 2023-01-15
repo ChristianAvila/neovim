@@ -43,19 +43,26 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
-#include "nvim/ascii.h"
 #include "nvim/assert.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/fileio.h"
+#include "nvim/gettext.h"
+#include "nvim/globals.h"
+#include "nvim/macros.h"
 #include "nvim/memfile.h"
+#include "nvim/memfile_defs.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
+#include "nvim/os/fs_defs.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
-#include "nvim/os_unix.h"
 #include "nvim/path.h"
+#include "nvim/pos.h"
+#include "nvim/types.h"
 #include "nvim/vim.h"
 
 #define MEMFILE_PAGE_SIZE 4096       /// default page size
@@ -170,7 +177,7 @@ void mf_close(memfile_T *mfp, bool del_file)
     emsg(_(e_swapclose));
   }
   if (del_file && mfp->mf_fname != NULL) {
-    os_remove((char *)mfp->mf_fname);
+    os_remove(mfp->mf_fname);
   }
 
   // free entries in used list
@@ -210,7 +217,7 @@ void mf_close_file(buf_T *buf, bool getlines)
   mfp->mf_fd = -1;
 
   if (mfp->mf_fname != NULL) {
-    os_remove((char *)mfp->mf_fname);    // delete the swap file
+    os_remove(mfp->mf_fname);    // delete the swap file
     mf_free_fnames(mfp);
   }
 }
@@ -751,8 +758,8 @@ void mf_free_fnames(memfile_T *mfp)
 /// name so we must work out the full path name.
 void mf_set_fnames(memfile_T *mfp, char *fname)
 {
-  mfp->mf_fname = (char_u *)fname;
-  mfp->mf_ffname = (char_u *)FullName_save((char *)mfp->mf_fname, false);
+  mfp->mf_fname = fname;
+  mfp->mf_ffname = FullName_save(mfp->mf_fname, false);
 }
 
 /// Make name of memfile's swapfile a full path.
@@ -760,11 +767,13 @@ void mf_set_fnames(memfile_T *mfp, char *fname)
 /// Used before doing a :cd
 void mf_fullname(memfile_T *mfp)
 {
-  if (mfp != NULL && mfp->mf_fname != NULL && mfp->mf_ffname != NULL) {
-    xfree(mfp->mf_fname);
-    mfp->mf_fname = mfp->mf_ffname;
-    mfp->mf_ffname = NULL;
+  if (mfp == NULL || mfp->mf_fname == NULL || mfp->mf_ffname == NULL) {
+    return;
   }
+
+  xfree(mfp->mf_fname);
+  mfp->mf_fname = mfp->mf_ffname;
+  mfp->mf_ffname = NULL;
 }
 
 /// Return true if there are any translations pending for memfile.
@@ -789,7 +798,7 @@ static bool mf_do_open(memfile_T *mfp, char *fname, int flags)
   /// exist yet. If there is a symbolic link, this is most likely an attack.
   FileInfo file_info;
   if ((flags & O_CREAT)
-      && os_fileinfo_link((char *)mfp->mf_fname, &file_info)) {
+      && os_fileinfo_link(mfp->mf_fname, &file_info)) {
     mfp->mf_fd = -1;
     emsg(_("E300: Swap file already exists (symlink attack?)"));
   } else {
@@ -815,8 +824,10 @@ static bool mf_do_open(memfile_T *mfp, char *fname, int flags)
 /// The number of buckets in the hashtable is increased by a factor of
 /// MHT_GROWTH_FACTOR when the average number of items per bucket
 /// exceeds 2 ^ MHT_LOG_LOAD_FACTOR.
-#define MHT_LOG_LOAD_FACTOR 6
-#define MHT_GROWTH_FACTOR   2   // must be a power of two
+enum {
+  MHT_LOG_LOAD_FACTOR = 6,
+  MHT_GROWTH_FACTOR = 2,  // must be a power of two
+};
 
 /// Initialize an empty hash table.
 static void mf_hash_init(mf_hashtab_T *mht)

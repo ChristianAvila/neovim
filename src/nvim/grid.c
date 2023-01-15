@@ -11,9 +11,19 @@
 //
 // The grid_*() functions write to the screen and handle updating grid->lines[].
 
+#include <assert.h>
+#include <limits.h>
+#include <stdlib.h>
+
 #include "nvim/arabic.h"
+#include "nvim/buffer_defs.h"
+#include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/highlight.h"
+#include "nvim/log.h"
+#include "nvim/message.h"
+#include "nvim/option_defs.h"
+#include "nvim/types.h"
 #include "nvim/ui.h"
 #include "nvim/vim.h"
 
@@ -46,14 +56,14 @@ void grid_adjust(ScreenGrid **grid, int *row_off, int *col_off)
 }
 
 /// Put a unicode char, and up to MAX_MCO composing chars, in a screen cell.
-int schar_from_cc(char_u *p, int c, int u8cc[MAX_MCO])
+int schar_from_cc(char *p, int c, int u8cc[MAX_MCO])
 {
-  int len = utf_char2bytes(c, (char *)p);
+  int len = utf_char2bytes(c, p);
   for (int i = 0; i < MAX_MCO; i++) {
     if (u8cc[i] == 0) {
       break;
     }
-    len += utf_char2bytes(u8cc[i], (char *)p + len);
+    len += utf_char2bytes(u8cc[i], p + len);
   }
   p[len] = 0;
   return len;
@@ -130,7 +140,7 @@ void grid_putchar(ScreenGrid *grid, int c, int row, int col, int attr)
 
 /// get a single character directly from grid.chars into "bytes[]".
 /// Also return its attribute in *attrp;
-void grid_getbytes(ScreenGrid *grid, int row, int col, char_u *bytes, int *attrp)
+void grid_getbytes(ScreenGrid *grid, int row, int col, char *bytes, int *attrp)
 {
   size_t off;
 
@@ -171,11 +181,11 @@ void grid_puts_line_start(ScreenGrid *grid, int row)
   put_dirty_grid = grid;
 }
 
-void grid_put_schar(ScreenGrid *grid, int row, int col, char_u *schar, int attr)
+void grid_put_schar(ScreenGrid *grid, int row, int col, char *schar, int attr)
 {
   assert(put_dirty_row == row);
   size_t off = grid->line_offset[row] + (size_t)col;
-  if (grid->attrs[off] != attr || schar_cmp(grid->chars[off], schar)) {
+  if (grid->attrs[off] != attr || schar_cmp(grid->chars[off], schar) || rdb_flags & RDB_NODELTA) {
     schar_copy(grid->chars[off], schar);
     grid->attrs[off] = attr;
 
@@ -243,7 +253,7 @@ void grid_puts_len(ScreenGrid *grid, char *text, int textlen, int row, int col, 
       ? utfc_ptr2len_len(ptr, (int)((text + len) - ptr))
       : utfc_ptr2len(ptr);
     u8c = len >= 0
-      ? utfc_ptr2char_len((char_u *)ptr, u8cc, (int)((text + len) - ptr))
+      ? utfc_ptr2char_len(ptr, u8cc, (int)((text + len) - ptr))
       : utfc_ptr2char(ptr, u8cc);
     mbyte_cells = utf_char2cells(u8c);
     if (p_arshape && !p_tbidi && ARABIC_CHAR(u8c)) {
@@ -254,7 +264,7 @@ void grid_puts_len(ScreenGrid *grid, char *text, int textlen, int row, int col, 
         nc1 = NUL;
       } else {
         nc = len >= 0
-          ? utfc_ptr2char_len((char_u *)ptr + mbyte_blen, pcc,
+          ? utfc_ptr2char_len(ptr + mbyte_blen, pcc,
                               (int)((text + len) - ptr - mbyte_blen))
           : utfc_ptr2char(ptr + mbyte_blen, pcc);
         nc1 = pcc[0];
@@ -280,7 +290,8 @@ void grid_puts_len(ScreenGrid *grid, char *text, int textlen, int row, int col, 
     need_redraw = schar_cmp(grid->chars[off], buf)
                   || (mbyte_cells == 2 && grid->chars[off + 1][0] != 0)
                   || grid->attrs[off] != attr
-                  || exmode_active;
+                  || exmode_active
+                  || rdb_flags & RDB_NODELTA;
 
     if (need_redraw) {
       // When at the end of the text and overwriting a two-cell
@@ -412,8 +423,7 @@ void grid_fill(ScreenGrid *grid, int start_row, int end_row, int start_col, int 
     size_t lineoff = grid->line_offset[row];
     for (col = start_col; col < end_col; col++) {
       size_t off = lineoff + (size_t)col;
-      if (schar_cmp(grid->chars[off], sc)
-          || grid->attrs[off] != attr) {
+      if (schar_cmp(grid->chars[off], sc) || grid->attrs[off] != attr || rdb_flags & RDB_NODELTA) {
         schar_copy(grid->chars[off], sc);
         grid->attrs[off] = attr;
         if (dirty_first == INT_MAX) {
@@ -605,7 +615,8 @@ void grid_put_linebuf(ScreenGrid *grid, int row, int coloff, int endcol, int cle
     while (col < clear_width) {
       if (grid->chars[off_to][0] != ' '
           || grid->chars[off_to][1] != NUL
-          || grid->attrs[off_to] != bg_attr) {
+          || grid->attrs[off_to] != bg_attr
+          || rdb_flags & RDB_NODELTA) {
         grid->chars[off_to][0] = ' ';
         grid->chars[off_to][1] = NUL;
         grid->attrs[off_to] = bg_attr;

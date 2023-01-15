@@ -1,5 +1,23 @@
 " Tests for :help
 
+source check.vim
+source vim9.vim
+
+func SetUp()
+  let s:vimruntime = $VIMRUNTIME
+  let s:runtimepath = &runtimepath
+  " Set $VIMRUNTIME to $BUILD_DIR/runtime and remove the original $VIMRUNTIME
+  " path from &runtimepath so that ":h local-additions" won't pick up builtin
+  " help files.
+  let $VIMRUNTIME = expand($BUILD_DIR) .. '/runtime'
+  set runtimepath-=../../../runtime
+endfunc
+
+func TearDown()
+  let $VIMRUNTIME = s:vimruntime
+  let &runtimepath = s:runtimepath
+endfunc
+
 func Test_help_restore_snapshot()
   help
   set buftype=
@@ -79,16 +97,42 @@ func Test_help_local_additions()
   call writefile(['*mydoc-ext.txt* my extended awesome doc'], 'Xruntime/doc/mydoc-ext.txt')
   let rtp_save = &rtp
   set rtp+=./Xruntime
-  help
-  1
-  call search('mydoc.txt')
-  call assert_equal('|mydoc.txt| my awesome doc', getline('.'))
-  1
-  call search('mydoc-ext.txt')
-  call assert_equal('|mydoc-ext.txt| my extended awesome doc', getline('.'))
+  help local-additions
+  let lines = getline(line(".") + 1, search("^$") - 1)
+  call assert_equal([
+  \ '|mydoc-ext.txt| my extended awesome doc',
+  \ '|mydoc.txt| my awesome doc'
+  \ ], lines)
+  call delete('Xruntime/doc/mydoc-ext.txt')
+  close
+
+  call mkdir('Xruntime-ja/doc', 'p')
+  call writefile(["local-additions\thelp.jax\t/*local-additions*"], 'Xruntime-ja/doc/tags-ja')
+  call writefile(['*help.txt* This is jax file', '',
+  \ 'LOCAL ADDITIONS: *local-additions*', ''], 'Xruntime-ja/doc/help.jax')
+  call writefile(['*work.txt* This is jax file'], 'Xruntime-ja/doc/work.jax')
+  call writefile(['*work2.txt* This is jax file'], 'Xruntime-ja/doc/work2.jax')
+  set rtp+=./Xruntime-ja
+
+  help local-additions@en
+  let lines = getline(line(".") + 1, search("^$") - 1)
+  call assert_equal([
+  \ '|mydoc.txt| my awesome doc'
+  \ ], lines)
+  close
+
+  help local-additions@ja
+  let lines = getline(line(".") + 1, search("^$") - 1)
+  call assert_equal([
+  \ '|mydoc.txt| my awesome doc',
+  \ '|help.txt| This is jax file',
+  \ '|work.txt| This is jax file',
+  \ '|work2.txt| This is jax file',
+  \ ], lines)
   close
 
   call delete('Xruntime', 'rf')
+  call delete('Xruntime-ja', 'rf')
   let &rtp = rtp_save
 endfunc
 
@@ -98,6 +142,7 @@ func Test_help_completion()
 endfunc
 
 " Test for the :helptags command
+" NOTE: if you run tests as root this will fail.  Don't run tests as root!
 func Test_helptag_cmd()
   call mkdir('Xdir/a/doc', 'p')
 
@@ -111,28 +156,12 @@ func Test_helptag_cmd()
   call assert_equal(["help-tags\ttags\t1"], readfile('Xdir/tags'))
   call delete('Xdir/tags')
 
-  " The following tests fail on FreeBSD for some reason
-  if has('unix') && !has('bsd')
-    " Read-only tags file
-    call mkdir('Xdir/doc', 'p')
-    call writefile([''], 'Xdir/doc/tags')
-    call writefile([], 'Xdir/doc/sample.txt')
-    call setfperm('Xdir/doc/tags', 'r-xr--r--')
-    call assert_fails('helptags Xdir/doc', 'E152:', getfperm('Xdir/doc/tags'))
-
-    let rtp = &rtp
-    let &rtp = 'Xdir'
-    helptags ALL
-    let &rtp = rtp
-
-    call delete('Xdir/doc/tags')
-
-    " No permission to read the help file
-    call setfperm('Xdir/a/doc/sample.txt', '-w-------')
-    call assert_fails('helptags Xdir', 'E153:', getfperm('Xdir/a/doc/sample.txt'))
-    call delete('Xdir/a/doc/sample.txt')
-    call delete('Xdir/tags')
-  endif
+  " Test parsing tags
+  call writefile(['*tag1*', 'Example: >', '  *notag*', 'Example end: *tag2*'],
+    \ 'Xdir/a/doc/sample.txt')
+  helptags Xdir
+  call assert_equal(["tag1\ta/doc/sample.txt\t/*tag1*",
+                  \  "tag2\ta/doc/sample.txt\t/*tag2*"], readfile('Xdir/tags'))
 
   " Duplicate tags in the help file
   call writefile(['*tag1*', '*tag1*', '*tag2*'], 'Xdir/a/doc/sample.txt')
@@ -141,12 +170,59 @@ func Test_helptag_cmd()
   call delete('Xdir', 'rf')
 endfunc
 
+func Test_helptag_cmd_readonly()
+  CheckUnix
+  CheckNotRoot
+
+  " Read-only tags file
+  call mkdir('Xdir/doc', 'p')
+  call writefile([''], 'Xdir/doc/tags')
+  call writefile([], 'Xdir/doc/sample.txt')
+  call setfperm('Xdir/doc/tags', 'r-xr--r--')
+  call assert_fails('helptags Xdir/doc', 'E152:', getfperm('Xdir/doc/tags'))
+
+  let rtp = &rtp
+  let &rtp = 'Xdir'
+  helptags ALL
+  let &rtp = rtp
+
+  call delete('Xdir/doc/tags')
+
+  " No permission to read the help file
+  call mkdir('Xdir/b/doc', 'p')
+  call writefile([], 'Xdir/b/doc/sample.txt')
+  call setfperm('Xdir/b/doc/sample.txt', '-w-------')
+  call assert_fails('helptags Xdir', 'E153:', getfperm('Xdir/b/doc/sample.txt'))
+  call delete('Xdir', 'rf')
+endfunc
+
+" Test for setting the 'helpheight' option in the help window
+func Test_help_window_height()
+  let &cmdheight = &lines - 23
+  set helpheight=10
+  help
+  set helpheight=14
+  call assert_equal(14, winheight(0))
+  set helpheight& cmdheight=1
+  close
+endfunc
+
 func Test_help_long_argument()
   try
     exe 'help \%' .. repeat('0', 1021)
   catch
     call assert_match("E149:", v:exception)
   endtry
+endfunc
+
+func Test_help_using_visual_match()
+  let lines =<< trim END
+      call setline(1, ' ')
+      /^
+      exe "normal \<C-V>\<C-V>"
+      h5\%V]
+  END
+  call CheckScriptFailure(lines, 'E149:')
 endfunc
 
 

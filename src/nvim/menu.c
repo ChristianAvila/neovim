@@ -5,29 +5,40 @@
 // GUI/Motif support by Robert Webb
 
 #include <assert.h>
-#include <inttypes.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
+#include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/garray.h"
 #include "nvim/getchar.h"
+#include "nvim/gettext.h"
+#include "nvim/globals.h"
+#include "nvim/highlight_defs.h"
 #include "nvim/keycodes.h"
+#include "nvim/macros.h"
+#include "nvim/mbyte.h"
 #include "nvim/memory.h"
 #include "nvim/menu.h"
+#include "nvim/menu_defs.h"
 #include "nvim/message.h"
+#include "nvim/option_defs.h"
 #include "nvim/popupmenu.h"
-#include "nvim/screen.h"
+#include "nvim/pos.h"
 #include "nvim/state.h"
 #include "nvim/strings.h"
+#include "nvim/types.h"
 #include "nvim/ui.h"
+#include "nvim/undo_defs.h"
 #include "nvim/vim.h"
-#include "nvim/window.h"
 
 #define MENUDEPTH   10          // maximum depth of menus
 
@@ -45,7 +56,7 @@ static char e_nomenu[] = N_("E329: No menu \"%s\"");
 static bool menu_is_winbar(const char *const name)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
-  return (STRNCMP(name, "WinBar", 6) == 0);
+  return (strncmp(name, "WinBar", 6) == 0);
 }
 
 static vimmenu_T **get_root_menu(const char *const name)
@@ -77,17 +88,17 @@ void ex_menu(exarg_T *eap)
   arg = eap->arg;
 
   for (;;) {
-    if (STRNCMP(arg, "<script>", 8) == 0) {
+    if (strncmp(arg, "<script>", 8) == 0) {
       noremap = REMAP_SCRIPT;
       arg = skipwhite(arg + 8);
       continue;
     }
-    if (STRNCMP(arg, "<silent>", 8) == 0) {
+    if (strncmp(arg, "<silent>", 8) == 0) {
       silent = true;
       arg = skipwhite(arg + 8);
       continue;
     }
-    if (STRNCMP(arg, "<special>", 9) == 0) {
+    if (strncmp(arg, "<special>", 9) == 0) {
       // Ignore obsolete "<special>" modifier.
       arg = skipwhite(arg + 9);
       continue;
@@ -97,7 +108,7 @@ void ex_menu(exarg_T *eap)
 
   // Locate an optional "icon=filename" argument
   // TODO(nvim): Currently this is only parsed. Should expose it to UIs.
-  if (STRNCMP(arg, "icon=", 5) == 0) {
+  if (strncmp(arg, "icon=", 5) == 0) {
     arg += 5;
     while (*arg != NUL && *arg != ' ') {
       if (*arg == '\\') {
@@ -140,10 +151,10 @@ void ex_menu(exarg_T *eap)
   pri_tab[MENUDEPTH] = -1;              // mark end of the table
 
   // Check for "disable" or "enable" argument.
-  if (STRNCMP(arg, "enable", 6) == 0 && ascii_iswhite(arg[6])) {
+  if (strncmp(arg, "enable", 6) == 0 && ascii_iswhite(arg[6])) {
     enable = kTrue;
     arg = skipwhite(arg + 6);
-  } else if (STRNCMP(arg, "disable", 7) == 0 && ascii_iswhite(arg[7])) {
+  } else if (strncmp(arg, "disable", 7) == 0 && ascii_iswhite(arg[7])) {
     enable = kFalse;
     arg = skipwhite(arg + 7);
   }
@@ -177,7 +188,7 @@ void ex_menu(exarg_T *eap)
     // Change sensitivity of the menu.
     // For the PopUp menu, remove a menu for each mode separately.
     // Careful: menu_enable_recurse() changes menu_path.
-    if (STRCMP(menu_path, "*") == 0) {          // meaning: do all menus
+    if (strcmp(menu_path, "*") == 0) {          // meaning: do all menus
       menu_path = "";
     }
 
@@ -193,7 +204,7 @@ void ex_menu(exarg_T *eap)
     menu_enable_recurse(*root_menu_ptr, menu_path, modes, enable);
   } else if (unmenu) {
     // Delete menu(s).
-    if (STRCMP(menu_path, "*") == 0) {          // meaning: remove all menus
+    if (strcmp(menu_path, "*") == 0) {          // meaning: remove all menus
       menu_path = "";
     }
 
@@ -220,7 +231,7 @@ void ex_menu(exarg_T *eap)
       map_buf = NULL;  // Menu tips are plain text.
     } else {
       map_buf = NULL;
-      map_to = replace_termcodes(map_to, STRLEN(map_to), &map_buf,
+      map_to = replace_termcodes(map_to, strlen(map_to), &map_buf,
                                  REPTERM_DO_LT, NULL, CPO_TO_CPO_FLAGS);
     }
     menuarg.modes = modes;
@@ -286,7 +297,7 @@ static int add_menu_path(const char *const menu_path, vimmenu_T *menuarg, const 
     // Get name of this element in the menu hierarchy, and the simplified
     // name (without mnemonic and accelerator text).
     next_name = menu_name_skip(name);
-    map_to = menutrans_lookup(name, (int)STRLEN(name));
+    map_to = menutrans_lookup(name, (int)strlen(name));
     if (map_to != NULL) {
       en_name = name;
       name = map_to;
@@ -424,7 +435,7 @@ static int add_menu_path(const char *const menu_path, vimmenu_T *menuarg, const 
         }
 
         if (c != 0) {
-          menu->strings[i] = xmalloc(STRLEN(call_data) + 5);
+          menu->strings[i] = xmalloc(strlen(call_data) + 5);
           menu->strings[i][0] = c;
           if (d == 0) {
             STRCPY(menu->strings[i] + 1, call_data);
@@ -433,7 +444,7 @@ static int add_menu_path(const char *const menu_path, vimmenu_T *menuarg, const 
             STRCPY(menu->strings[i] + 2, call_data);
           }
           if (c == Ctrl_C) {
-            int len = (int)STRLEN(menu->strings[i]);
+            int len = (int)strlen(menu->strings[i]);
 
             menu->strings[i][len] = Ctrl_BSL;
             menu->strings[i][len + 1] = Ctrl_G;
@@ -685,8 +696,7 @@ static dict_T *menu_get_recursive(const vimmenu_T *menu, int modes)
       if ((menu->modes & modes & (1 << bit)) != 0) {
         dict_T *impl = tv_dict_alloc();
         tv_dict_add_allocated_str(impl, S_LEN("rhs"),
-                                  str2special_save(menu->strings[bit],
-                                                   false, false));
+                                  str2special_save(menu->strings[bit], false, false));
         tv_dict_add_nr(impl, S_LEN("silent"), menu->silent[bit]);
         tv_dict_add_nr(impl, S_LEN("enabled"),
                        (menu->enabled & (1 << bit)) ? 1 : 0);
@@ -906,10 +916,10 @@ char *set_context_in_menu_cmd(expand_T *xp, const char *cmd, char *arg, bool for
   }
 
   if (!ascii_iswhite(*p)) {
-    if (STRNCMP(arg, "enable", 6) == 0
+    if (strncmp(arg, "enable", 6) == 0
         && (arg[6] == NUL || ascii_iswhite(arg[6]))) {
       p = arg + 6;
-    } else if (STRNCMP(arg, "disable", 7) == 0
+    } else if (strncmp(arg, "disable", 7) == 0
                && (arg[7] == NUL || ascii_iswhite(arg[7]))) {
       p = arg + 7;
     } else {
@@ -950,7 +960,7 @@ char *set_context_in_menu_cmd(expand_T *xp, const char *cmd, char *arg, bool for
     if (after_dot > arg) {
       size_t path_len = (size_t)(after_dot - arg);
       path_name = xmalloc(path_len);
-      STRLCPY(path_name, arg, path_len);
+      xstrlcpy(path_name, arg, path_len);
     }
     name = path_name;
     while (name != NULL && *name) {
@@ -1054,7 +1064,7 @@ char *get_menu_names(expand_T *xp, int idx)
   while (menu != NULL
          && (menu_is_hidden(menu->dname)
              || (expand_emenu && menu_is_separator(menu->dname))
-             || menu->dname[STRLEN(menu->dname) - 1] == '.')) {
+             || menu->dname[strlen(menu->dname) - 1] == '.')) {
     menu = menu->next;
   }
 
@@ -1065,9 +1075,9 @@ char *get_menu_names(expand_T *xp, int idx)
   if (menu->modes & expand_modes) {
     if (menu->children != NULL) {
       if (should_advance) {
-        STRLCPY(tbuffer, menu->en_dname, TBUFFER_LEN);
+        xstrlcpy(tbuffer, menu->en_dname, TBUFFER_LEN);
       } else {
-        STRLCPY(tbuffer, menu->dname,  TBUFFER_LEN);
+        xstrlcpy(tbuffer, menu->dname,  TBUFFER_LEN);
         if (menu->en_dname == NULL) {
           should_advance = true;
         }
@@ -1276,7 +1286,7 @@ static char *get_menu_mode_str(int modes)
 // Returns the name in allocated memory.
 static char *popup_mode_name(char *name, int idx)
 {
-  size_t len = STRLEN(name);
+  size_t len = strlen(name);
   assert(len >= 4);
 
   char *mode_chars = menu_mode_chars[idx];
@@ -1328,7 +1338,7 @@ static char *menu_text(const char *str, int *mnemonic, char **actext)
         break;
       }
       if (mnemonic != NULL && p[1] != '&') {
-        *mnemonic = (char_u)p[1];
+        *mnemonic = (uint8_t)p[1];
       }
       STRMOVE(p, p + 1);
       p = p + 1;
@@ -1351,21 +1361,21 @@ bool menu_is_menubar(const char *const name)
 bool menu_is_popup(const char *const name)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
-  return STRNCMP(name, "PopUp", 5) == 0;
+  return strncmp(name, "PopUp", 5) == 0;
 }
 
 // Return true if "name" is a toolbar menu name.
 bool menu_is_toolbar(const char *const name)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
-  return STRNCMP(name, "ToolBar", 7) == 0;
+  return strncmp(name, "ToolBar", 7) == 0;
 }
 
 /// Return true if the name is a menu separator identifier: Starts and ends
 /// with '-'
 int menu_is_separator(char *name)
 {
-  return name[0] == '-' && name[STRLEN(name) - 1] == '-';
+  return name[0] == '-' && name[strlen(name) - 1] == '-';
 }
 
 /// True if a popup menu or starts with \ref MNU_HIDDEN_CHAR
@@ -1433,15 +1443,17 @@ void show_popupmenu(void)
   vimmenu_T *menu;
 
   for (menu = root_menu; menu != NULL; menu = menu->next) {
-    if (STRNCMP("PopUp", menu->name, 5) == 0 && STRNCMP(menu->name + 5, mode, mode_len) == 0) {
+    if (strncmp("PopUp", menu->name, 5) == 0 && strncmp(menu->name + 5, mode, mode_len) == 0) {
       break;
     }
   }
 
   // Only show a popup when it is defined and has entries
-  if (menu != NULL && menu->children != NULL) {
-    pum_show_popupmenu(menu);
+  if (menu == NULL || menu->children == NULL) {
+    return;
   }
+
+  pum_show_popupmenu(menu);
 }
 
 /// Execute "menu".  Use by ":emenu" and the window toolbar.
@@ -1521,7 +1533,7 @@ void execute_menu(const exarg_T *eap, vimmenu_T *menu, int mode_idx)
 
       ex_normal_busy++;
       if (save_current_state(&save_state)) {
-        exec_normal_cmd((char_u *)menu->strings[idx], menu->noremap[idx],
+        exec_normal_cmd(menu->strings[idx], menu->noremap[idx],
                         menu->silent[idx]);
       }
       restore_current_state(&save_state);
@@ -1717,7 +1729,7 @@ void ex_menutranslate(exarg_T *eap)
   }
 
   // ":menutrans clear": clear all translations.
-  if (STRNCMP(arg, "clear", 5) == 0 && ends_excmd(*skipwhite(arg + 5))) {
+  if (strncmp(arg, "clear", 5) == 0 && ends_excmd(*skipwhite(arg + 5))) {
     GA_DEEP_CLEAR(&menutrans_ga, menutrans_T, FREE_MENUTRANS);
 
     // Delete all "menutrans_" global variables.

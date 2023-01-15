@@ -1,20 +1,29 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
+#include <string.h>
 
+#include "klib/kvec.h"
+#include "lauxlib.h"
 #include "nvim/api/extmark.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/decoration.h"
 #include "nvim/decoration_provider.h"
 #include "nvim/drawscreen.h"
 #include "nvim/extmark.h"
 #include "nvim/highlight_group.h"
-#include "nvim/lua/executor.h"
+#include "nvim/mbyte.h"
 #include "nvim/memline.h"
+#include "nvim/memory.h"
+#include "nvim/pos.h"
+#include "nvim/strings.h"
+#include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/extmark.c.generated.h"
@@ -31,7 +40,7 @@ void api_extmark_free_all_mem(void)
   map_destroy(String, handle_T)(&namespace_ids);
 }
 
-/// Creates a new \*namespace\* or gets an existing one.
+/// Creates a new namespace or gets an existing one. \*namespace\*
 ///
 /// Namespaces are used for buffer highlights and virtual text, see
 /// |nvim_buf_add_highlight()| and |nvim_buf_set_extmark()|.
@@ -57,7 +66,7 @@ Integer nvim_create_namespace(String name)
   return (Integer)id;
 }
 
-/// Gets existing, non-anonymous namespaces.
+/// Gets existing, non-anonymous |namespace|s.
 ///
 /// @return dict that maps from names to namespace ids.
 Dictionary nvim_get_namespaces(void)
@@ -186,7 +195,7 @@ static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict
   return rv;
 }
 
-/// Gets the position (0-indexed) of an extmark.
+/// Gets the position (0-indexed) of an |extmark|.
 ///
 /// @param buffer  Buffer handle, or 0 for current buffer
 /// @param ns_id  Namespace id from |nvim_create_namespace()|
@@ -240,31 +249,29 @@ ArrayOf(Integer) nvim_buf_get_extmark_by_id(Buffer buffer, Integer ns_id,
   return extmark_to_array(&extmark, false, details);
 }
 
-/// Gets extmarks in "traversal order" from a |charwise| region defined by
+/// Gets |extmarks| in "traversal order" from a |charwise| region defined by
 /// buffer positions (inclusive, 0-indexed |api-indexing|).
 ///
 /// Region can be given as (row,col) tuples, or valid extmark ids (whose
 /// positions define the bounds). 0 and -1 are understood as (0,0) and (-1,-1)
 /// respectively, thus the following are equivalent:
-///
-/// <pre>
-///   nvim_buf_get_extmarks(0, my_ns, 0, -1, {})
-///   nvim_buf_get_extmarks(0, my_ns, [0,0], [-1,-1], {})
+/// <pre>lua
+///   vim.api.nvim_buf_get_extmarks(0, my_ns, 0, -1, {})
+///   vim.api.nvim_buf_get_extmarks(0, my_ns, {0,0}, {-1,-1}, {})
 /// </pre>
 ///
 /// If `end` is less than `start`, traversal works backwards. (Useful
 /// with `limit`, to get the first marks prior to a given position.)
 ///
 /// Example:
-///
-/// <pre>
+/// <pre>lua
 ///   local a   = vim.api
 ///   local pos = a.nvim_win_get_cursor(0)
 ///   local ns  = a.nvim_create_namespace('my-plugin')
 ///   -- Create new extmark at line 1, column 1.
 ///   local m1  = a.nvim_buf_set_extmark(0, ns, 0, 0, {})
 ///   -- Create new extmark at line 3, column 1.
-///   local m2  = a.nvim_buf_set_extmark(0, ns, 0, 2, {})
+///   local m2  = a.nvim_buf_set_extmark(0, ns, 2, 0, {})
 ///   -- Get extmarks only from line 3.
 ///   local ms  = a.nvim_buf_get_extmarks(0, ns, {2,0}, {2,0}, {})
 ///   -- Get all marks in this buffer + namespace.
@@ -361,7 +368,7 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
   return rv;
 }
 
-/// Creates or updates an extmark.
+/// Creates or updates an |extmark|.
 ///
 /// By default a new extmark is created when no id is passed in, but it is also
 /// possible to create a new mark by passing in a previously unused id or move
@@ -389,11 +396,11 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
 ///               - virt_text : virtual text to link to this mark.
 ///                   A list of [text, highlight] tuples, each representing a
 ///                   text chunk with specified highlight. `highlight` element
-///                   can either be a a single highlight group, or an array of
+///                   can either be a single highlight group, or an array of
 ///                   multiple highlight groups that will be stacked
 ///                   (highest priority last). A highlight group can be supplied
 ///                   either as a string or as an integer, the latter which
-///                   can be obtained using |nvim_get_hl_id_by_name|.
+///                   can be obtained using |nvim_get_hl_id_by_name()|.
 ///               - virt_text_pos : position of virtual text. Possible values:
 ///                 - "eol": right after eol character (default)
 ///                 - "overlay": display over the specified column, without
@@ -430,7 +437,7 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
 ///                                     column of the window, bypassing
 ///                                     sign and number columns.
 ///
-///               - ephemeral : for use with |nvim_set_decoration_provider|
+///               - ephemeral : for use with |nvim_set_decoration_provider()|
 ///                   callbacks. The mark will only be used for the current
 ///                   redraw cycle, and not be permantently stored in the
 ///                   buffer.
@@ -473,6 +480,8 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
 ///                   When a character is supplied it is used as |:syn-cchar|.
 ///                   "hl_group" is used as highlight for the cchar if provided,
 ///                   otherwise it defaults to |hl-Conceal|.
+///               - spell: boolean indicating that spell checking should be
+///                   performed within this extmark
 ///               - ui_watched: boolean that indicates the mark should be drawn
 ///                   by a UI. When set, the UI will receive win_extmark events.
 ///                   Note: the mark is positioned by virt_text attributes. Can be
@@ -719,6 +728,15 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
   bool ephemeral = false;
   OPTION_TO_BOOL(ephemeral, ephemeral, false);
 
+  if (opts->spell.type == kObjectTypeNil) {
+    decor.spell = kNone;
+  } else {
+    bool spell = false;
+    OPTION_TO_BOOL(spell, spell, false);
+    decor.spell = spell ? kTrue : kFalse;
+    has_decor = true;
+  }
+
   OPTION_TO_BOOL(decor.ui_watched, ui_watched, false);
   if (decor.ui_watched) {
     has_decor = true;
@@ -735,7 +753,7 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
       line = buf->b_ml.ml_line_count;
     }
   } else if (line < buf->b_ml.ml_line_count) {
-    len = ephemeral ? MAXCOL : STRLEN(ml_get_buf(buf, (linenr_T)line + 1, false));
+    len = ephemeral ? MAXCOL : strlen(ml_get_buf(buf, (linenr_T)line + 1, false));
   }
 
   if (col == -1) {
@@ -754,7 +772,7 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
 
   if (col2 >= 0) {
     if (line2 >= 0 && line2 < buf->b_ml.ml_line_count) {
-      len = ephemeral ? MAXCOL : STRLEN(ml_get_buf(buf, (linenr_T)line2 + 1, false));
+      len = ephemeral ? MAXCOL : strlen(ml_get_buf(buf, (linenr_T)line2 + 1, false));
     } else if (line2 == buf->b_ml.ml_line_count) {
       // We are trying to add an extmark past final newline
       len = 0;
@@ -796,7 +814,7 @@ error:
   return 0;
 }
 
-/// Removes an extmark.
+/// Removes an |extmark|.
 ///
 /// @param buffer Buffer handle, or 0 for current buffer
 /// @param ns_id Namespace id from |nvim_create_namespace()|
@@ -826,9 +844,8 @@ uint32_t src2ns(Integer *src_id)
   }
   if (*src_id < 0) {
     return (((uint32_t)1) << 31) - 1;
-  } else {
-    return (uint32_t)(*src_id);
   }
+  return (uint32_t)(*src_id);
 }
 
 /// Adds a highlight to buffer.
@@ -912,7 +929,7 @@ Integer nvim_buf_add_highlight(Buffer buffer, Integer ns_id, String hl_group, In
   return ns_id;
 }
 
-/// Clears namespaced objects (highlights, extmarks, virtual text) from
+/// Clears |namespace|d objects (highlights, |extmarks|, virtual text) from
 /// a region.
 ///
 /// Lines are 0-indexed. |api-indexing|  To clear the namespace in the entire
@@ -945,13 +962,13 @@ void nvim_buf_clear_namespace(Buffer buffer, Integer ns_id, Integer line_start, 
                 (int)line_end - 1, MAXCOL);
 }
 
-/// Set or change decoration provider for a namespace
+/// Set or change decoration provider for a |namespace|
 ///
 /// This is a very general purpose interface for having lua callbacks
 /// being triggered during the redraw code.
 ///
-/// The expected usage is to set extmarks for the currently
-/// redrawn buffer. |nvim_buf_set_extmark| can be called to add marks
+/// The expected usage is to set |extmarks| for the currently
+/// redrawn buffer. |nvim_buf_set_extmark()| can be called to add marks
 /// on a per-window or per-lines basis. Use the `ephemeral` key to only
 /// use the mark for the current screen redraw (the callback will be called
 /// again for the next redraw ).
@@ -972,20 +989,21 @@ void nvim_buf_clear_namespace(Buffer buffer, Integer ns_id, Integer line_start, 
 /// for the moment.
 ///
 /// @param ns_id  Namespace id from |nvim_create_namespace()|
-/// @param opts   Callbacks invoked during redraw:
+/// @param opts  Table of callbacks:
 ///             - on_start: called first on each screen redraw
 ///                 ["start", tick]
-///             - on_buf: called for each buffer being redrawn (before window
-///                 callbacks)
+///             - on_buf: called for each buffer being redrawn (before
+///                 window callbacks)
 ///                 ["buf", bufnr, tick]
-///             - on_win: called when starting to redraw a specific window.
+///             - on_win: called when starting to redraw a
+///                 specific window.
 ///                 ["win", winid, bufnr, topline, botline_guess]
-///             - on_line: called for each buffer line being redrawn. (The
-///                 interaction with fold lines is subject to change)
+///             - on_line: called for each buffer line being redrawn.
+///                 (The interaction with fold lines is subject to change)
 ///                 ["win", winid, bufnr, row]
 ///             - on_end: called at the end of a redraw cycle
 ///                 ["end", tick]
-void nvim_set_decoration_provider(Integer ns_id, DictionaryOf(LuaRef) opts, Error *err)
+void nvim_set_decoration_provider(Integer ns_id, Dict(set_decoration_provider) *opts, Error *err)
   FUNC_API_SINCE(7) FUNC_API_LUA_ONLY
 {
   DecorProvider *p = get_decor_provider((NS)ns_id, true);
@@ -997,37 +1015,32 @@ void nvim_set_decoration_provider(Integer ns_id, DictionaryOf(LuaRef) opts, Erro
 
   struct {
     const char *name;
+    Object *source;
     LuaRef *dest;
   } cbs[] = {
-    { "on_start", &p->redraw_start },
-    { "on_buf", &p->redraw_buf },
-    { "on_win", &p->redraw_win },
-    { "on_line", &p->redraw_line },
-    { "on_end", &p->redraw_end },
-    { "_on_hl_def", &p->hl_def },
-    { NULL, NULL },
+    { "on_start", &opts->on_start, &p->redraw_start },
+    { "on_buf", &opts->on_buf, &p->redraw_buf },
+    { "on_win", &opts->on_win, &p->redraw_win },
+    { "on_line", &opts->on_line, &p->redraw_line },
+    { "on_end", &opts->on_end, &p->redraw_end },
+    { "_on_hl_def", &opts->_on_hl_def, &p->hl_def },
+    { "_on_spell_nav", &opts->_on_spell_nav, &p->spell_nav },
+    { NULL, NULL, NULL },
   };
 
-  for (size_t i = 0; i < opts.size; i++) {
-    String k = opts.items[i].key;
-    Object *v = &opts.items[i].value;
-    size_t j;
-    for (j = 0; cbs[j].name && cbs[j].dest; j++) {
-      if (strequal(cbs[j].name, k.data)) {
-        if (v->type != kObjectTypeLuaRef) {
-          api_set_error(err, kErrorTypeValidation,
-                        "%s is not a function", cbs[j].name);
-          goto error;
-        }
-        *(cbs[j].dest) = v->data.luaref;
-        v->data.luaref = LUA_NOREF;
-        break;
-      }
+  for (size_t i = 0; cbs[i].source && cbs[i].dest && cbs[i].name; i++) {
+    Object *v = cbs[i].source;
+    if (v->type == kObjectTypeNil) {
+      continue;
     }
-    if (!cbs[j].name) {
-      api_set_error(err, kErrorTypeValidation, "unexpected key: %s", k.data);
+
+    if (v->type != kObjectTypeLuaRef) {
+      api_set_error(err, kErrorTypeValidation,
+                    "%s is not a function", cbs[i].name);
       goto error;
     }
+    *(cbs[i].dest) = v->data.luaref;
+    v->data.luaref = LUA_NOREF;
   }
 
   p->active = true;
@@ -1038,7 +1051,7 @@ error:
   decor_provider_clear(p);
 }
 
-/// Gets the line and column of an extmark.
+/// Gets the line and column of an |extmark|.
 ///
 /// Extmarks may be queried by position, name or even special names
 /// in the future such as "cursor".
@@ -1103,7 +1116,7 @@ static int init_sign_text(char **sign_text, char *text)
 {
   char *s;
 
-  char *endp = text + (int)STRLEN(text);
+  char *endp = text + (int)strlen(text);
 
   // Count cells and check for non-printable chars
   int cells = 0;

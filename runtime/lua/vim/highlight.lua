@@ -5,6 +5,7 @@ local M = {}
 M.priorities = {
   syntax = 50,
   treesitter = 100,
+  semantic_tokens = 125,
   diagnostics = 150,
   user = 200,
 }
@@ -41,7 +42,7 @@ end
 ---@param start first position (tuple {line,col})
 ---@param finish second position (tuple {line,col})
 ---@param opts table with options:
---             - regtype type of range (:help setreg, default charwise)
+--             - regtype type of range (see |setreg()|, default charwise)
 --             - inclusive boolean indicating whether the range is end-inclusive (default false)
 --             - priority number indicating priority of highlight (default priorities.user)
 function M.range(bufnr, ns, higroup, start, finish, opts)

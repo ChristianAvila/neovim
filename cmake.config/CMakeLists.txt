@@ -5,6 +5,26 @@ include(CheckIncludeFiles)
 include(CheckCSourceRuns)
 include(CheckCSourceCompiles)
 
+check_c_source_compiles("
+#include <execinfo.h>
+int main(void)
+{
+  void *trace[1];
+  backtrace(trace, 1);
+  return 0;
+}
+" HAVE_EXECINFO_BACKTRACE)
+
+check_c_source_compiles("
+int main(void)
+{
+  int a = 42;
+  __builtin_add_overflow(a, a, &a);
+  __builtin_sub_overflow(a, a, &a);
+  return 0;
+}
+" HAVE_BUILTIN_ADD_OVERFLOW)
+
 check_type_size("int" SIZEOF_INT LANGUAGE C)
 check_type_size("long" SIZEOF_LONG LANGUAGE C)
 check_type_size("intmax_t" SIZEOF_INTMAX_T LANGUAGE C)
@@ -20,11 +40,6 @@ check_include_files(langinfo.h HAVE_LANGINFO_H)
 check_include_files(locale.h HAVE_LOCALE_H)
 check_include_files(pwd.h HAVE_PWD_H)
 check_include_files(strings.h HAVE_STRINGS_H)
-check_include_files(sys/wait.h HAVE_SYS_WAIT_H)
-if(NOT HAVE_SYS_WAIT_H AND UNIX)
-  # See if_cscope.c
-  message(SEND_ERROR "header sys/wait.h is required for Unix")
-endif()
 check_include_files(sys/utsname.h HAVE_SYS_UTSNAME_H)
 check_include_files(termios.h HAVE_TERMIOS_H)
 check_include_files(sys/uio.h HAVE_SYS_UIO_H)
@@ -50,6 +65,26 @@ check_function_exists(strnlen HAVE_STRNLEN)
 check_function_exists(strcasecmp HAVE_STRCASECMP)
 check_function_exists(strncasecmp HAVE_STRNCASECMP)
 check_function_exists(strptime HAVE_STRPTIME)
+
+check_c_source_compiles("
+#include <sys/types.h>
+#include <dirent.h>
+int main(void)
+{
+  DIR *dir = opendir(\"dirname\");
+  dirfd(dir);
+  return 0;
+}
+" HAVE_DIRFD)
+
+check_c_source_compiles("
+#include <sys/file.h>
+int main(void)
+{
+  flock(10, LOCK_SH);
+  return 0;
+}
+" HAVE_FLOCK)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "SunOS")
   check_c_source_compiles("

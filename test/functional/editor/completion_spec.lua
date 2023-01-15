@@ -1029,7 +1029,8 @@ describe('completion', function()
     ]])
   end)
 
-  it('TextChangedP autocommand', function()
+  -- oldtest: Test_ChangedP()
+  it('TextChangedI and TextChangedP autocommands', function()
     curbufmeths.set_lines(0, 1, false, { 'foo', 'bar', 'foobar'})
     source([[
       set complete=. completeopt=menuone
@@ -1127,6 +1128,49 @@ describe('completion', function()
       autocmd! CompleteChanged * :call OnPumChange()
       call cursor(4, 1)
     ]])
+
+    -- v:event.size should be set with ext_popupmenu #20646
+    screen:set_option('ext_popupmenu', true)
+    feed('Sf<C-N>')
+    screen:expect({grid = [[
+      foo                                                         |
+      bar                                                         |
+      foobar                                                      |
+      f^                                                           |
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {3:-- Keyword completion (^N^P) }{5:Back at original}               |
+    ]], popupmenu = {
+      anchor = { 1, 3, 0 },
+      items = { { "foo", "", "", "" }, { "foobar", "", "", "" } },
+      pos = -1
+    }})
+    eq({completed_item = {}, width = 0,
+      height = 2, size = 2,
+      col = 0, row = 4, scrollbar = false},
+      eval('g:event'))
+    feed('oob')
+    screen:expect({grid = [[
+      foo                                                         |
+      bar                                                         |
+      foobar                                                      |
+      foob^                                                        |
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {3:-- Keyword completion (^N^P) }{5:Back at original}               |
+    ]], popupmenu = {
+      anchor = { 1, 3, 0 },
+      items = { { "foobar", "", "", "" } },
+      pos = -1
+    }})
+    eq({completed_item = {}, width = 0,
+      height = 1, size = 1,
+      col = 0, row = 4, scrollbar = false},
+      eval('g:event'))
+    feed('<Esc>')
+    screen:set_option('ext_popupmenu', false)
 
     feed('Sf<C-N>')
     screen:expect([[

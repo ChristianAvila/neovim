@@ -1,8 +1,12 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 
+#include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "lauxlib.h"
 #include "nvim/api/autocmd.h"
@@ -12,7 +16,12 @@
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
 #include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
+#include "nvim/ex_cmds_defs.h"
+#include "nvim/globals.h"
 #include "nvim/lua/executor.h"
+#include "nvim/memory.h"
+#include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/autocmd.c.generated.h"
@@ -38,7 +47,7 @@ static int64_t next_autocmd_id = 1;
 /// Get all autocommands that match the corresponding {opts}.
 ///
 /// These examples will get autocommands matching ALL the given criteria:
-/// <pre>
+/// <pre>lua
 ///   -- Matches all criteria
 ///   autocommands = vim.api.nvim_get_autocmds({
 ///     group = "MyGroup",
@@ -59,6 +68,9 @@ static int64_t next_autocmd_id = 1;
 ///             - group (string|integer): the autocommand group name or id to match against.
 ///             - event (string|array): event or events to match against |autocmd-events|.
 ///             - pattern (string|array): pattern or patterns to match against |autocmd-pattern|.
+///             Cannot be used with {buffer}
+///             - buffer: Buffer number or list of buffer numbers for buffer local autocommands
+///             |autocmd-buflocal|. Cannot be used with {pattern}
 /// @return Array of autocommands matching the criteria, with each item
 ///         containing the following fields:
 ///             - id (number): the autocommand id (only when defined with the API).
@@ -240,7 +252,7 @@ Array nvim_get_autocmds(Dict(get_autocmds) *opts, Error *err)
           assert(pattern_filters[i]);
 
           char *pat = pattern_filters[i];
-          int patlen = (int)STRLEN(pat);
+          int patlen = (int)strlen(pat);
 
           if (aupat_is_buflocal(pat, patlen)) {
             aupat_normalize_buflocal_pat(pattern_buflocal,
@@ -349,82 +361,49 @@ cleanup:
   return autocmd_list;
 }
 
-/// Create an |autocommand|
+/// Creates an |autocommand| event handler, defined by `callback` (Lua function or Vimscript
+/// function _name_ string) or `command` (Ex command string).
 ///
-/// The API allows for two (mutually exclusive) types of actions to be executed when the autocommand
-/// triggers: a callback function (Lua or Vimscript), or a command (like regular autocommands).
-///
-/// Example using callback:
-/// <pre>
-///     -- Lua function
-///     local myluafun = function() print("This buffer enters") end
-///
-///     -- Vimscript function name (as a string)
-///     local myvimfun = "g:MyVimFunction"
-///
+/// Example using Lua callback:
+/// <pre>lua
 ///     vim.api.nvim_create_autocmd({"BufEnter", "BufWinEnter"}, {
 ///       pattern = {"*.c", "*.h"},
-///       callback = myluafun,  -- Or myvimfun
+///       callback = function(ev)
+///         print(string.format('event fired: %s', vim.inspect(ev)))
+///       end
 ///     })
 /// </pre>
 ///
-/// Lua functions receive a table with information about the autocmd event as an argument. To use
-/// a function which itself accepts another (optional) parameter, wrap the function
-/// in a lambda:
-///
-/// <pre>
-///     -- Lua function with an optional parameter.
-///     -- The autocmd callback would pass a table as argument but this
-///     -- function expects number|nil
-///     local myluafun = function(bufnr) bufnr = bufnr or vim.api.nvim_get_current_buf() end
-///
-///     vim.api.nvim_create_autocmd({"BufEnter", "BufWinEnter"}, {
-///       pattern = {"*.c", "*.h"},
-///       callback = function() myluafun() end,
-///     })
-/// </pre>
-///
-/// Example using command:
-/// <pre>
+/// Example using an Ex command as the handler:
+/// <pre>lua
 ///     vim.api.nvim_create_autocmd({"BufEnter", "BufWinEnter"}, {
 ///       pattern = {"*.c", "*.h"},
 ///       command = "echo 'Entering a C or C++ file'",
 ///     })
 /// </pre>
 ///
-/// Example values for pattern:
-/// <pre>
-///   pattern = "*.py"
-///   pattern = { "*.py", "*.pyi" }
+/// Note: `pattern` is NOT automatically expanded (unlike with |:autocmd|), thus names like "$HOME"
+/// and "~" must be expanded explicitly:
+/// <pre>lua
+///   pattern = vim.fn.expand("~") .. "/some/path/*.py"
 /// </pre>
 ///
-/// Example values for event:
-/// <pre>
-///   "BufWritePre"
-///   {"CursorHold", "BufWritePre", "BufWritePost"}
-/// </pre>
-///
-/// @param event (string|array) The event or events to register this autocommand
-/// @param opts Dictionary of autocommand options:
-///             - group (string|integer) optional: the autocommand group name or
-///             id to match against.
-///             - pattern (string|array) optional: pattern or patterns to match
-///             against |autocmd-pattern|.
-///             - buffer (integer) optional: buffer number for buffer local autocommands
+/// @param event (string|array) Event(s) that will trigger the handler (`callback` or `command`).
+/// @param opts Options dict:
+///             - group (string|integer) optional: autocommand group name or id to match against.
+///             - pattern (string|array) optional: pattern(s) to match literally |autocmd-pattern|.
+///             - buffer (integer) optional: buffer number for buffer-local autocommands
 ///             |autocmd-buflocal|. Cannot be used with {pattern}.
-///             - desc (string) optional: description of the autocommand.
-///             - callback (function|string) optional: if a string, the name of a Vimscript function
-///             to call when this autocommand is triggered. Otherwise, a Lua function which is
-///             called when this autocommand is triggered. Cannot be used with {command}. Lua
-///             callbacks can return true to delete the autocommand; in addition, they accept a
-///             single table argument with the following keys:
-///                 - id: (number) the autocommand id
-///                 - event: (string) the name of the event that triggered the autocommand
-///                 |autocmd-events|
-///                 - group: (number|nil) the autocommand group id, if it exists
-///                 - match: (string) the expanded value of |<amatch>|
-///                 - buf: (number) the expanded value of |<abuf>|
-///                 - file: (string) the expanded value of |<afile>|
+///             - desc (string) optional: description (for documentation and troubleshooting).
+///             - callback (function|string) optional: Lua function (or Vimscript function name, if
+///             string) called when the event(s) is triggered. Lua callback can return true to
+///             delete the autocommand, and receives a table argument with these keys:
+///                 - id: (number) autocommand id
+///                 - event: (string) name of the triggered event |autocmd-events|
+///                 - group: (number|nil) autocommand group id, if any
+///                 - match: (string) expanded value of |<amatch>|
+///                 - buf: (number) expanded value of |<abuf>|
+///                 - file: (string) expanded value of |<afile>|
 ///                 - data: (any) arbitrary data passed to |nvim_exec_autocmds()|
 ///             - command (string) optional: Vim command to execute on event. Cannot be used with
 ///             {callback}
@@ -433,7 +412,7 @@ cleanup:
 ///             - nested (boolean) optional: defaults to false. Run nested
 ///             autocommands |autocmd-nested|.
 ///
-/// @return Integer id of the created autocommand.
+/// @return Autocommand id (number)
 /// @see |autocommand|
 /// @see |nvim_del_autocmd()|
 Integer nvim_create_autocmd(uint64_t channel_id, Object event, Dict(create_autocmd) *opts,
@@ -454,8 +433,7 @@ Integer nvim_create_autocmd(uint64_t channel_id, Object event, Dict(create_autoc
   }
 
   if (opts->callback.type != kObjectTypeNil && opts->command.type != kObjectTypeNil) {
-    api_set_error(err, kErrorTypeValidation,
-                  "cannot pass both: 'callback' and 'command' for the same autocmd");
+    api_set_error(err, kErrorTypeValidation, "specify either 'callback' or 'command', not both");
     goto cleanup;
   } else if (opts->callback.type != kObjectTypeNil) {
     // TODO(tjdevries): It's possible we could accept callable tables,
@@ -596,7 +574,7 @@ void nvim_del_autocmd(Integer id, Error *err)
 }
 
 /// Clear all autocommands that match the corresponding {opts}. To delete
-/// a particular autocmd, see |nvim_del_autocmd|.
+/// a particular autocmd, see |nvim_del_autocmd()|.
 /// @param opts Parameters
 ///         - event: (string|table)
 ///              Examples:
@@ -684,7 +662,7 @@ cleanup:
 /// Create or get an autocommand group |autocmd-groups|.
 ///
 /// To get an existing group id, do:
-/// <pre>
+/// <pre>lua
 ///     local id = vim.api.nvim_create_augroup("MyGroup", {
 ///         clear = false
 ///     })
@@ -725,7 +703,7 @@ Integer nvim_create_augroup(uint64_t channel_id, String name, Dict(create_augrou
 ///
 /// To get a group id one can use |nvim_get_autocmds()|.
 ///
-/// NOTE: behavior differs from |augroup-delete|. When deleting a group, autocommands contained in
+/// NOTE: behavior differs from |:augroup-delete|. When deleting a group, autocommands contained in
 /// this group will also be deleted and cleared. This group will no longer exist.
 /// @param id Integer The id of the group.
 /// @see |nvim_del_augroup_by_name()|
@@ -743,10 +721,10 @@ void nvim_del_augroup_by_id(Integer id, Error *err)
 
 /// Delete an autocommand group by name.
 ///
-/// NOTE: behavior differs from |augroup-delete|. When deleting a group, autocommands contained in
+/// NOTE: behavior differs from |:augroup-delete|. When deleting a group, autocommands contained in
 /// this group will also be deleted and cleared. This group will no longer exist.
 /// @param name String The name of the group.
-/// @see |autocommand-groups|
+/// @see |autocmd-groups|
 void nvim_del_augroup_by_name(String name, Error *err)
   FUNC_API_SINCE(9)
 {
@@ -962,7 +940,7 @@ static bool get_patterns_from_pattern_or_buf(Array *patterns, Object pattern, Ob
         patlen = aucmd_pattern_length(pat);
       }
     } else if (v->type == kObjectTypeArray) {
-      if (!check_autocmd_string_array(*patterns, "pattern", err)) {
+      if (!check_autocmd_string_array(v->data.array, "pattern", err)) {
         return false;
       }
 

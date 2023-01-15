@@ -11,8 +11,9 @@
 // The 'scrolloff' option makes this a bit complicated.
 
 #include <assert.h>
-#include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "nvim/ascii.h"
 #include "nvim/buffer.h"
@@ -21,18 +22,28 @@
 #include "nvim/diff.h"
 #include "nvim/drawscreen.h"
 #include "nvim/edit.h"
+#include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
+#include "nvim/eval/window.h"
 #include "nvim/fold.h"
 #include "nvim/getchar.h"
+#include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/highlight.h"
+#include "nvim/macros.h"
 #include "nvim/mbyte.h"
-#include "nvim/memline.h"
+#include "nvim/memline_defs.h"
+#include "nvim/mouse.h"
 #include "nvim/move.h"
 #include "nvim/option.h"
 #include "nvim/plines.h"
 #include "nvim/popupmenu.h"
+#include "nvim/pos.h"
+#include "nvim/screen.h"
 #include "nvim/search.h"
 #include "nvim/strings.h"
+#include "nvim/types.h"
+#include "nvim/vim.h"
 #include "nvim/window.h"
 
 typedef struct {
@@ -127,16 +138,6 @@ static void redraw_for_cursorcolumn(win_T *wp)
   }
 }
 
-// Update curwin->w_topline and redraw if necessary.
-// Used to update the screen before printing a message.
-void update_topline_redraw(void)
-{
-  update_topline(curwin);
-  if (must_redraw) {
-    update_screen(0);
-  }
-}
-
 // Update curwin->w_topline to move the cursor onto the screen.
 void update_topline(win_T *wp)
 {
@@ -147,12 +148,16 @@ void update_topline(win_T *wp)
   long *so_ptr = wp->w_p_so >= 0 ? &wp->w_p_so : &p_so;
   long save_so = *so_ptr;
 
+  // Cursor is updated instead when this is true for 'splitkeep'.
+  if (skip_update_topline) {
+    return;
+  }
+
   // If there is no valid screen and when the window height is zero just use
   // the cursor line.
   if (!default_grid.chars || wp->w_height_inner == 0) {
     wp->w_topline = wp->w_cursor.lnum;
     wp->w_botline = wp->w_topline;
-    wp->w_valid |= VALID_BOTLINE|VALID_BOTLINE_AP;
     wp->w_viewport_invalid = true;
     wp->w_scbind_pos = 1;
     return;
@@ -335,15 +340,6 @@ void update_topline(win_T *wp)
   *so_ptr = save_so;
 }
 
-// Update win->w_topline to move the cursor onto the screen.
-void update_topline_win(win_T *win)
-{
-  switchwin_T switchwin;
-  switch_win(&switchwin, win, NULL, true);
-  update_topline(curwin);
-  restore_win(&switchwin, true);
-}
-
 // Return the scrolljump value to use for the current window.
 // When 'scrolljump' is positive use it as-is.
 // When 'scrolljump' is negative use it as a percentage of the window height.
@@ -383,12 +379,19 @@ static bool check_top_offset(void)
   return false;
 }
 
+/// Update w_curswant.
+void update_curswant_force(void)
+{
+  validate_virtcol();
+  curwin->w_curswant = curwin->w_virtcol;
+  curwin->w_set_curswant = false;
+}
+
+/// Update w_curswant if w_set_curswant is set.
 void update_curswant(void)
 {
   if (curwin->w_set_curswant) {
-    validate_virtcol();
-    curwin->w_curswant = curwin->w_virtcol;
-    curwin->w_set_curswant = false;
+    update_curswant_force();
   }
 }
 
@@ -603,57 +606,67 @@ void validate_virtcol(void)
 void validate_virtcol_win(win_T *wp)
 {
   check_cursor_moved(wp);
-  if (!(wp->w_valid & VALID_VIRTCOL)) {
-    getvvcol(wp, &wp->w_cursor, NULL, &(wp->w_virtcol), NULL);
-    redraw_for_cursorcolumn(wp);
-    wp->w_valid |= VALID_VIRTCOL;
+
+  if (wp->w_valid & VALID_VIRTCOL) {
+    return;
   }
+
+  getvvcol(wp, &wp->w_cursor, NULL, &(wp->w_virtcol), NULL);
+  redraw_for_cursorcolumn(wp);
+  wp->w_valid |= VALID_VIRTCOL;
 }
 
 // Validate curwin->w_cline_height only.
 void validate_cheight(void)
 {
   check_cursor_moved(curwin);
-  if (!(curwin->w_valid & VALID_CHEIGHT)) {
-    curwin->w_cline_height = plines_win_full(curwin, curwin->w_cursor.lnum,
-                                             NULL, &curwin->w_cline_folded,
-                                             true);
-    curwin->w_valid |= VALID_CHEIGHT;
+
+  if (curwin->w_valid & VALID_CHEIGHT) {
+    return;
   }
+
+  curwin->w_cline_height = plines_win_full(curwin, curwin->w_cursor.lnum,
+                                           NULL, &curwin->w_cline_folded,
+                                           true);
+  curwin->w_valid |= VALID_CHEIGHT;
 }
 
 // Validate w_wcol and w_virtcol only.
 void validate_cursor_col(void)
 {
   validate_virtcol();
-  if (!(curwin->w_valid & VALID_WCOL)) {
-    colnr_T col = curwin->w_virtcol;
-    colnr_T off = curwin_col_off();
-    col += off;
-    int width = curwin->w_width_inner - off + curwin_col_off2();
 
-    // long line wrapping, adjust curwin->w_wrow
-    if (curwin->w_p_wrap && col >= (colnr_T)curwin->w_width_inner
-        && width > 0) {
-      // use same formula as what is used in curs_columns()
-      col -= ((col - curwin->w_width_inner) / width + 1) * width;
-    }
-    if (col > (int)curwin->w_leftcol) {
-      col -= curwin->w_leftcol;
-    } else {
-      col = 0;
-    }
-    curwin->w_wcol = col;
-
-    curwin->w_valid |= VALID_WCOL;
+  if (curwin->w_valid & VALID_WCOL) {
+    return;
   }
+
+  colnr_T col = curwin->w_virtcol;
+  colnr_T off = curwin_col_off();
+  col += off;
+  int width = curwin->w_width_inner - off + curwin_col_off2();
+
+  // long line wrapping, adjust curwin->w_wrow
+  if (curwin->w_p_wrap && col >= (colnr_T)curwin->w_width_inner
+      && width > 0) {
+    // use same formula as what is used in curs_columns()
+    col -= ((col - curwin->w_width_inner) / width + 1) * width;
+  }
+  if (col > (int)curwin->w_leftcol) {
+    col -= curwin->w_leftcol;
+  } else {
+    col = 0;
+  }
+  curwin->w_wcol = col;
+
+  curwin->w_valid |= VALID_WCOL;
 }
 
 // Compute offset of a window, occupied by absolute or relative line number,
 // fold column and sign column (these don't move when scrolling horizontally).
 int win_col_off(win_T *wp)
 {
-  return ((wp->w_p_nu || wp->w_p_rnu) ? number_width(wp) + 1 : 0)
+  return ((wp->w_p_nu || wp->w_p_rnu || (*wp->w_p_stc != NUL)) ?
+          (number_width(wp) + (*wp->w_p_stc == NUL)) : 0)
          + (cmdwin_type == 0 || wp != curwin ? 0 : 1)
          + win_fdccol_count(wp)
          + (win_signcol_count(wp) * win_signcol_width(wp));
@@ -815,8 +828,7 @@ void curs_columns(win_T *wp, int may_scroll)
   if ((wp->w_wrow >= wp->w_height_inner
        || ((prev_skipcol > 0
             || wp->w_wrow + so >= wp->w_height_inner)
-           && (plines =
-                 plines_win_nofill(wp, wp->w_cursor.lnum, false)) - 1
+           && (plines = plines_win_nofill(wp, wp->w_cursor.lnum, false)) - 1
            >= wp->w_height_inner))
       && wp->w_height_inner != 0
       && wp->w_cursor.lnum == wp->w_topline
@@ -924,11 +936,16 @@ void textpos2screenpos(win_T *wp, pos_T *pos, int *rowp, int *scolp, int *ccolp,
   int rowoff = 0;
   colnr_T coloff = 0;
   bool visible_row = false;
+  bool is_folded = false;
 
-  if (pos->lnum >= wp->w_topline && pos->lnum < wp->w_botline) {
-    row = plines_m_win(wp, wp->w_topline, pos->lnum - 1) + 1;
+  if (pos->lnum >= wp->w_topline && pos->lnum <= wp->w_botline) {
+    linenr_T lnum = pos->lnum;
+    is_folded = hasFoldingWin(wp, lnum, &lnum, NULL, true, NULL);
+    row = plines_m_win(wp, wp->w_topline, lnum - 1) + 1;
+    // Add filler lines above this buffer line.
+    row += win_get_fill(wp, lnum);
     visible_row = true;
-  } else if (pos->lnum < wp->w_topline) {
+  } else if (!local || pos->lnum < wp->w_topline) {
     row = 0;
   } else {
     row = wp->w_height_inner;
@@ -937,44 +954,106 @@ void textpos2screenpos(win_T *wp, pos_T *pos, int *rowp, int *scolp, int *ccolp,
   bool existing_row = (pos->lnum > 0
                        && pos->lnum <= wp->w_buffer->b_ml.ml_line_count);
 
-  if ((local && existing_row) || visible_row) {
-    colnr_T off;
-    colnr_T col;
-    int width;
-
-    getvcol(wp, pos, &scol, &ccol, &ecol);
-
-    // similar to what is done in validate_cursor_col()
-    col = scol;
-    off = win_col_off(wp);
-    col += off;
-    width = wp->w_width - off + win_col_off2(wp);
-
-    // long line wrapping, adjust row
-    if (wp->w_p_wrap && col >= (colnr_T)wp->w_width && width > 0) {
-      // use same formula as what is used in curs_columns()
-      rowoff = visible_row ? ((col - wp->w_width) / width + 1) : 0;
-      col -= rowoff * width;
-    }
-
-    col -= wp->w_leftcol;
-
-    if (col >= 0 && col < wp->w_width) {
-      coloff = col - scol + (local ? 0 : wp->w_wincol + wp->w_wincol_off) + 1;
+  if ((local || visible_row) && existing_row) {
+    const colnr_T off = win_col_off(wp);
+    if (is_folded) {
+      row += local ? 0 : wp->w_winrow + wp->w_winrow_off;
+      coloff = (local ? 0 : wp->w_wincol + wp->w_wincol_off) + 1 + off;
     } else {
-      scol = ccol = ecol = 0;
-      // character is left or right of the window
-      if (local) {
-        coloff = col < 0 ? -1 : wp->w_width_inner + 1;
+      getvcol(wp, pos, &scol, &ccol, &ecol);
+
+      // similar to what is done in validate_cursor_col()
+      colnr_T col = scol;
+      col += off;
+      int width = wp->w_width - off + win_col_off2(wp);
+
+      // long line wrapping, adjust row
+      if (wp->w_p_wrap && col >= (colnr_T)wp->w_width && width > 0) {
+        // use same formula as what is used in curs_columns()
+        rowoff = visible_row ? ((col - wp->w_width) / width + 1) : 0;
+        col -= rowoff * width;
+      }
+
+      col -= wp->w_leftcol;
+
+      if (col >= 0 && col < wp->w_width && row + rowoff <= wp->w_height) {
+        coloff = col - scol + (local ? 0 : wp->w_wincol + wp->w_wincol_off) + 1;
+        row += local ? 0 : wp->w_winrow + wp->w_winrow_off;
       } else {
-        row = 0;
+        // character is left, right or below of the window
+        scol = ccol = ecol = 0;
+        if (local) {
+          coloff = col < 0 ? -1 : wp->w_width_inner + 1;
+        } else {
+          row = rowoff = 0;
+        }
       }
     }
   }
-  *rowp = (local ? 0 : wp->w_winrow + wp->w_winrow_off) + row + rowoff;
+  *rowp = row + rowoff;
   *scolp = scol + coloff;
   *ccolp = ccol + coloff;
   *ecolp = ecol + coloff;
+}
+
+/// "screenpos({winid}, {lnum}, {col})" function
+void f_screenpos(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
+{
+  tv_dict_alloc_ret(rettv);
+  dict_T *dict = rettv->vval.v_dict;
+
+  win_T *wp = find_win_by_nr_or_id(&argvars[0]);
+  if (wp == NULL) {
+    return;
+  }
+
+  pos_T pos = {
+    .lnum   = (linenr_T)tv_get_number(&argvars[1]),
+    .col    = (colnr_T)tv_get_number(&argvars[2]) - 1,
+    .coladd = 0
+  };
+  if (pos.lnum > wp->w_buffer->b_ml.ml_line_count) {
+    semsg(_(e_invalid_line_number_nr), pos.lnum);
+    return;
+  }
+  int row = 0;
+  int scol = 0, ccol = 0, ecol = 0;
+  textpos2screenpos(wp, &pos, &row, &scol, &ccol, &ecol, false);
+
+  tv_dict_add_nr(dict, S_LEN("row"), row);
+  tv_dict_add_nr(dict, S_LEN("col"), scol);
+  tv_dict_add_nr(dict, S_LEN("curscol"), ccol);
+  tv_dict_add_nr(dict, S_LEN("endcol"), ecol);
+}
+
+/// "virtcol2col({winid}, {lnum}, {col})" function
+void f_virtcol2col(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
+{
+  rettv->vval.v_number = -1;
+
+  if (tv_check_for_number_arg(argvars, 0) == FAIL
+      || tv_check_for_number_arg(argvars, 1) == FAIL
+      || tv_check_for_number_arg(argvars, 2) == FAIL) {
+    return;
+  }
+
+  win_T *wp = find_win_by_nr_or_id(&argvars[0]);
+  if (wp == NULL) {
+    return;
+  }
+
+  bool error = false;
+  linenr_T lnum = (linenr_T)tv_get_number_chk(&argvars[1], &error);
+  if (error || lnum < 0 || lnum > wp->w_buffer->b_ml.ml_line_count) {
+    return;
+  }
+
+  int screencol = (int)tv_get_number_chk(&argvars[2], &error);
+  if (error || screencol < 0) {
+    return;
+  }
+
+  rettv->vval.v_number = vcol2col(wp, lnum, screencol);
 }
 
 /// Scroll the current window down by "line_count" logical lines.  "CTRL-Y"

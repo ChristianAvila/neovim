@@ -6,28 +6,35 @@
 /// Code related to character sets.
 
 #include <assert.h>
+#include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
+#include <stdlib.h>
 #include <string.h>
-#include <wctype.h>
 
+#include "auto/config.h"
 #include "nvim/ascii.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
-#include "nvim/func_attr.h"
+#include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/garray.h"
+#include "nvim/globals.h"
+#include "nvim/grid_defs.h"
 #include "nvim/indent.h"
-#include "nvim/main.h"
+#include "nvim/keycodes.h"
+#include "nvim/macros.h"
 #include "nvim/mark.h"
 #include "nvim/mbyte.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/move.h"
 #include "nvim/option.h"
-#include "nvim/os_unix.h"
 #include "nvim/path.h"
 #include "nvim/plines.h"
+#include "nvim/pos.h"
 #include "nvim/state.h"
-#include "nvim/strings.h"
 #include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -267,8 +274,8 @@ int buf_init_chartab(buf_T *buf, int global)
 /// @param bufsize
 void trans_characters(char *buf, int bufsize)
 {
-  char_u *trs;                 // translated character
-  int len = (int)STRLEN(buf);  // length of string needing translation
+  char *trs;                   // translated character
+  int len = (int)strlen(buf);  // length of string needing translation
   int room = bufsize - len;    // room in buffer after string
 
   while (*buf != 0) {
@@ -277,8 +284,8 @@ void trans_characters(char *buf, int bufsize)
     if ((trs_len = utfc_ptr2len(buf)) > 1) {
       len -= trs_len;
     } else {
-      trs = transchar_byte((uint8_t)(*buf));
-      trs_len = (int)STRLEN(trs);
+      trs = (char *)transchar_byte((uint8_t)(*buf));
+      trs_len = (int)strlen(trs);
 
       if (trs_len > 1) {
         room -= trs_len - 1;
@@ -411,12 +418,28 @@ char *transstr(const char *const s, bool untab)
   return buf;
 }
 
+size_t kv_transstr(StringBuilder *str, const char *const s, bool untab)
+  FUNC_ATTR_NONNULL_ARG(1)
+{
+  if (!s) {
+    return 0;
+  }
+
+  // Compute the length of the result, taking account of unprintable
+  // multi-byte characters.
+  const size_t len = transstr_len(s, untab);
+  kv_ensure_space(*str, len + 1);
+  transstr_buf(s, str->items + str->size, len + 1, untab);
+  str->size += len;  // do not include NUL byte
+  return len;
+}
+
 /// Convert the string "str[orglen]" to do ignore-case comparing.
 /// Use the current locale.
 ///
 /// When "buf" is NULL, return an allocated string.
 /// Otherwise, put the result in buf, limited by buflen, and return buf.
-char_u *str_foldcase(char_u *str, int orglen, char_u *buf, int buflen)
+char *str_foldcase(char *str, int orglen, char *buf, int buflen)
   FUNC_ATTR_NONNULL_RET
 {
   garray_T ga;
@@ -424,7 +447,7 @@ char_u *str_foldcase(char_u *str, int orglen, char_u *buf, int buflen)
   int len = orglen;
 
 #define GA_CHAR(i) ((char *)ga.ga_data)[i]
-#define GA_PTR(i) ((char_u *)ga.ga_data + (i))
+#define GA_PTR(i) ((char *)ga.ga_data + (i))
 #define STR_CHAR(i) (buf == NULL ? GA_CHAR(i) : buf[i])
 #define STR_PTR(i) (buf == NULL ? GA_PTR(i) : buf + (i))
 
@@ -452,8 +475,8 @@ char_u *str_foldcase(char_u *str, int orglen, char_u *buf, int buflen)
   // Make each character lower case.
   i = 0;
   while (STR_CHAR(i) != NUL) {
-    int c = utf_ptr2char((char *)STR_PTR(i));
-    int olen = utf_ptr2len((char *)STR_PTR(i));
+    int c = utf_ptr2char(STR_PTR(i));
+    int olen = utf_ptr2len(STR_PTR(i));
     int lc = mb_tolower(c);
 
     // Only replace the character when it is not an invalid
@@ -487,15 +510,15 @@ char_u *str_foldcase(char_u *str, int orglen, char_u *buf, int buflen)
           }
         }
       }
-      (void)utf_char2bytes(lc, (char *)STR_PTR(i));
+      (void)utf_char2bytes(lc, STR_PTR(i));
     }
 
     // skip to next multi-byte char
-    i += utfc_ptr2len((char *)STR_PTR(i));
+    i += utfc_ptr2len(STR_PTR(i));
   }
 
   if (buf == NULL) {
-    return (char_u *)ga.ga_data;
+    return ga.ga_data;
   }
   return buf;
 }
@@ -650,7 +673,7 @@ static inline unsigned nr2hex(unsigned n)
 ///
 /// @param b
 ///
-/// @reeturn Number of display cells.
+/// @return Number of display cells.
 int byte2cells(int b)
   FUNC_ATTR_PURE
 {
@@ -786,10 +809,10 @@ bool vim_iswordc_buf(const int c, buf_T *const buf)
 /// @param  p  pointer to the multi-byte character
 ///
 /// @return true if "p" points to a keyword character.
-bool vim_iswordp(const char_u *const p)
+bool vim_iswordp(const char *const p)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
 {
-  return vim_iswordp_buf((char *)p, curbuf);
+  return vim_iswordp_buf(p, curbuf);
 }
 
 /// Just like vim_iswordc_buf() but uses a pointer to the (multi-byte)
@@ -913,7 +936,7 @@ void getvcol(win_T *wp, pos_T *pos, colnr_T *start, colnr_T *cursor, colnr_T *en
   int ts = (int)wp->w_buffer->b_p_ts;
 
   colnr_T vcol = 0;
-  char *line = ptr = (char *)ml_get_buf(wp->w_buffer, pos->lnum, false);  // start of the line
+  char *line = ptr = ml_get_buf(wp->w_buffer, pos->lnum, false);  // start of the line
 
   if (pos->col == MAXCOL) {
     // continue until the NUL
@@ -1076,9 +1099,9 @@ void getvvcol(win_T *wp, pos_T *pos, colnr_T *start, colnr_T *cursor, colnr_T *e
     colnr_T endadd = 0;
 
     // Cannot put the cursor on part of a wide character.
-    char *ptr = (char *)ml_get_buf(wp->w_buffer, pos->lnum, false);
+    char *ptr = ml_get_buf(wp->w_buffer, pos->lnum, false);
 
-    if (pos->col < (colnr_T)STRLEN(ptr)) {
+    if (pos->col < (colnr_T)strlen(ptr)) {
       int c = utf_ptr2char(ptr + pos->col);
       if ((c != TAB) && vim_isprintc(c)) {
         endadd = (colnr_T)(char2cells(c) - 1);
@@ -1157,7 +1180,7 @@ char *skipwhite(const char *const p)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
   FUNC_ATTR_NONNULL_RET
 {
-  return skipwhite_len(p, STRLEN(p));
+  return skipwhite_len(p, strlen(p));
 }
 
 /// Like `skipwhite`, but skip up to `len` characters.
@@ -1698,7 +1721,7 @@ bool rem_backslash(const char *str)
              || (str[1] != NUL
                  && str[1] != '*'
                  && str[1] != '?'
-                 && !vim_isfilec(str[1])));
+                 && !vim_isfilec((uint8_t)str[1])));
 
 #else  // ifdef BACKSLASH_IN_FILENAME
   return str[0] == '\\' && str[1] != NUL;

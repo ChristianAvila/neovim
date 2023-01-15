@@ -2,6 +2,7 @@ name: vim-patches
 on:
   schedule:
     - cron: '3 3 * * *'
+  workflow_dispatch:
 
 jobs:
   update-vim-patches:
@@ -24,6 +25,8 @@ jobs:
           path: ${{ env.VIM_SOURCE_DIR }}
           fetch-depth: 0
 
+      - run: sudo apt-get install libfuse2
+
       - run: |
           gh release download -R neovim/neovim -p nvim.appimage
           chmod a+x nvim.appimage
@@ -40,8 +43,8 @@ jobs:
         id: update-version
         run: |
           git checkout -b ${VERSION_BRANCH}
-          nvim -i NONE -u NONE --headless +'luafile scripts/vimpatch.lua' +q
-          printf '::set-output name=NEW_PATCHES::%s\n' $([ -z "$(git diff)" ]; echo $?)
+          nvim -V1 -es -i NONE +'luafile scripts/vimpatch.lua' +q
+          printf 'NEW_PATCHES=%s\n' $([ -z "$(git diff)" ]; echo $?) >> $GITHUB_OUTPUT
 
       - name: Automatic PR
         if: ${{ steps.update-version.outputs.NEW_PATCHES != 0 }}

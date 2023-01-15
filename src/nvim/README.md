@@ -18,6 +18,12 @@ The source files use extensions to hint about their purpose.
 - `*.h.generated.h` - exported functions’ declarations.
 - `*.c.generated.h` - static functions’ declarations.
 
+Common structures
+-----------------
+
+- StringBuilder
+- kvec or garray.c for dynamic lists / vectors (use StringBuilder for strings)
+
 Logs
 ----
 
@@ -391,8 +397,8 @@ implemented by libuv, the platform layer used by Nvim.
 
 Since Nvim inherited its code from Vim, the states are not prepared to receive
 "arbitrary events", so we use a special key to represent those (When a state
-receives an "arbitrary event", it normally doesn't do anything other update the
-screen).
+receives an "arbitrary event", it normally doesn't do anything other than
+update the screen).
 
 Main loop
 ---------

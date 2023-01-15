@@ -3,8 +3,10 @@
 
 // locale.c: functions for language/locale configuration
 
-#include "auto/config.h"
+#include <stdbool.h>
+#include <stdio.h>
 
+#include "auto/config.h"
 #ifdef HAVE_LOCALE_H
 # include <locale.h>
 #endif
@@ -13,8 +15,11 @@
 #include "nvim/buffer.h"
 #include "nvim/charset.h"
 #include "nvim/eval.h"
+#include "nvim/ex_cmds_defs.h"
 #include "nvim/garray.h"
+#include "nvim/gettext.h"
 #include "nvim/locale.h"
+#include "nvim/macros.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
@@ -23,6 +28,7 @@
 #include "nvim/path.h"
 #include "nvim/profile.h"
 #include "nvim/types.h"
+#include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "locale.c.generated.h"
@@ -42,7 +48,7 @@ static char *get_locale_val(int what)
 
 /// @return  true when "lang" starts with a valid language name.
 ///          Rejects NULL, empty string, "C", "C.UTF-8" and others.
-static bool is_valid_mess_lang(char *lang)
+static bool is_valid_mess_lang(const char *lang)
 {
   return lang != NULL && ASCII_ISALPHA(lang[0]) && ASCII_ISALPHA(lang[1]);
 }
@@ -270,7 +276,7 @@ void ex_language(exarg_T *eap)
 
 static char **locales = NULL;       // Array of all available locales
 
-# ifndef WIN32
+# ifndef MSWIN
 static bool did_init_locales = false;
 
 /// @return  an array of strings for all available locales + NULL for the
@@ -284,8 +290,7 @@ static char **find_locales(void)
 
   // Find all available locales by running command "locale -a".  If this
   // doesn't work we won't have completion.
-  char *locale_a = (char *)get_cmd_output((char_u *)"locale -a", NULL,
-                                          kShellOptSilent, NULL);
+  char *locale_a = get_cmd_output("locale -a", NULL, kShellOptSilent, NULL);
   if (locale_a == NULL) {
     return NULL;
   }
@@ -311,24 +316,27 @@ static char **find_locales(void)
 /// Lazy initialization of all available locales.
 static void init_locales(void)
 {
-# ifndef WIN32
-  if (!did_init_locales) {
-    did_init_locales = true;
-    locales = find_locales();
+# ifndef MSWIN
+  if (did_init_locales) {
+    return;
   }
+
+  did_init_locales = true;
+  locales = find_locales();
 # endif
 }
 
 # if defined(EXITFREE)
 void free_locales(void)
 {
-  int i;
-  if (locales != NULL) {
-    for (i = 0; locales[i] != NULL; i++) {
-      xfree(locales[i]);
-    }
-    XFREE_CLEAR(locales);
+  if (locales == NULL) {
+    return;
   }
+
+  for (int i = 0; locales[i] != NULL; i++) {
+    xfree(locales[i]);
+  }
+  XFREE_CLEAR(locales);
 }
 # endif
 

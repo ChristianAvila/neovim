@@ -91,6 +91,17 @@ func Test_setpos()
   call assert_equal([0, 1, 21341234, 0], getpos("'a"))
   call assert_equal(4, virtcol("'a"))
 
+  " Test with invalid buffer number, line number and column number
+  call cursor(2, 2)
+  call setpos('.', [-1, 1, 1, 0])
+  call assert_equal([2, 2], [line('.'), col('.')])
+  call setpos('.', [0, -1, 1, 0])
+  call assert_equal([2, 2], [line('.'), col('.')])
+  call setpos('.', [0, 1, -1, 0])
+  call assert_equal([2, 2], [line('.'), col('.')])
+
+  call assert_fails("call setpos('ab', [0, 1, 1, 0])", 'E474:')
+
   bwipe!
   call win_gotoid(twowin)
   bwipe!
@@ -292,5 +303,18 @@ func Test_getmarklist()
   call assert_equal([], {}->getmarklist())
   close!
 endfunc
+
+" This was using freed memory
+func Test_jump_mark_autocmd()
+  next 00
+  edit 0
+  sargument
+  au BufEnter 0 all
+  sil norm 
+
+  au! BufEnter
+  bwipe!
+endfunc
+
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -170,13 +170,14 @@ local extension = {
     return require('vim.filetype.detect').bindzone(bufnr, 'dcl')
   end,
   db = function(path, bufnr)
-    return require('vim.filetype.detect').bindzone(bufnr, '')
+    return require('vim.filetype.detect').bindzone(bufnr)
   end,
   bicep = 'bicep',
   bb = 'bitbake',
   bbappend = 'bitbake',
   bbclass = 'bitbake',
   bl = 'blank',
+  blp = 'blueprint',
   bsd = 'bsdl',
   bsdl = 'bsdl',
   bst = 'bst',
@@ -201,6 +202,7 @@ local extension = {
     return require('vim.filetype.detect').change(bufnr)
   end,
   chs = 'chaskell',
+  chatito = 'chatito',
   chopro = 'chordpro',
   crd = 'chordpro',
   crdpro = 'chordpro',
@@ -255,6 +257,7 @@ local extension = {
   cc = function(path, bufnr)
     return vim.g.cynlib_syntax_for_cc and 'cynlib' or 'cpp'
   end,
+  cql = 'cqlang',
   crm = 'crm',
   csx = 'cs',
   cs = 'cs',
@@ -324,11 +327,7 @@ local extension = {
   end,
   eex = 'eelixir',
   leex = 'eelixir',
-  am = function(path, bufnr)
-    if not path:lower():find('makefile%.am$') then
-      return 'elf'
-    end
-  end,
+  am = 'elf',
   exs = 'elixir',
   elm = 'elm',
   elv = 'elvish',
@@ -416,6 +415,7 @@ local extension = {
   fs = function(path, bufnr)
     return require('vim.filetype.detect').fs(bufnr)
   end,
+  fsh = 'fsh',
   fsi = 'fsharp',
   fsx = 'fsharp',
   fusion = 'fusion',
@@ -446,6 +446,8 @@ local extension = {
   gsp = 'gsp',
   gjs = 'javascript.glimmer',
   gts = 'typescript.glimmer',
+  gyp = 'gyp',
+  gypi = 'gyp',
   hack = 'hack',
   hackpartial = 'hack',
   haml = 'haml',
@@ -471,6 +473,8 @@ local extension = {
   hex = 'hex',
   ['h32'] = 'hex',
   hjson = 'hjson',
+  m3u = 'hlsplaylist',
+  m3u8 = 'hlsplaylist',
   hog = 'hog',
   hws = 'hollywood',
   hoon = 'hoon',
@@ -540,6 +544,7 @@ local extension = {
   mjs = 'javascript',
   javascript = 'javascript',
   js = 'javascript',
+  jsm = 'javascript',
   cjs = 'javascript',
   jsx = 'javascriptreact',
   clp = 'jess',
@@ -548,6 +553,7 @@ local extension = {
   jov = 'jovial',
   jovial = 'jovial',
   properties = 'jproperties',
+  jq = 'jq',
   slnf = 'json',
   json = 'json',
   jsonp = 'json',
@@ -556,6 +562,8 @@ local extension = {
   ['json-patch'] = 'json',
   json5 = 'json5',
   jsonc = 'jsonc',
+  jsonnet = 'jsonnet',
+  libsonnet = 'jsonnet',
   jsp = 'jsp',
   jl = 'julia',
   kv = 'kivy',
@@ -602,11 +610,14 @@ local extension = {
   c = function(path, bufnr)
     return require('vim.filetype.detect').lpc(bufnr)
   end,
-  lsl = 'lsl',
+  lsl = function(path, bufnr)
+    return require('vim.filetype.detect').lsl(bufnr)
+  end,
   lss = 'lss',
   nse = 'lua',
   rockspec = 'lua',
   lua = 'lua',
+  lrc = 'lyrics',
   m = function(path, bufnr)
     return require('vim.filetype.detect').m(bufnr)
   end,
@@ -646,6 +657,9 @@ local extension = {
   dmt = 'maxima',
   wxm = 'maxima',
   mel = 'mel',
+  mmd = 'mermaid',
+  mmdc = 'mermaid',
+  mermaid = 'mermaid',
   mf = 'mf',
   mgl = 'mgl',
   mgp = 'mgp',
@@ -664,6 +678,7 @@ local extension = {
   DEF = 'modula2',
   ['m2'] = 'modula2',
   mi = 'modula2',
+  lm3 = 'modula3',
   ssc = 'monk',
   monk = 'monk',
   tsc = 'monk',
@@ -697,6 +712,9 @@ local extension = {
   nanorc = 'nanorc',
   ncf = 'ncf',
   nginx = 'nginx',
+  nim = 'nim',
+  nims = 'nim',
+  nimble = 'nim',
   ninja = 'ninja',
   nix = 'nix',
   nqc = 'nqc',
@@ -709,6 +727,10 @@ local extension = {
   nsi = 'nsis',
   nsh = 'nsis',
   obj = 'obj',
+  obl = 'obse',
+  obse = 'obse',
+  oblivion = 'obse',
+  obscript = 'obse',
   mlt = 'ocaml',
   mly = 'ocaml',
   mll = 'ocaml',
@@ -722,6 +744,7 @@ local extension = {
   opam = 'opam',
   ['or'] = 'openroad',
   scad = 'openscad',
+  ovpn = 'openvpn',
   ora = 'ora',
   org = 'org',
   org_archive = 'org',
@@ -743,6 +766,7 @@ local extension = {
   php = 'php',
   phpt = 'php',
   phtml = 'php',
+  theme = 'php',
   pike = 'pike',
   pmod = 'pike',
   rcp = 'pilrc',
@@ -760,6 +784,7 @@ local extension = {
   po = 'po',
   pot = 'po',
   pod = 'pod',
+  filter = 'poefilter',
   pk = 'poke',
   ps = 'postscr',
   epsi = 'postscr',
@@ -920,12 +945,14 @@ local extension = {
   ice = 'slice',
   score = 'slrnsc',
   sol = 'solidity',
+  smali = 'smali',
   tpl = 'smarty',
   ihlp = 'smcl',
   smcl = 'smcl',
   hlp = 'smcl',
   smith = 'smith',
   smt = 'smith',
+  smithy = 'smithy',
   sml = 'sml',
   spt = 'snobol4',
   sno = 'snobol4',
@@ -954,6 +981,9 @@ local extension = {
   srec = 'srec',
   mot = 'srec',
   ['s19'] = 'srec',
+  srt = 'srt',
+  ssa = 'ssa',
+  ass = 'ssa',
   st = 'st',
   imata = 'stata',
   ['do'] = 'stata',
@@ -1006,6 +1036,8 @@ local extension = {
   ts = function(path, bufnr)
     return M.getlines(bufnr, 1):find('<%?xml') and 'xml' or 'typescript'
   end,
+  mts = 'typescript',
+  cts = 'typescript',
   tsx = 'typescriptreact',
   uc = 'uc',
   uit = 'uil',
@@ -1015,6 +1047,7 @@ local extension = {
   dsm = 'vb',
   ctl = 'vb',
   vbs = 'vb',
+  vdf = 'vdf',
   vdmpp = 'vdmpp',
   vpp = 'vdmpp',
   vdmrt = 'vdmrt',
@@ -1032,6 +1065,7 @@ local extension = {
   hdl = 'vhdl',
   vho = 'vhdl',
   vbe = 'vhdl',
+  tape = 'vhs',
   vim = 'vim',
   vba = 'vim',
   mar = 'vmasm',
@@ -1041,6 +1075,7 @@ local extension = {
   vue = 'vue',
   wat = 'wast',
   wast = 'wast',
+  wdl = 'wdl',
   wm = 'webmacro',
   wbt = 'winbatch',
   wml = 'wml',
@@ -1087,6 +1122,7 @@ local extension = {
   yang = 'yang',
   ['z8a'] = 'z8a',
   zig = 'zig',
+  zir = 'zir',
   zu = 'zimbu',
   zut = 'zimbutempl',
   zsh = 'zsh',
@@ -1285,9 +1321,9 @@ local filename = {
   ['GNUmakefile.am'] = 'automake',
   ['named.root'] = 'bindzone',
   WORKSPACE = 'bzl',
+  ['WORKSPACE.bzlmod'] = 'bzl',
   BUILD = 'bzl',
   ['cabal.project'] = 'cabalproject',
-  [vim.env.HOME .. '/cabal.config'] = 'cabalconfig',
   ['cabal.config'] = 'cabalconfig',
   calendar = 'calendar',
   catalog = 'catalog',
@@ -1341,13 +1377,13 @@ local filename = {
   npmrc = 'dosini',
   ['/etc/yum.conf'] = 'dosini',
   ['.npmrc'] = 'dosini',
-  ['.editorconfig'] = 'dosini',
   ['/etc/pacman.conf'] = 'confini',
   ['mpv.conf'] = 'confini',
   dune = 'dune',
   jbuild = 'dune',
   ['dune-workspace'] = 'dune',
   ['dune-project'] = 'dune',
+  ['.editorconfig'] = 'editorconfig',
   ['elinks.conf'] = 'elinks',
   ['mix.lock'] = 'elixir',
   ['filter-rules'] = 'elmfilt',
@@ -1380,6 +1416,8 @@ local filename = {
   ['EDIT_DESCRIPTION'] = 'gitcommit',
   ['.gitconfig'] = 'gitconfig',
   ['.gitmodules'] = 'gitconfig',
+  ['.gitattributes'] = 'gitattributes',
+  ['.gitignore'] = 'gitignore',
   ['gitolite.conf'] = 'gitolite',
   ['git-rebase-todo'] = 'gitrebase',
   gkrellmrc = 'gkrellmrc',
@@ -1388,6 +1426,7 @@ local filename = {
   gnashpluginrc = 'gnash',
   gnashrc = 'gnash',
   ['.gnuplot'] = 'gnuplot',
+  ['go.sum'] = 'gosum',
   ['go.work'] = 'gowork',
   ['.gprc'] = 'gp',
   ['/.gnupg/gpg.conf'] = 'gpg',
@@ -1417,11 +1456,15 @@ local filename = {
   ['ipf.conf'] = 'ipfilter',
   ['ipf6.conf'] = 'ipfilter',
   ['ipf.rules'] = 'ipfilter',
-  ['.eslintrc'] = 'json',
-  ['.babelrc'] = 'json',
   ['Pipfile.lock'] = 'json',
   ['.firebaserc'] = 'json',
   ['.prettierrc'] = 'json',
+  ['.babelrc'] = 'jsonc',
+  ['.eslintrc'] = 'jsonc',
+  ['.hintrc'] = 'jsonc',
+  ['.jsfmtrc'] = 'jsonc',
+  ['.jshintrc'] = 'jsonc',
+  ['.swrc'] = 'jsonc',
   Kconfig = 'kconfig',
   ['Kconfig.debug'] = 'kconfig',
   ['lftp.conf'] = 'lftp',
@@ -1436,6 +1479,10 @@ local filename = {
   ['.sawfishrc'] = 'lisp',
   ['/etc/login.access'] = 'loginaccess',
   ['/etc/login.defs'] = 'logindefs',
+  ['.lsl'] = function(path, bufnr)
+    return require('vim.filetype.detect').lsl(bufnr)
+  end,
+  ['.luacheckrc'] = 'lua',
   ['lynx.cfg'] = 'lynx',
   ['m3overrides'] = 'm3build',
   ['m3makefile'] = 'm3build',
@@ -1481,8 +1528,11 @@ local filename = {
   ['/etc/shadow-'] = 'passwd',
   ['/etc/shadow'] = 'passwd',
   ['/etc/passwd.edit'] = 'passwd',
+  ['latexmkrc'] = 'perl',
+  ['.latexmkrc'] = 'perl',
   ['pf.conf'] = 'pf',
   ['main.cf'] = 'pfmain',
+  ['main.cf.proto'] = 'pfmain',
   pinerc = 'pine',
   ['.pinercex'] = 'pine',
   ['.pinerc'] = 'pine',
@@ -1515,6 +1565,9 @@ local filename = {
   ['.pythonstartup'] = 'python',
   ['.pythonrc'] = 'python',
   SConstruct = 'python',
+  ['.Rprofile'] = 'r',
+  ['Rprofile'] = 'r',
+  ['Rprofile.site'] = 'r',
   ratpoisonrc = 'ratpoison',
   ['.ratpoisonrc'] = 'ratpoison',
   inputrc = 'readline',
@@ -1641,6 +1694,8 @@ local filename = {
   fglrxrc = 'xml',
   ['/etc/blkid.tab'] = 'xml',
   ['/etc/blkid.tab.old'] = 'xml',
+  ['.clang-format'] = 'yaml',
+  ['.clang-tidy'] = 'yaml',
   ['/etc/zprofile'] = 'zsh',
   ['.zlogin'] = 'zsh',
   ['.zlogout'] = 'zsh',
@@ -1693,6 +1748,7 @@ local pattern = {
   ['.*/meta%-.*/conf/.*%.conf'] = 'bitbake',
   ['bzr_log%..*'] = 'bzr',
   ['.*enlightenment/.*%.cfg'] = 'c',
+  ['${HOME}/cabal%.config'] = 'cabalconfig',
   ['cabal%.project%..*'] = starsetf('cabalproject'),
   ['.*/%.calendar/.*'] = starsetf('calendar'),
   ['.*/share/calendar/.*/calendar%..*'] = starsetf('calendar'),
@@ -1711,7 +1767,7 @@ local pattern = {
     { priority = -1 },
   },
   ['[cC]hange[lL]og.*'] = starsetf(function(path, bufnr)
-    require('vim.filetype.detect').changelog(bufnr)
+    return require('vim.filetype.detect').changelog(bufnr)
   end),
   ['.*%.%.ch'] = 'chill',
   ['.*%.cmake%.in'] = 'cmake',
@@ -1753,6 +1809,8 @@ local pattern = {
   ['.*/etc/DIR_COLORS'] = 'dircolors',
   ['.*/etc/dnsmasq%.conf'] = 'dnsmasq',
   ['php%.ini%-.*'] = 'dosini',
+  ['.*/%.aws/config'] = 'confini',
+  ['.*/%.aws/credentials'] = 'confini',
   ['.*/etc/pacman%.conf'] = 'confini',
   ['.*/etc/yum%.conf'] = 'dosini',
   ['.*lvs'] = 'dracula',
@@ -1817,26 +1875,21 @@ local pattern = {
   ['.*/%.config/git/config'] = 'gitconfig',
   ['.*%.git/config%.worktree'] = 'gitconfig',
   ['.*%.git/worktrees/.*/config%.worktree'] = 'gitconfig',
-  ['.*/git/config'] = function(path, bufnr)
-    if vim.env.XDG_CONFIG_HOME and path:find(vim.env.XDG_CONFIG_HOME .. '/git/config') then
-      return 'gitconfig'
-    end
-  end,
+  ['${XDG_CONFIG_HOME}/git/config'] = 'gitconfig',
+  ['.*%.git/info/attributes'] = 'gitattributes',
+  ['.*/etc/gitattributes'] = 'gitattributes',
+  ['.*/%.config/git/attributes'] = 'gitattributes',
+  ['${XDG_CONFIG_HOME}/git/attributes'] = 'gitattributes',
+  ['.*%.git/info/exclude'] = 'gitignore',
+  ['.*/%.config/git/ignore'] = 'gitignore',
+  ['${XDG_CONFIG_HOME}/git/ignore'] = 'gitignore',
   ['%.gitsendemail%.msg%.......'] = 'gitsendemail',
   ['gkrellmrc_.'] = 'gkrellmrc',
   ['.*/usr/.*/gnupg/options%.skel'] = 'gpg',
   ['.*/%.gnupg/options'] = 'gpg',
   ['.*/%.gnupg/gpg%.conf'] = 'gpg',
-  ['.*/options'] = function(path, bufnr)
-    if vim.env.GNUPGHOME and path:find(vim.env.GNUPGHOME .. '/options') then
-      return 'gpg'
-    end
-  end,
-  ['.*/gpg%.conf'] = function(path, bufnr)
-    if vim.env.GNUPGHOME and path:find(vim.env.GNUPGHOME .. '/gpg%.conf') then
-      return 'gpg'
-    end
-  end,
+  ['${GNUPGHOME}/options'] = 'gpg',
+  ['${GNUPGHOME}/gpg%.conf'] = 'gpg',
   ['.*/etc/group'] = 'group',
   ['.*/etc/gshadow'] = 'group',
   ['.*/etc/group%.edit'] = 'group',
@@ -1850,7 +1903,7 @@ local pattern = {
   ['.*/etc/grub%.conf'] = 'grub',
   -- gtkrc* and .gtkrc*
   ['%.?gtkrc.*'] = starsetf('gtkrc'),
-  [vim.env.VIMRUNTIME .. '/doc/.*%.txt'] = 'help',
+  ['${VIMRUNTIME}/doc/.*%.txt'] = 'help',
   ['hg%-editor%-.*%.txt'] = 'hgcommit',
   ['.*/etc/host%.conf'] = 'hostconf',
   ['.*/etc/hosts%.deny'] = 'hostsaccess',
@@ -1864,7 +1917,9 @@ local pattern = {
   ['Prl.*%..*'] = starsetf('jam'),
   ['.*%.properties_..'] = 'jproperties',
   ['.*%.properties_.._..'] = 'jproperties',
+  ['org%.eclipse%..*%.prefs'] = 'jproperties',
   ['.*%.properties_.._.._.*'] = starsetf('jproperties'),
+  ['[jt]sconfig.*%.json'] = 'jsonc',
   ['Kconfig%..*'] = starsetf('kconfig'),
   ['.*%.[Ss][Uu][Bb]'] = 'krl',
   ['lilo%.conf.*'] = starsetf('lilo'),
@@ -2018,6 +2073,7 @@ local pattern = {
   ['.*%.ml%.cppo'] = 'ocaml',
   ['.*%.mli%.cppo'] = 'ocaml',
   ['.*%.opam%.template'] = 'opam',
+  ['.*/openvpn/.*/.*%.conf'] = 'openvpn',
   ['.*%.[Oo][Pp][Ll]'] = 'opl',
   ['.*/etc/pam%.conf'] = 'pamconf',
   ['.*/etc/pam%.d/.*'] = starsetf('pamconf'),
@@ -2254,13 +2310,14 @@ end
 --- Filename patterns can specify an optional priority to resolve cases when a
 --- file path matches multiple patterns. Higher priorities are matched first.
 --- When omitted, the priority defaults to 0.
+--- A pattern can contain environment variables of the form "${SOME_VAR}" that will
+--- be automatically expanded. If the environment variable is not set, the pattern
+--- won't be matched.
 ---
 --- See $VIMRUNTIME/lua/vim/filetype.lua for more examples.
 ---
---- Note that Lua filetype detection is disabled when |g:do_legacy_filetype| is set.
----
 --- Example:
---- <pre>
+--- <pre>lua
 ---  vim.filetype.add({
 ---    extension = {
 ---      foo = 'fooscript',
@@ -2282,6 +2339,8 @@ end
 ---      ['.*/etc/foo/.*'] = 'fooscript',
 ---      -- Using an optional priority
 ---      ['.*/etc/foo/.*%.conf'] = { 'dosini', { priority = 10 } },
+---      -- A pattern containing an environment variable
+---      ['${XDG_CONFIG_HOME}/foo/git'] = 'git',
 ---      ['README.(%a+)$'] = function(path, bufnr, ext)
 ---        if ext == 'md' then
 ---          return 'markdown'
@@ -2293,8 +2352,8 @@ end
 ---  })
 --- </pre>
 ---
---- To add a fallback match on contents (see |new-filetype-scripts|), use
---- <pre>
+--- To add a fallback match on contents, use
+--- <pre>lua
 --- vim.filetype.add {
 ---   pattern = {
 ---     ['.*'] = {
@@ -2355,8 +2414,28 @@ local function dispatch(ft, path, bufnr, ...)
   end
 end
 
+-- Lookup table/cache for patterns that contain an environment variable pattern, e.g. ${SOME_VAR}.
+local expand_env_lookup = {}
+
 ---@private
 local function match_pattern(name, path, tail, pat)
+  if expand_env_lookup[pat] == nil then
+    expand_env_lookup[pat] = pat:find('%${') ~= nil
+  end
+  if expand_env_lookup[pat] then
+    local return_early
+    pat = pat:gsub('%${(%S-)}', function(env)
+      -- If an environment variable is present in the pattern but not set, there is no match
+      if not vim.env[env] then
+        return_early = true
+        return nil
+      end
+      return vim.env[env]
+    end)
+    if return_early then
+      return false
+    end
+  end
   -- If the pattern contains a / match against the full path, otherwise just the tail
   local fullpat = '^' .. pat .. '$'
   local matches
@@ -2386,7 +2465,7 @@ end
 --- Each of the three options is specified using a key to the single argument of this function.
 --- Example:
 ---
---- <pre>
+--- <pre>lua
 ---   -- Using a buffer number
 ---   vim.filetype.match({ buf = 42 })
 ---

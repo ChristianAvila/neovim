@@ -4,20 +4,29 @@
 // textformat.c: text formatting functions
 
 #include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
 
 #include "nvim/ascii.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/change.h"
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
 #include "nvim/drawscreen.h"
 #include "nvim/edit.h"
 #include "nvim/eval.h"
+#include "nvim/eval/typval_defs.h"
+#include "nvim/ex_cmds_defs.h"
 #include "nvim/getchar.h"
 #include "nvim/globals.h"
 #include "nvim/indent.h"
 #include "nvim/indent_c.h"
+#include "nvim/macros.h"
+#include "nvim/mark.h"
 #include "nvim/mbyte.h"
 #include "nvim/memline.h"
+#include "nvim/memory.h"
+#include "nvim/message.h"
 #include "nvim/move.h"
 #include "nvim/normal.h"
 #include "nvim/ops.h"
@@ -28,6 +37,7 @@
 #include "nvim/strings.h"
 #include "nvim/textformat.h"
 #include "nvim/textobject.h"
+#include "nvim/types.h"
 #include "nvim/undo.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
@@ -97,7 +107,7 @@ void internal_format(int textwidth, int second_indent, int flags, bool format_on
     colnr_T len;
     colnr_T virtcol;
     int orig_col = 0;
-    char_u *saved_text = NULL;
+    char *saved_text = NULL;
     colnr_T col;
     colnr_T end_col;
     bool did_do_comment = false;
@@ -353,7 +363,7 @@ void internal_format(int textwidth, int second_indent, int flags, bool format_on
     if (State & VREPLACE_FLAG) {
       // In MODE_VREPLACE state, we will backspace over the text to be
       // wrapped, so save a copy now to put on the next line.
-      saved_text = vim_strsave(get_cursor_pos_ptr());
+      saved_text = xstrdup(get_cursor_pos_ptr());
       curwin->w_cursor.col = orig_col;
       saved_text[startcol] = NUL;
 
@@ -425,13 +435,13 @@ void internal_format(int textwidth, int second_indent, int flags, bool format_on
     if (State & VREPLACE_FLAG) {
       // In MODE_VREPLACE state we have backspaced over the text to be
       // moved, now we re-insert it into the new line.
-      ins_bytes((char *)saved_text);
+      ins_bytes(saved_text);
       xfree(saved_text);
     } else {
       // Check if cursor is not past the NUL off the line, cindent
       // may have added or removed indent.
       curwin->w_cursor.col += startcol;
-      len = (colnr_T)STRLEN(get_cursor_line_ptr());
+      len = (colnr_T)strlen(get_cursor_line_ptr());
       if (curwin->w_cursor.col > len) {
         curwin->w_cursor.col = len;
       }
@@ -465,21 +475,21 @@ void internal_format(int textwidth, int second_indent, int flags, bool format_on
 /// ('e' in comment flags), so that this line is skipped, and not joined to the
 /// previous line.  A new paragraph starts after a blank line, or when the
 /// comment leader changes.
-static int fmt_check_par(linenr_T lnum, int *leader_len, char_u **leader_flags, bool do_comments)
+static int fmt_check_par(linenr_T lnum, int *leader_len, char **leader_flags, bool do_comments)
 {
   char_u *flags = NULL;        // init for GCC
   char_u *ptr;
 
   ptr = (char_u *)ml_get(lnum);
   if (do_comments) {
-    *leader_len = get_leader_len((char *)ptr, (char **)leader_flags, false, true);
+    *leader_len = get_leader_len((char *)ptr, leader_flags, false, true);
   } else {
     *leader_len = 0;
   }
 
   if (*leader_len > 0) {
     // Search for 'e' flag in comment leader flags.
-    flags = *leader_flags;
+    flags = (char_u *)(*leader_flags);
     while (*flags && *flags != ':' && *flags != COM_END) {
       flags++;
     }
@@ -493,14 +503,14 @@ static int fmt_check_par(linenr_T lnum, int *leader_len, char_u **leader_flags, 
 /// @return  true if line "lnum" ends in a white character.
 static bool ends_in_white(linenr_T lnum)
 {
-  char_u *s = (char_u *)ml_get(lnum);
+  char *s = ml_get(lnum);
   size_t l;
 
   if (*s == NUL) {
     return false;
   }
-  l = STRLEN(s) - 1;
-  return ascii_iswhite(s[l]);
+  l = strlen(s) - 1;
+  return ascii_iswhite((uint8_t)s[l]);
 }
 
 /// @return  true if the two comment leaders given are the same.
@@ -508,13 +518,13 @@ static bool ends_in_white(linenr_T lnum)
 /// @param lnum  The first line.  White-space is ignored.
 ///
 /// @note the whole of 'leader1' must match 'leader2_len' characters from 'leader2'.
-static bool same_leader(linenr_T lnum, int leader1_len, char_u *leader1_flags, int leader2_len,
-                        char_u *leader2_flags)
+static bool same_leader(linenr_T lnum, int leader1_len, char *leader1_flags, int leader2_len,
+                        char *leader2_flags)
 {
   int idx1 = 0, idx2 = 0;
-  char_u *p;
-  char_u *line1;
-  char_u *line2;
+  char *p;
+  char *line1;
+  char *line2;
 
   if (leader1_len == 0) {
     return leader2_len == 0;
@@ -552,9 +562,9 @@ static bool same_leader(linenr_T lnum, int leader1_len, char_u *leader1_flags, i
 
   // Get current line and next line, compare the leaders.
   // The first line has to be saved, only one line can be locked at a time.
-  line1 = vim_strsave((char_u *)ml_get(lnum));
+  line1 = xstrdup(ml_get(lnum));
   for (idx1 = 0; ascii_iswhite(line1[idx1]); idx1++) {}
-  line2 = (char_u *)ml_get(lnum + 1);
+  line2 = ml_get(lnum + 1);
   for (idx2 = 0; idx2 < leader2_len; idx2++) {
     if (!ascii_iswhite(line2[idx2])) {
       if (line1[idx1++] != line2[idx2]) {
@@ -579,9 +589,9 @@ static bool paragraph_start(linenr_T lnum)
 {
   char_u *p;
   int leader_len = 0;                // leader len of current line
-  char_u *leader_flags = NULL;       // flags for leader of current line
+  char *leader_flags = NULL;         // flags for leader of current line
   int next_leader_len = 0;           // leader len of next line
-  char_u *next_leader_flags = NULL;  // flags for leader of next line
+  char *next_leader_flags = NULL;    // flags for leader of next line
 
   if (lnum <= 1) {
     return true;                // start of the file
@@ -644,7 +654,7 @@ void auto_format(bool trailblank, bool prev_line)
   // in 'formatoptions' and there is a single character before the cursor.
   // Otherwise the line would be broken and when typing another non-white
   // next they are not joined back together.
-  wasatend = (pos.col == (colnr_T)STRLEN(old));
+  wasatend = (pos.col == (colnr_T)strlen(old));
   if (*old != NUL && !trailblank && wasatend) {
     dec_cursor();
     cc = gchar_cursor();
@@ -698,7 +708,7 @@ void auto_format(bool trailblank, bool prev_line)
   // formatted.
   if (!wasatend && has_format_option(FO_WHITE_PAR)) {
     new = get_cursor_line_ptr();
-    len = (colnr_T)STRLEN(new);
+    len = (colnr_T)strlen(new);
     if (curwin->w_cursor.col == len) {
       pnew = xstrnsave(new, (size_t)len + 2);
       pnew[len] = ' ';
@@ -914,8 +924,8 @@ void format_lines(linenr_T line_count, bool avoid_fex)
   bool next_is_start_par = false;
   int leader_len = 0;               // leader len of current line
   int next_leader_len;              // leader len of next line
-  char_u *leader_flags = NULL;      // flags for leader of current line
-  char_u *next_leader_flags = NULL;  // flags for leader of next line
+  char *leader_flags = NULL;        // flags for leader of current line
+  char *next_leader_flags = NULL;   // flags for leader of next line
   bool advance = true;
   int second_indent = -1;           // indent for second line (comment aware)
   bool first_par_line = true;
@@ -1025,7 +1035,7 @@ void format_lines(linenr_T line_count, bool avoid_fex)
         // and this line has a line comment after some text, the
         // paragraph doesn't really end.
         if (next_leader_flags == NULL
-            || STRNCMP(next_leader_flags, "://", 3) != 0
+            || strncmp(next_leader_flags, "://", 3) != 0
             || check_linecomment(get_cursor_line_ptr()) == MAXCOL) {
           is_end_par = true;
         }
@@ -1115,7 +1125,7 @@ void format_lines(linenr_T line_count, bool avoid_fex)
         }
         first_par_line = false;
         // If the line is getting long, format it next time
-        if (STRLEN(get_cursor_line_ptr()) > (size_t)max_len) {
+        if (strlen(get_cursor_line_ptr()) > (size_t)max_len) {
           force_format = true;
         } else {
           force_format = false;

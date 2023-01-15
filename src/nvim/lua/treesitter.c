@@ -6,23 +6,28 @@
 // trees and nodes, and could be broken out as a reusable lua package
 
 #include <assert.h>
-#include <inttypes.h>
 #include <lauxlib.h>
+#include <limits.h>
 #include <lua.h>
-#include <lualib.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <uv.h>
 
+#include "klib/kvec.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/buffer.h"
-#include "nvim/lib/kvec.h"
-#include "nvim/log.h"
+#include "nvim/buffer_defs.h"
+#include "nvim/globals.h"
 #include "nvim/lua/treesitter.h"
+#include "nvim/macros.h"
 #include "nvim/map.h"
 #include "nvim/memline.h"
+#include "nvim/memory.h"
+#include "nvim/pos.h"
+#include "nvim/strings.h"
+#include "nvim/types.h"
 #include "tree_sitter/api.h"
 
 #define TS_META_PARSER "treesitter_parser"
@@ -177,19 +182,19 @@ int tslua_add_language(lua_State *L)
 
   uv_lib_t lib;
   if (uv_dlopen(path, &lib)) {
-    snprintf((char *)IObuff, IOSIZE, "Failed to load parser: uv_dlopen: %s",
+    snprintf(IObuff, IOSIZE, "Failed to load parser: uv_dlopen: %s",
              uv_dlerror(&lib));
     uv_dlclose(&lib);
-    lua_pushstring(L, (char *)IObuff);
+    lua_pushstring(L, IObuff);
     return lua_error(L);
   }
 
   TSLanguage *(*lang_parser)(void);
   if (uv_dlsym(&lib, symbol_buf, (void **)&lang_parser)) {
-    snprintf((char *)IObuff, IOSIZE, "Failed to load parser: uv_dlsym: %s",
+    snprintf(IObuff, IOSIZE, "Failed to load parser: uv_dlsym: %s",
              uv_dlerror(&lib));
     uv_dlclose(&lib);
-    lua_pushstring(L, (char *)IObuff);
+    lua_pushstring(L, IObuff);
     return lua_error(L);
   }
 
@@ -332,8 +337,8 @@ static const char *input_cb(void *payload, uint32_t byte_index, TSPoint position
     *bytes_read = 0;
     return "";
   }
-  char *line = (char *)ml_get_buf(bp, (linenr_T)position.row + 1, false);
-  size_t len = STRLEN(line);
+  char *line = ml_get_buf(bp, (linenr_T)position.row + 1, false);
+  size_t len = strlen(line);
   if (position.column > len) {
     *bytes_read = 0;
     return "";
@@ -834,7 +839,7 @@ static int node_field(lua_State *L)
     do {
       const char *current_field = ts_tree_cursor_current_field_name(&cursor);
 
-      if (current_field != NULL && !STRCMP(field_name, current_field)) {
+      if (current_field != NULL && !strcmp(field_name, current_field)) {
         push_node(L, ts_tree_cursor_current_node(&cursor), 1);  // [table, node]
         lua_rawseti(L, -2, (int)++curr_index);
       }
@@ -1369,7 +1374,7 @@ static int query_inspect(lua_State *L)
       lua_rawseti(L, -2, nextitem++);  // [retval, patterns, pat, pred]
     }
     // last predicate should have ended with TypeDone
-    lua_pop(L, 1);  // [retval, patters, pat]
+    lua_pop(L, 1);  // [retval, patterns, pat]
     lua_rawseti(L, -2, (int)i + 1);  // [retval, patterns]
   }
   lua_setfield(L, -2, "patterns");  // [retval]

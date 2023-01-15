@@ -3,18 +3,32 @@
 
 // highlight.c: low level code for UI and syntax highlighting
 
+#include <assert.h>
+#include <inttypes.h>
+#include <limits.h>
+#include <string.h>
+
+#include "klib/kvec.h"
+#include "lauxlib.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
+#include "nvim/api/ui.h"
 #include "nvim/decoration_provider.h"
 #include "nvim/drawscreen.h"
+#include "nvim/gettext.h"
+#include "nvim/globals.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/highlight_group.h"
+#include "nvim/log.h"
 #include "nvim/lua/executor.h"
+#include "nvim/macros.h"
 #include "nvim/map.h"
+#include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
 #include "nvim/popupmenu.h"
+#include "nvim/types.h"
 #include "nvim/ui.h"
 #include "nvim/vim.h"
 
@@ -115,19 +129,15 @@ static int get_attr_entry(HlEntry entry)
 /// When a UI connects, we need to send it the table of highlights used so far.
 void ui_send_all_hls(UI *ui)
 {
-  if (ui->hl_attr_define) {
-    for (size_t i = 1; i < kv_size(attr_entries); i++) {
-      Array inspect = hl_inspect((int)i);
-      ui->hl_attr_define(ui, (Integer)i, kv_A(attr_entries, i).attr,
-                         kv_A(attr_entries, i).attr, inspect);
-      api_free_array(inspect);
-    }
+  for (size_t i = 1; i < kv_size(attr_entries); i++) {
+    Array inspect = hl_inspect((int)i);
+    remote_ui_hl_attr_define(ui, (Integer)i, kv_A(attr_entries, i).attr,
+                             kv_A(attr_entries, i).attr, inspect);
+    api_free_array(inspect);
   }
-  if (ui->hl_group_set) {
-    for (size_t hlf = 0; hlf < HLF_COUNT; hlf++) {
-      ui->hl_group_set(ui, cstr_as_string((char *)hlf_names[hlf]),
-                       highlight_attr[hlf]);
-    }
+  for (size_t hlf = 0; hlf < HLF_COUNT; hlf++) {
+    remote_ui_hl_group_set(ui, cstr_as_string((char *)hlf_names[hlf]),
+                           highlight_attr[hlf]);
   }
 }
 
@@ -141,10 +151,9 @@ int hl_get_syn_attr(int ns_id, int idx, HlAttrs at_en)
       || at_en.rgb_ae_attr != 0 || ns_id != 0) {
     return get_attr_entry((HlEntry){ .attr = at_en, .kind = kHlSyntax,
                                      .id1 = idx, .id2 = ns_id });
-  } else {
-    // If all the fields are cleared, clear the attr field back to default value
-    return 0;
   }
+  // If all the fields are cleared, clear the attr field back to default value
+  return 0;
 }
 
 void ns_hl_def(NS ns_id, int hl_id, HlAttrs attrs, int link_id, Dict(highlight) *dict)
@@ -238,12 +247,11 @@ int ns_get_hl(NS *ns_hl, int hl_id, bool link, bool nodefault)
   if (link) {
     if (it.attr_id >= 0) {
       return 0;
-    } else {
-      if (it.link_global) {
-        *ns_hl = 0;
-      }
-      return it.link_id;
     }
+    if (it.link_global) {
+      *ns_hl = 0;
+    }
+    return it.link_id;
   } else {
     return it.attr_id;
   }
@@ -407,7 +415,7 @@ void update_ns_hl(int ns_id)
   int *hl_attrs = **alloc;
 
   for (int hlf = 0; hlf < HLF_COUNT; hlf++) {
-    int id = syn_check_group(hlf_names[hlf], STRLEN(hlf_names[hlf]));
+    int id = syn_check_group(hlf_names[hlf], strlen(hlf_names[hlf]));
     bool optional = (hlf == HLF_INACTIVE || hlf == HLF_NFLOAT);
     hl_attrs[hlf] = hl_get_ui_attr(ns_id, hlf, id, optional);
   }
@@ -922,22 +930,26 @@ HlAttrs dict2hlattrs(Dict(highlight) *dict, bool use_rgb, int *link_id, Error *e
   CHECK_FLAG(dict, mask, italic, , HL_ITALIC);
   CHECK_FLAG(dict, mask, reverse, , HL_INVERSE);
   CHECK_FLAG(dict, mask, strikethrough, , HL_STRIKETHROUGH);
+  if (use_rgb) {
+    CHECK_FLAG(dict, mask, fg_indexed, , HL_FG_INDEXED);
+    CHECK_FLAG(dict, mask, bg_indexed, , HL_BG_INDEXED);
+  }
   CHECK_FLAG(dict, mask, nocombine, , HL_NOCOMBINE);
   CHECK_FLAG(dict, mask, default, _, HL_DEFAULT);
 
   if (HAS_KEY(dict->fg)) {
-    fg = object_to_color(dict->fg, "fg", true, err);
+    fg = object_to_color(dict->fg, "fg", use_rgb, err);
   } else if (HAS_KEY(dict->foreground)) {
-    fg = object_to_color(dict->foreground, "foreground", true, err);
+    fg = object_to_color(dict->foreground, "foreground", use_rgb, err);
   }
   if (ERROR_SET(err)) {
     return hlattrs;
   }
 
   if (HAS_KEY(dict->bg)) {
-    bg = object_to_color(dict->bg, "bg", true, err);
+    bg = object_to_color(dict->bg, "bg", use_rgb, err);
   } else if (HAS_KEY(dict->background)) {
-    bg = object_to_color(dict->background, "background", true, err);
+    bg = object_to_color(dict->background, "background", use_rgb, err);
   }
   if (ERROR_SET(err)) {
     return hlattrs;
@@ -1024,11 +1036,11 @@ HlAttrs dict2hlattrs(Dict(highlight) *dict, bool use_rgb, int *link_id, Error *e
     }
   }
 
-  // apply gui mask as default for cterm mask
-  if (!cterm_mask_provided) {
-    cterm_mask = mask;
-  }
   if (use_rgb) {
+    // apply gui mask as default for cterm mask
+    if (!cterm_mask_provided) {
+      cterm_mask = mask;
+    }
     hlattrs.rgb_ae_attr = mask;
     hlattrs.rgb_bg_color = bg;
     hlattrs.rgb_fg_color = fg;
@@ -1038,9 +1050,9 @@ HlAttrs dict2hlattrs(Dict(highlight) *dict, bool use_rgb, int *link_id, Error *e
     hlattrs.cterm_fg_color = ctermfg == -1 ? 0 : ctermfg + 1;
     hlattrs.cterm_ae_attr = cterm_mask;
   } else {
-    hlattrs.cterm_bg_color = ctermbg == -1 ? 0 : ctermbg + 1;
-    hlattrs.cterm_fg_color = ctermfg == -1 ? 0 : ctermfg + 1;
-    hlattrs.cterm_ae_attr = cterm_mask;
+    hlattrs.cterm_bg_color = bg == -1 ? 0 : bg + 1;
+    hlattrs.cterm_fg_color = fg == -1 ? 0 : fg + 1;
+    hlattrs.cterm_ae_attr = mask;
   }
 
   return hlattrs;

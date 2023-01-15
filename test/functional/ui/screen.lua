@@ -101,13 +101,10 @@ end
 
 local default_screen_timeout = default_timeout_factor * 3500
 
-do
-  local spawn, nvim_prog = helpers.spawn, helpers.nvim_prog
-  local session = spawn({nvim_prog, '-u', 'NONE', '-i', 'NONE', '-N', '--embed'})
+function Screen._init_colors(session)
   local status, rv = session:request('nvim_get_color_map')
   if not status then
-    print('failed to get color map')
-    os.exit(1)
+    error('failed to get color map')
   end
   local colors = rv
   local colornames = {}
@@ -116,12 +113,15 @@ do
     -- this is just a helper to get any canonical name of a color
     colornames[rgb] = name
   end
-  session:close()
   Screen.colors = colors
   Screen.colornames = colornames
 end
 
 function Screen.new(width, height)
+  if not Screen.colors then
+    Screen._init_colors(get_session())
+  end
+
   if not width then
     width = 53
   end
@@ -519,7 +519,7 @@ function Screen:_wait(check, flags)
   end
 
   assert(timeout >= minimal_timeout)
-  local did_miminal_timeout = false
+  local did_minimal_timeout = false
 
   local function notification_cb(method, args)
     assert(method == 'redraw', string.format(
@@ -536,7 +536,7 @@ function Screen:_wait(check, flags)
 
     if not err then
       success_seen = true
-      if did_miminal_timeout then
+      if did_minimal_timeout then
         self._session:stop()
       end
     elseif success_seen and #args > 0 then
@@ -558,7 +558,7 @@ function Screen:_wait(check, flags)
   end
 
   if not success_seen and not eof then
-    did_miminal_timeout = true
+    did_minimal_timeout = true
     eof = run_session(self._session, flags.request_cb, notification_cb, nil, timeout-minimal_timeout)
   end
 
@@ -769,6 +769,7 @@ end
 
 function Screen:_handle_grid_cursor_goto(grid, row, col)
   self._cursor.grid = grid
+  assert(row >= 0 and col >= 0)
   self._cursor.row = row + 1
   self._cursor.col = col + 1
 end
@@ -1549,7 +1550,8 @@ function Screen:_get_attr_id(attr_state, attrs, hl_id)
       attr_state.modified = true
       return id
     end
-    return "UNEXPECTED "..self:_pprint_attrs(self._attr_table[hl_id][1])
+    local kind = self._options.rgb and 1 or 2
+    return "UNEXPECTED "..self:_pprint_attrs(self._attr_table[hl_id][kind])
   else
     if self:_equal_attrs(attrs, {}) then
       -- ignore this attrs

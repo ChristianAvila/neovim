@@ -1,11 +1,16 @@
 source shared.vim
 source term_util.vim
 
+command -nargs=1 MissingFeature throw 'Skipped: ' .. <args> .. ' feature missing'
+
 " Command to check for the presence of a feature.
 command -nargs=1 CheckFeature call CheckFeature(<f-args>)
 func CheckFeature(name)
+  " if !has(a:name, 1)
+  "   throw 'Checking for non-existent feature ' .. a:name
+  " endif
   if !has(a:name)
-    throw 'Skipped: ' .. a:name .. ' feature missing'
+    MissingFeature a:name
   endif
 endfunc
 
@@ -36,6 +41,22 @@ command -nargs=1 CheckFunction call CheckFunction(<f-args>)
 func CheckFunction(name)
   if !exists('*' .. a:name)
     throw 'Skipped: ' .. a:name .. ' function missing'
+  endif
+endfunc
+
+" Command to check for the presence of an Ex command
+command -nargs=1 CheckCommand call CheckCommand(<f-args>)
+func CheckCommand(name)
+  if !exists(':' .. a:name)
+    throw 'Skipped: ' .. a:name .. ' command not supported'
+  endif
+endfunc
+
+" Command to check for the presence of a shell command
+command -nargs=1 CheckExecutable call CheckExecutable(<f-args>)
+func CheckExecutable(name)
+  if !executable(a:name)
+    throw 'Skipped: ' .. a:name .. ' program not executable'
   endif
 endfunc
 
@@ -71,12 +92,11 @@ func CheckUnix()
   endif
 endfunc
 
-" Command to check for not running on a BSD system.
-" TODO: using this checks should not be needed
-command CheckNotBSD call CheckNotBSD()
-func CheckNotBSD()
-  if has('bsd')
-    throw 'Skipped: does not work on BSD'
+" Command to check for running on Linux
+command CheckLinux call CheckLinux()
+func CheckLinux()
+  if !has('linux')
+    throw 'Skipped: only works on Linux'
   endif
 endfunc
 
@@ -102,6 +122,14 @@ command CheckCanRunGui call CheckCanRunGui()
 func CheckCanRunGui()
   if !has('gui') || ($DISPLAY == "" && !has('gui_running'))
     throw 'Skipped: cannot start the GUI'
+  endif
+endfunc
+
+" Command to Check for an environment variable
+command -nargs=1 CheckEnv call CheckEnv(<f-args>)
+func CheckEnv(name)
+  if empty(eval('$' .. a:name))
+    throw 'Skipped: Environment variable ' .. a:name .. ' is not set'
   endif
 endfunc
 
@@ -142,6 +170,22 @@ command CheckNotAsan call CheckNotAsan()
 func CheckNotAsan()
   if execute('version') =~# '-fsanitize=[a-z,]*\<address\>'
     throw 'Skipped: does not work with ASAN'
+  endif
+endfunc
+
+" Command to check for not running under valgrind
+command CheckNotValgrind call CheckNotValgrind()
+func CheckNotValgrind()
+  if RunningWithValgrind()
+    throw 'Skipped: does not work well with valgrind'
+  endif
+endfunc
+
+" Command to check for X11 based GUI
+command CheckX11BasedGui call CheckX11BasedGui()
+func CheckX11BasedGui()
+  if !g:x11_based_gui
+    throw 'Skipped: requires X11 based GUI'
   endif
 endfunc
 

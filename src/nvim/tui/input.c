@@ -1,25 +1,38 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/vim.h"
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
 #include "nvim/charset.h"
-#include "nvim/ex_docmd.h"
+#include "nvim/event/defs.h"
+#include "nvim/event/multiqueue.h"
+#include "nvim/globals.h"
+#include "nvim/log.h"
 #include "nvim/macros.h"
 #include "nvim/main.h"
+#include "nvim/map.h"
+#include "nvim/memory.h"
+#include "nvim/message.h"
 #include "nvim/option.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/tui/input.h"
+#include "nvim/tui/input_defs.h"
 #include "nvim/tui/tui.h"
-#include "nvim/vim.h"
-#ifdef WIN32
+#ifdef MSWIN
 # include "nvim/os/os_win_console.h"
 #endif
 #include "nvim/event/rstream.h"
 #include "nvim/msgpack_rpc/channel.h"
+#include "nvim/ui.h"
 
 #define KEY_BUFFER_SIZE 0xfff
 
@@ -143,7 +156,7 @@ void tinput_init(TermInput *input, Loop *loop)
   // If stdin is not a pty, switch to stderr. For cases like:
   //    echo q | nvim -es
   //    ls *.md | xargs nvim
-#ifdef WIN32
+#ifdef MSWIN
   if (!os_isatty(input->in_fd)) {
     input->in_fd = os_get_conin_fd();
   }
@@ -159,14 +172,10 @@ void tinput_init(TermInput *input, Loop *loop)
     term = "";  // termkey_new_abstract assumes non-null (#2745)
   }
 
-#if TERMKEY_VERSION_MAJOR > 0 || TERMKEY_VERSION_MINOR > 18
   input->tk = termkey_new_abstract(term,
                                    TERMKEY_FLAG_UTF8 | TERMKEY_FLAG_NOSTART);
   termkey_hook_terminfo_getstr(input->tk, input->tk_ti_hook_fn, NULL);
   termkey_start(input->tk);
-#else
-  input->tk = termkey_new_abstract(term, TERMKEY_FLAG_UTF8);
-#endif
 
   int curflags = termkey_get_canonflags(input->tk);
   termkey_set_canonflags(input->tk, curflags | TERMKEY_CANON_DELBS);
@@ -211,16 +220,12 @@ static void tinput_wait_enqueue(void **argv)
     const size_t len = rbuffer_size(input->key_buffer);
     String keys = { .data = xmallocz(len), .size = len };
     rbuffer_read(input->key_buffer, keys.data, len);
-    if (ui_client_channel_id) {
-      Array args = ARRAY_DICT_INIT;
-      ADD(args, STRING_OBJ(keys));  // 'data'
-      ADD(args, BOOLEAN_OBJ(true));  // 'crlf'
-      ADD(args, INTEGER_OBJ(input->paste));  // 'phase'
-      rpc_send_event(ui_client_channel_id, "nvim_paste", args);
-    } else {
-      multiqueue_put(main_loop.events, tinput_paste_event, 3,
-                     keys.data, keys.size, (intptr_t)input->paste);
-    }
+    MAXSIZE_TEMP_ARRAY(args, 3);
+    ADD_C(args, STRING_OBJ(keys));  // 'data'
+    ADD_C(args, BOOLEAN_OBJ(true));  // 'crlf'
+    ADD_C(args, INTEGER_OBJ(input->paste));  // 'phase'
+    rpc_send_event(ui_client_channel_id, "nvim_paste", args);
+    api_free_string(keys);
     if (input->paste == 1) {
       // Paste phase: "continue"
       input->paste = 2;
@@ -229,60 +234,22 @@ static void tinput_wait_enqueue(void **argv)
   } else {  // enqueue input for the main thread or Nvim server
     RBUFFER_UNTIL_EMPTY(input->key_buffer, buf, len) {
       const String keys = { .data = buf, .size = len };
-      size_t consumed;
-      if (ui_client_channel_id) {
-        Array args = ARRAY_DICT_INIT;
-        Error err = ERROR_INIT;
-        ADD(args, STRING_OBJ(copy_string(keys, NULL)));
-        // TODO(bfredl): could be non-blocking now with paste?
-        ArenaMem res_mem = NULL;
-        Object result = rpc_send_call(ui_client_channel_id, "nvim_input", args, &res_mem, &err);
-        consumed = result.type == kObjectTypeInteger ? (size_t)result.data.integer : 0;
-        arena_mem_free(res_mem);
-      } else {
-        consumed = input_enqueue(keys);
-      }
-      if (consumed) {
-        rbuffer_consumed(input->key_buffer, consumed);
-      }
+      MAXSIZE_TEMP_ARRAY(args, 1);
+      ADD_C(args, STRING_OBJ(keys));
+      // NOTE: This is non-blocking and won't check partially processed input,
+      // but should be fine as all big sends are handled with nvim_paste, not nvim_input
+      rpc_send_event(ui_client_channel_id, "nvim_input", args);
+      rbuffer_consumed(input->key_buffer, len);
       rbuffer_reset(input->key_buffer);
-      if (consumed < len) {
-        break;
-      }
     }
   }
-  uv_mutex_lock(&input->key_buffer_mutex);
-  input->waiting = false;
-  uv_cond_signal(&input->key_buffer_cond);
-  uv_mutex_unlock(&input->key_buffer_mutex);
-}
-
-static void tinput_paste_event(void **argv)
-{
-  String keys = { .data = argv[0], .size = (size_t)argv[1] };
-  intptr_t phase = (intptr_t)argv[2];
-
-  Error err = ERROR_INIT;
-  nvim_paste(keys, true, phase, &err);
-  if (ERROR_SET(&err)) {
-    semsg("paste: %s", err.msg);
-    api_clear_error(&err);
-  }
-
-  api_free_string(keys);
 }
 
 static void tinput_flush(TermInput *input, bool wait_until_empty)
 {
   size_t drain_boundary = wait_until_empty ? 0 : 0xff;
   do {
-    uv_mutex_lock(&input->key_buffer_mutex);
-    loop_schedule_fast(&main_loop, event_create(tinput_wait_enqueue, 1, input));
-    input->waiting = true;
-    while (input->waiting) {
-      uv_cond_wait(&input->key_buffer_cond, &input->key_buffer_mutex);
-    }
-    uv_mutex_unlock(&input->key_buffer_mutex);
+    tinput_wait_enqueue((void **)&input);
   } while (rbuffer_size(input->key_buffer) > drain_boundary);
 }
 
@@ -328,15 +295,14 @@ static void forward_simple_utf8(TermInput *input, TermKeyKey *key)
       && map_has(KittyKey, cstr_t)(&kitty_key_map, (KittyKey)key->code.codepoint)) {
     handle_kitty_key_protocol(input, key);
     return;
-  } else {
-    while (*ptr) {
-      if (*ptr == '<') {
-        len += (size_t)snprintf(buf + len, sizeof(buf) - len, "<lt>");
-      } else {
-        buf[len++] = *ptr;
-      }
-      ptr++;
+  }
+  while (*ptr) {
+    if (*ptr == '<') {
+      len += (size_t)snprintf(buf + len, sizeof(buf) - len, "<lt>");
+    } else {
+      buf[len++] = *ptr;
     }
+    ptr++;
   }
 
   tinput_enqueue(input, buf, len);
@@ -359,21 +325,20 @@ static void forward_modified_utf8(TermInput *input, TermKeyKey *key)
                                      (KittyKey)key->code.codepoint)) {
       handle_kitty_key_protocol(input, key);
       return;
-    } else {
-      // Termkey doesn't include the S- modifier for ASCII characters (e.g.,
-      // ctrl-shift-l is <C-L> instead of <C-S-L>.  Vim, on the other hand,
-      // treats <C-L> and <C-l> the same, requiring the S- modifier.
-      len = termkey_strfkey(input->tk, buf, sizeof(buf), key, TERMKEY_FORMAT_VIM);
-      if ((key->modifiers & TERMKEY_KEYMOD_CTRL)
-          && !(key->modifiers & TERMKEY_KEYMOD_SHIFT)
-          && ASCII_ISUPPER(key->code.codepoint)) {
-        assert(len <= 62);
-        // Make room for the S-
-        memmove(buf + 3, buf + 1, len - 1);
-        buf[1] = 'S';
-        buf[2] = '-';
-        len += 2;
-      }
+    }
+    // Termkey doesn't include the S- modifier for ASCII characters (e.g.,
+    // ctrl-shift-l is <C-L> instead of <C-S-L>.  Vim, on the other hand,
+    // treats <C-L> and <C-l> the same, requiring the S- modifier.
+    len = termkey_strfkey(input->tk, buf, sizeof(buf), key, TERMKEY_FORMAT_VIM);
+    if ((key->modifiers & TERMKEY_KEYMOD_CTRL)
+        && !(key->modifiers & TERMKEY_KEYMOD_SHIFT)
+        && ASCII_ISUPPER(key->code.codepoint)) {
+      assert(len <= 62);
+      // Make room for the S-
+      memmove(buf + 3, buf + 1, len - 1);
+      buf[1] = 'S';
+      buf[2] = '-';
+      len += 2;
     }
   }
 
@@ -564,7 +529,10 @@ static bool handle_focus_event(TermInput *input)
     bool focus_gained = *rbuffer_get(input->read_stream.buffer, 2) == 'I';
     // Advance past the sequence
     rbuffer_consumed(input->read_stream.buffer, 3);
-    autocmd_schedule_focusgained(focus_gained);
+
+    MAXSIZE_TEMP_ARRAY(args, 1);
+    ADD_C(args, BOOLEAN_OBJ(focus_gained));
+    rpc_send_event(ui_client_channel_id, "nvim_ui_set_focus", args);
     return true;
   }
   return false;
@@ -611,10 +579,14 @@ static HandleState handle_bracketed_paste(TermInput *input)
   return kNotApplicable;
 }
 
-static void set_bg_deferred(void **argv)
+static void set_bg(char *bgvalue)
 {
-  char *bgvalue = argv[0];
-  set_tty_background(bgvalue);
+  if (ui_client_attached) {
+    MAXSIZE_TEMP_ARRAY(args, 2);
+    ADD_C(args, STRING_OBJ(cstr_as_string("term_background")));
+    ADD_C(args, STRING_OBJ(cstr_as_string(bgvalue)));
+    rpc_send_event(ui_client_channel_id, "nvim_ui_set_option", args);
+  }
 }
 
 // During startup, tui.c requests the background color (see `ext.get_bg`).
@@ -696,10 +668,11 @@ static HandleState handle_background_color(TermInput *input)
     double g = (double)rgb[1] / (double)rgb_max[1];
     double b = (double)rgb[2] / (double)rgb_max[2];
     double luminance = (0.299 * r) + (0.587 * g) + (0.114 * b);  // CCIR 601
-    char *bgvalue = luminance < 0.5 ? "dark" : "light";
+    bool is_dark = luminance < 0.5;
+    char *bgvalue = is_dark ? "dark" : "light";
     DLOG("bg response: %s", bgvalue);
-    loop_schedule_deferred(&main_loop,
-                           event_create(set_bg_deferred, 1, bgvalue));
+    ui_client_bg_respose = is_dark ? kTrue : kFalse;
+    set_bg(bgvalue);
     input->waiting_for_bg_response = 0;
   } else if (!done && !bad) {
     // An incomplete sequence was found, waiting for the next input.
