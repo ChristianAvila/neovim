@@ -8,31 +8,27 @@
 
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/api/vim.h"
 #include "nvim/ascii.h"
-#include "nvim/autocmd.h"
 #include "nvim/charset.h"
 #include "nvim/event/defs.h"
-#include "nvim/event/multiqueue.h"
-#include "nvim/globals.h"
 #include "nvim/log.h"
 #include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/map.h"
 #include "nvim/memory.h"
-#include "nvim/message.h"
 #include "nvim/option.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/tui/input.h"
 #include "nvim/tui/input_defs.h"
 #include "nvim/tui/tui.h"
+#include "nvim/types.h"
+#include "nvim/ui_client.h"
 #ifdef MSWIN
 # include "nvim/os/os_win_console.h"
 #endif
 #include "nvim/event/rstream.h"
 #include "nvim/msgpack_rpc/channel.h"
-#include "nvim/ui.h"
 
 #define KEY_BUFFER_SIZE 0xfff
 
@@ -121,14 +117,6 @@ static const struct kitty_key_map_entry {
 
 static Map(KittyKey, cstr_t) kitty_key_map = MAP_INIT;
 
-#ifndef UNIT_TESTING
-typedef enum {
-  kIncomplete = -1,
-  kNotApplicable = 0,
-  kComplete = 1,
-} HandleState;
-#endif
-
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "tui/input.c.generated.h"
 #endif
@@ -145,27 +133,13 @@ void tinput_init(TermInput *input, Loop *loop)
   input->ttimeout = (bool)p_ttimeout;
   input->ttimeoutlen = p_ttm;
   input->key_buffer = rbuffer_new(KEY_BUFFER_SIZE);
-  uv_mutex_init(&input->key_buffer_mutex);
-  uv_cond_init(&input->key_buffer_cond);
 
   for (size_t i = 0; i < ARRAY_SIZE(kitty_key_map_entry); i++) {
     map_put(KittyKey, cstr_t)(&kitty_key_map, kitty_key_map_entry[i].key,
                               kitty_key_map_entry[i].name);
   }
 
-  // If stdin is not a pty, switch to stderr. For cases like:
-  //    echo q | nvim -es
-  //    ls *.md | xargs nvim
-#ifdef MSWIN
-  if (!os_isatty(input->in_fd)) {
-    input->in_fd = os_get_conin_fd();
-  }
-#else
-  if (!os_isatty(input->in_fd) && os_isatty(STDERR_FILENO)) {
-    input->in_fd = STDERR_FILENO;
-  }
-#endif
-  input_global_fd_init(input->in_fd);
+  input->in_fd = STDIN_FILENO;
 
   const char *term = os_getenv("TERM");
   if (!term) {
@@ -174,7 +148,7 @@ void tinput_init(TermInput *input, Loop *loop)
 
   input->tk = termkey_new_abstract(term,
                                    TERMKEY_FLAG_UTF8 | TERMKEY_FLAG_NOSTART);
-  termkey_hook_terminfo_getstr(input->tk, input->tk_ti_hook_fn, NULL);
+  termkey_hook_terminfo_getstr(input->tk, input->tk_ti_hook_fn, input);
   termkey_start(input->tk);
 
   int curflags = termkey_get_canonflags(input->tk);
@@ -190,8 +164,6 @@ void tinput_destroy(TermInput *input)
 {
   map_destroy(KittyKey, cstr_t)(&kitty_key_map);
   rbuffer_free(input->key_buffer);
-  uv_mutex_destroy(&input->key_buffer_mutex);
-  uv_cond_destroy(&input->key_buffer_cond);
   time_watcher_close(&input->timer_handle, NULL);
   stream_close(&input->read_stream, NULL, NULL);
   termkey_destroy(input->tk);
@@ -209,13 +181,14 @@ void tinput_stop(TermInput *input)
 }
 
 static void tinput_done_event(void **argv)
+  FUNC_ATTR_NORETURN
 {
-  input_done();
+  os_exit(1);
 }
 
-static void tinput_wait_enqueue(void **argv)
+/// Send all pending input in key buffer to Nvim server.
+static void tinput_flush(TermInput *input)
 {
-  TermInput *input = argv[0];
   if (input->paste) {  // produce exactly one paste event
     const size_t len = rbuffer_size(input->key_buffer);
     String keys = { .data = xmallocz(len), .size = len };
@@ -231,7 +204,7 @@ static void tinput_wait_enqueue(void **argv)
       input->paste = 2;
     }
     rbuffer_reset(input->key_buffer);
-  } else {  // enqueue input for the main thread or Nvim server
+  } else {  // enqueue input
     RBUFFER_UNTIL_EMPTY(input->key_buffer, buf, len) {
       const String keys = { .data = buf, .size = len };
       MAXSIZE_TEMP_ARRAY(args, 1);
@@ -245,21 +218,13 @@ static void tinput_wait_enqueue(void **argv)
   }
 }
 
-static void tinput_flush(TermInput *input, bool wait_until_empty)
-{
-  size_t drain_boundary = wait_until_empty ? 0 : 0xff;
-  do {
-    tinput_wait_enqueue((void **)&input);
-  } while (rbuffer_size(input->key_buffer) > drain_boundary);
-}
-
 static void tinput_enqueue(TermInput *input, char *buf, size_t size)
 {
   if (rbuffer_size(input->key_buffer) >
       rbuffer_capacity(input->key_buffer) - 0xff) {
     // don't ever let the buffer get too full or we risk putting incomplete keys
     // into it
-    tinput_flush(input, false);
+    tinput_flush(input);
   }
   rbuffer_write(input->key_buffer, buf, size);
 }
@@ -510,7 +475,7 @@ static void tinput_timer_cb(TimeWatcher *watcher, void *data)
     handle_raw_buffer(input, true);
   }
   tk_getkeys(input, true);
-  tinput_flush(input, true);
+  tinput_flush(input);
 }
 
 /// Handle focus events.
@@ -558,13 +523,13 @@ static HandleState handle_bracketed_paste(TermInput *input)
 
     if (enable) {
       // Flush before starting paste.
-      tinput_flush(input, true);
+      tinput_flush(input);
       // Paste phase: "first-chunk".
       input->paste = 1;
     } else if (input->paste) {
       // Paste phase: "last-chunk".
       input->paste = input->paste == 2 ? 3 : -1;
-      tinput_flush(input, true);
+      tinput_flush(input);
       // Paste phase: "disabled".
       input->paste = 0;
     }
@@ -600,7 +565,7 @@ static void set_bg(char *bgvalue)
 // ignored in the calculations.
 //
 // [1] https://en.wikipedia.org/wiki/Luma_%28video%29
-static HandleState handle_background_color(TermInput *input)
+HandleState handle_background_color(TermInput *input)
 {
   if (input->waiting_for_bg_response <= 0) {
     return kNotApplicable;
@@ -671,7 +636,7 @@ static HandleState handle_background_color(TermInput *input)
     bool is_dark = luminance < 0.5;
     char *bgvalue = is_dark ? "dark" : "light";
     DLOG("bg response: %s", bgvalue);
-    ui_client_bg_respose = is_dark ? kTrue : kFalse;
+    ui_client_bg_response = is_dark ? kTrue : kFalse;
     set_bg(bgvalue);
     input->waiting_for_bg_response = 0;
   } else if (!done && !bad) {
@@ -685,12 +650,6 @@ static HandleState handle_background_color(TermInput *input)
   }
   return kComplete;
 }
-#ifdef UNIT_TESTING
-HandleState ut_handle_background_color(TermInput *input)
-{
-  return handle_background_color(input);
-}
-#endif
 
 static void handle_raw_buffer(TermInput *input, bool force)
 {
@@ -764,7 +723,7 @@ static void tinput_read_cb(Stream *stream, RBuffer *buf, size_t count_, void *da
   }
 
   handle_raw_buffer(input, false);
-  tinput_flush(input, true);
+  tinput_flush(input);
 
   // An incomplete sequence was found. Leave it in the raw buffer and wait for
   // the next input.

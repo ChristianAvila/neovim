@@ -20,14 +20,6 @@ function transform_schema_to_table()
 end
 --]=]
 
----@class lsp.ShowMessageRequestParams
----@field type lsp.MessageType
----@field message string
----@field actions nil|lsp.MessageActionItem[]
-
----@class lsp.MessageActionItem
----@field title string
-
 local constants = {
   DiagnosticSeverity = {
     -- Reports an error.
@@ -60,6 +52,7 @@ local constants = {
   },
 
   -- The file event type.
+  ---@enum lsp.FileChangeType
   FileChangeType = {
     -- The file got created.
     Created = 1,
@@ -303,6 +296,17 @@ local constants = {
     Source = 'source',
     -- Base kind for an organize imports source action
     SourceOrganizeImports = 'source.organizeImports',
+  },
+  -- The reason why code actions were requested.
+  ---@enum lsp.CodeActionTriggerKind
+  CodeActionTriggerKind = {
+    -- Code actions were explicitly requested by the user or by an extension.
+    Invoked = 1,
+    -- Code actions were requested automatically.
+    --
+    -- This typically happens when current selection in a file changes, but can
+    -- also be triggered when file content changes.
+    Automatic = 2,
   },
 }
 

@@ -629,6 +629,7 @@ func Test_WinScrolled_diff()
         \ }, event)
 
   call StopVimInTerminal(buf)
+  call delete('XscrollEvent')
 endfunc
 
 func Test_WinClosed()
@@ -1896,6 +1897,64 @@ func Test_Cmdline()
   call assert_equal(':', g:entered)
   au! CmdlineChanged
 
+  autocmd CmdlineChanged : let g:log += [getcmdline()]
+
+  let g:log = []
+  cnoremap <F1> <Cmd>call setcmdline('ls')<CR>
+  call feedkeys(":\<F1>", 'xt')
+  call assert_equal(['ls'], g:log)
+  cunmap <F1>
+
+  let g:log = []
+  call feedkeys(":sign \<Tab>\<Tab>\<C-N>\<C-P>\<S-Tab>\<S-Tab>\<Esc>", 'xt')
+  call assert_equal([
+        \ 's',
+        \ 'si',
+        \ 'sig',
+        \ 'sign',
+        \ 'sign ',
+        \ 'sign define',
+        \ 'sign jump',
+        \ 'sign list',
+        \ 'sign jump',
+        \ 'sign define',
+        \ 'sign ',
+        \ ], g:log)
+  let g:log = []
+  set wildmenu wildoptions+=pum
+  call feedkeys(":sign \<S-Tab>\<PageUp>\<kPageUp>\<kPageDown>\<PageDown>\<Esc>", 'xt')
+  call assert_equal([
+        \ 's',
+        \ 'si',
+        \ 'sig',
+        \ 'sign',
+        \ 'sign ',
+        \ 'sign unplace',
+        \ 'sign jump',
+        \ 'sign define',
+        \ 'sign undefine',
+        \ 'sign unplace',
+        \ ], g:log)
+  set wildmenu& wildoptions&
+
+  let g:log = []
+  let @r = 'abc'
+  call feedkeys(":0\<C-R>r1\<C-R>\<C-O>r2\<C-R>\<C-R>r3\<Esc>", 'xt')
+  call assert_equal([
+        \ '0',
+        \ '0a',
+        \ '0ab',
+        \ '0abc',
+        \ '0abc1',
+        \ '0abc1abc',
+        \ '0abc1abc2',
+        \ '0abc1abc2abc',
+        \ '0abc1abc2abc3',
+        \ ], g:log)
+
+  unlet g:log
+  au! CmdlineChanged
+
   au! CmdlineEnter : let g:entered = expand('<afile>')
   au! CmdlineLeave : let g:left = expand('<afile>')
   let g:entered = 0
@@ -2661,7 +2720,7 @@ func Test_autocmd_bufreadpre()
   close
   close
   call delete('XAutocmdBufReadPre.txt')
-  " set cpo-=g
+  set cpo-=g
 endfunc
 
 " FileChangedShell tested in test_filechanged.vim
@@ -2918,7 +2977,7 @@ func Test_autocmd_CmdWinEnter()
   call term_sendkeys(buf, "q:")
   call term_wait(buf)
   call term_sendkeys(buf, ":echo b:dummy_var\<cr>")
-  call WaitForAssert({-> assert_match('^This is a dummy', term_getline(buf, 6))}, 1000)
+  call WaitForAssert({-> assert_match('^This is a dummy', term_getline(buf, 6))}, 2000)
   call term_sendkeys(buf, ":echo &buftype\<cr>")
   call WaitForAssert({-> assert_notmatch('^nofile', term_getline(buf, 6))}, 1000)
   call term_sendkeys(buf, ":echo winnr\<cr>")

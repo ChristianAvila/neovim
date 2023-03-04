@@ -1,25 +1,35 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 
+/// Nvim's own UI client, which attaches to a child or remote Nvim server.
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 #include "nvim/api/private/helpers.h"
+#include "nvim/channel.h"
 #include "nvim/eval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/event/loop.h"
-#include "nvim/event/multiqueue.h"
 #include "nvim/globals.h"
 #include "nvim/highlight.h"
 #include "nvim/log.h"
 #include "nvim/main.h"
 #include "nvim/memory.h"
 #include "nvim/msgpack_rpc/channel.h"
+#include "nvim/msgpack_rpc/channel_defs.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/tui/tui.h"
 #include "nvim/ui.h"
 #include "nvim/ui_client.h"
 
+#ifdef MSWIN
+# include "nvim/os/os_win_console.h"
+#endif
+
 static TUIData *tui = NULL;
+static bool ui_client_is_remote = false;
 
 // uncrustify:off
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -27,7 +37,6 @@ static TUIData *tui = NULL;
 # include "ui_events_client.generated.h"
 #endif
 // uncrustify:on
-//
 
 uint64_t ui_client_start_server(int argc, char **argv)
 {
@@ -48,21 +57,23 @@ uint64_t ui_client_start_server(int argc, char **argv)
                                        on_err, CALLBACK_NONE,
                                        false, true, true, false, kChannelStdinPipe,
                                        NULL, 0, 0, NULL, &exit_status);
+
+  // If stdin is not a pty, it is forwarded to the client.
+  // Replace stdin in the TUI process with the tty fd.
   if (ui_client_forward_stdin) {
     close(0);
-    dup(2);
+#ifdef MSWIN
+    os_open_conin_fd();
+#else
+    dup(stderr_isatty ? STDERR_FILENO : STDOUT_FILENO);
+#endif
   }
 
   return channel->id;
 }
 
-void ui_client_run(bool remote_ui)
-  FUNC_ATTR_NORETURN
+void ui_client_attach(int width, int height, char *term)
 {
-  int width, height;
-  char *term;
-  tui = tui_start(&width, &height, &term);
-
   MAXSIZE_TEMP_ARRAY(args, 3);
   ADD_C(args, INTEGER_OBJ(width));
   ADD_C(args, INTEGER_OBJ(height));
@@ -72,24 +83,42 @@ void ui_client_run(bool remote_ui)
   PUT_C(opts, "ext_linegrid", BOOLEAN_OBJ(true));
   PUT_C(opts, "ext_termcolors", BOOLEAN_OBJ(true));
   if (term) {
-    PUT(opts, "term_name", STRING_OBJ(cstr_to_string(term)));
+    PUT_C(opts, "term_name", STRING_OBJ(cstr_as_string(term)));
   }
-  if (ui_client_bg_respose != kNone) {
-    bool is_dark = (ui_client_bg_respose == kTrue);
+  if (ui_client_bg_response != kNone) {
+    bool is_dark = (ui_client_bg_response == kTrue);
     PUT_C(opts, "term_background", STRING_OBJ(cstr_as_string(is_dark ? "dark" : "light")));
   }
   PUT_C(opts, "term_colors", INTEGER_OBJ(t_colors));
-  if (!remote_ui) {
+  if (!ui_client_is_remote) {
     PUT_C(opts, "stdin_tty", BOOLEAN_OBJ(stdin_isatty));
     PUT_C(opts, "stdout_tty", BOOLEAN_OBJ(stdout_isatty));
     if (ui_client_forward_stdin) {
       PUT_C(opts, "stdin_fd", INTEGER_OBJ(UI_CLIENT_STDIN_FD));
+      ui_client_forward_stdin = false;  // stdin shouldn't be forwarded again #22292
     }
   }
   ADD_C(args, DICTIONARY_OBJ(opts));
 
   rpc_send_event(ui_client_channel_id, "nvim_ui_attach", args);
   ui_client_attached = true;
+}
+
+void ui_client_detach(void)
+{
+  rpc_send_event(ui_client_channel_id, "nvim_ui_detach", (Array)ARRAY_DICT_INIT);
+  ui_client_attached = false;
+}
+
+void ui_client_run(bool remote_ui)
+  FUNC_ATTR_NORETURN
+{
+  ui_client_is_remote = remote_ui;
+  int width, height;
+  char *term;
+  tui_start(&tui, &width, &height, &term);
+
+  ui_client_attach(width, height, term);
 
   // os_exit() will be invoked when the client channel detaches
   while (true) {
@@ -99,7 +128,9 @@ void ui_client_run(bool remote_ui)
 
 void ui_client_stop(void)
 {
-  tui_stop(tui);
+  if (!tui_is_stopped(tui)) {
+    tui_stop(tui);
+  }
 }
 
 void ui_client_set_size(int width, int height)
@@ -124,7 +155,7 @@ UIClientHandler ui_client_get_redraw_handler(const char *name, size_t name_len, 
 
 /// Placeholder for _sync_ requests with 'redraw' method name
 ///
-/// async 'redraw' events, which are expected when nvim acts as an ui client.
+/// async 'redraw' events, which are expected when nvim acts as a ui client.
 /// get handled in msgpack_rpc/unpacker.c and directly dispatched to handlers
 /// of specific ui events, like ui_client_event_grid_resize and so on.
 Object handle_ui_client_redraw(uint64_t channel_id, Array args, Arena *arena, Error *error)

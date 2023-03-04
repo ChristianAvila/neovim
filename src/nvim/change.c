@@ -296,7 +296,9 @@ static void changed_common(linenr_T lnum, colnr_T col, linenr_T lnume, linenr_T 
       for (int i = 0; i < wp->w_lines_valid; i++) {
         if (wp->w_lines[i].wl_valid) {
           if (wp->w_lines[i].wl_lnum >= lnum) {
-            if (wp->w_lines[i].wl_lnum < lnume) {
+            // Do not change wl_lnum at index zero, it is used to
+            // compare with w_topline.  Invalidate it instead.
+            if (wp->w_lines[i].wl_lnum < lnume || i == 0) {
               // line included in change
               wp->w_lines[i].wl_valid = false;
             } else if (xtra != 0) {
@@ -418,14 +420,7 @@ void appended_lines(linenr_T lnum, linenr_T count)
 /// Like appended_lines(), but adjust marks first.
 void appended_lines_mark(linenr_T lnum, long count)
 {
-  // Skip mark_adjust when adding a line after the last one, there can't
-  // be marks there. But it's still needed in diff mode.
-  if (lnum + count < curbuf->b_ml.ml_line_count || curwin->w_p_diff) {
-    mark_adjust(lnum + 1, (linenr_T)MAXLNUM, (linenr_T)count, 0L, kExtmarkUndo);
-  } else {
-    extmark_adjust(curbuf, lnum + 1, (linenr_T)MAXLNUM, (linenr_T)count, 0L,
-                   kExtmarkUndo);
-  }
+  mark_adjust(lnum + 1, (linenr_T)MAXLNUM, (linenr_T)count, 0L, kExtmarkUndo);
   changed_lines(lnum + 1, 0, lnum + 1, (linenr_T)count, true);
 }
 
@@ -1694,13 +1689,7 @@ int open_line(int dir, int flags, int second_line_indent, bool *did_do_comment)
     }
     // Postpone calling changed_lines(), because it would mess up folding
     // with markers.
-    // Skip mark_adjust when adding a line after the last one, there can't
-    // be marks there. But still needed in diff mode.
-    if (curwin->w_cursor.lnum + 1 < curbuf->b_ml.ml_line_count
-        || curwin->w_p_diff) {
-      mark_adjust(curwin->w_cursor.lnum + 1, (linenr_T)MAXLNUM, 1L, 0L,
-                  kExtmarkNOOP);
-    }
+    mark_adjust(curwin->w_cursor.lnum + 1, (linenr_T)MAXLNUM, 1L, 0L, kExtmarkNOOP);
     did_append = true;
   } else {
     // In MODE_VREPLACE state we are starting to replace the next line.

@@ -474,7 +474,7 @@ char_u *get_special_key_name(int c, int modifiers)
 
   int i, idx;
   int table_idx;
-  char_u *s;
+  char *s;
 
   string[0] = '<';
   idx = 1;
@@ -543,7 +543,7 @@ char_u *get_special_key_name(int c, int modifiers)
       } else {
         s = transchar(c);
         while (*s) {
-          string[idx++] = *s++;
+          string[idx++] = (uint8_t)(*s++);
         }
       }
     }
@@ -572,7 +572,7 @@ char_u *get_special_key_name(int c, int modifiers)
 /// @param[out]  did_simplify  found <C-H>, etc.
 ///
 /// @return Number of characters added to dst, zero for no match.
-unsigned int trans_special(const char **const srcp, const size_t src_len, char_u *const dst,
+unsigned int trans_special(const char **const srcp, const size_t src_len, char *const dst,
                            const int flags, const bool escape_ks, bool *const did_simplify)
   FUNC_ATTR_NONNULL_ARG(1, 3) FUNC_ATTR_WARN_UNUSED_RESULT
 {
@@ -590,27 +590,27 @@ unsigned int trans_special(const char **const srcp, const size_t src_len, char_u
 /// When "escape_ks" is true escape K_SPECIAL bytes in the character.
 /// The sequence is not NUL terminated.
 /// This is how characters in a string are encoded.
-unsigned int special_to_buf(int key, int modifiers, bool escape_ks, char_u *dst)
+unsigned int special_to_buf(int key, int modifiers, bool escape_ks, char *dst)
 {
   unsigned int dlen = 0;
 
   // Put the appropriate modifier in a string.
   if (modifiers != 0) {
-    dst[dlen++] = K_SPECIAL;
-    dst[dlen++] = KS_MODIFIER;
-    dst[dlen++] = (char_u)modifiers;
+    dst[dlen++] = (char)(uint8_t)K_SPECIAL;
+    dst[dlen++] = (char)(uint8_t)KS_MODIFIER;
+    dst[dlen++] = (char)(uint8_t)modifiers;
   }
 
   if (IS_SPECIAL(key)) {
-    dst[dlen++] = K_SPECIAL;
-    dst[dlen++] = (char_u)KEY2TERMCAP0(key);
-    dst[dlen++] = KEY2TERMCAP1(key);
+    dst[dlen++] = (char)(uint8_t)K_SPECIAL;
+    dst[dlen++] = (char)(uint8_t)KEY2TERMCAP0(key);
+    dst[dlen++] = (char)(uint8_t)KEY2TERMCAP1(key);
   } else if (escape_ks) {
-    char_u *after = add_char2buf(key, dst + dlen);
+    char *after = add_char2buf(key, dst + dlen);
     assert(after >= dst && (uintmax_t)(after - dst) <= UINT_MAX);
     dlen = (unsigned int)(after - dst);
   } else {
-    dlen += (unsigned int)utf_char2bytes(key, (char *)dst + dlen);
+    dlen += (unsigned int)utf_char2bytes(key, dst + dlen);
   }
 
   return dlen;
@@ -629,15 +629,14 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
                      const int flags, bool *const did_simplify)
   FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ARG(1, 3)
 {
-  const char_u *last_dash;
-  const char_u *end_of_name;
-  const char_u *src;
-  const char_u *bp;
-  const char_u *const end = (char_u *)(*srcp) + src_len - 1;
+  const char *last_dash;
+  const char *end_of_name;
+  const char *src;
+  const char *bp;
+  const char *const end = *srcp + src_len - 1;
   const bool in_string = flags & FSK_IN_STRING;
   int modifiers;
   int bit;
-  int key;
   uvarnumber_T n;
   int l;
 
@@ -645,7 +644,7 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
     return 0;
   }
 
-  src = (char_u *)(*srcp);
+  src = *srcp;
   if (src[0] != '<') {
     return 0;
   }
@@ -659,7 +658,7 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
     if (*bp == '-') {
       last_dash = bp;
       if (bp + 1 <= end) {
-        l = utfc_ptr2len_len((char *)bp + 1, (int)(end - bp) + 1);
+        l = utfc_ptr2len_len(bp + 1, (int)(end - bp) + 1);
         // Anything accepted, like <C-?>.
         // <C-"> or <M-"> are not special in strings as " is
         // the string delimiter. With a backslash it works: <M-\">
@@ -674,7 +673,7 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
     if (end - bp > 3 && bp[0] == 't' && bp[1] == '_') {
       bp += 3;  // skip t_xx, xx may be '-' or '>'
     } else if (end - bp > 4 && STRNICMP(bp, "char-", 5) == 0) {
-      vim_str2nr((char *)bp + 5, NULL, &l, STR2NR_ALL, NULL, NULL, 0, true);
+      vim_str2nr(bp + 5, NULL, &l, STR2NR_ALL, NULL, NULL, 0, true);
       if (l == 0) {
         emsg(_(e_invarg));
         return 0;
@@ -685,13 +684,14 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
   }
 
   if (bp <= end && *bp == '>') {  // found matching '>'
+    int key;
     end_of_name = bp + 1;
 
     // Which modifiers are given?
     modifiers = 0x0;
     for (bp = src + 1; bp < last_dash; bp++) {
       if (*bp != '-') {
-        bit = name_to_mod_mask(*bp);
+        bit = name_to_mod_mask((uint8_t)(*bp));
         if (bit == 0x0) {
           break;                // Illegal modifier name
         }
@@ -704,7 +704,7 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
       if (STRNICMP(last_dash + 1, "char-", 5) == 0
           && ascii_isdigit(last_dash[6])) {
         // <Char-123> or <Char-033> or <Char-0x33>
-        vim_str2nr((char *)last_dash + 6, NULL, &l, STR2NR_ALL, NULL, &n, 0, true);
+        vim_str2nr(last_dash + 6, NULL, &l, STR2NR_ALL, NULL, &n, 0, true);
         if (l == 0) {
           emsg(_(e_invarg));
           return 0;
@@ -718,12 +718,12 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
           // Special case for a double-quoted string
           off = l = 2;
         } else {
-          l = utfc_ptr2len((char *)last_dash + 1);
+          l = utfc_ptr2len(last_dash + 1);
         }
         if (modifiers != 0 && last_dash[l + 1] == '>') {
-          key = utf_ptr2char((char *)last_dash + off);
+          key = utf_ptr2char(last_dash + off);
         } else {
-          key = get_special_key_code(last_dash + off);
+          key = get_special_key_code((char_u *)last_dash + off);
           if (!(flags & FSK_KEEP_X_KEY)) {
             key = handle_x_keys(key);
           }
@@ -753,7 +753,7 @@ int find_special_key(const char **const srcp, const size_t src_len, int *const m
         }
 
         *modp = modifiers;
-        *srcp = (char *)end_of_name;
+        *srcp = end_of_name;
         return key;
       }  // else { ELOG("unknown key: '%s'", src); }
     }
@@ -944,7 +944,7 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
         }
       }
 
-      slen = trans_special(&src, (size_t)(end - src) + 1, (char_u *)result + dlen,
+      slen = trans_special(&src, (size_t)(end - src) + 1, result + dlen,
                            FSK_KEYCODE | ((flags & REPTERM_NO_SIMPLIFY) ? 0 : FSK_SIMPLIFY),
                            true, did_simplify);
       if (slen) {
@@ -1033,20 +1033,20 @@ char *replace_termcodes(const char *const from, const size_t from_len, char **co
 /// @param[out]  s  Buffer to add to. Must have at least MB_MAXBYTES + 1 bytes.
 ///
 /// @return Pointer to after the added bytes.
-char_u *add_char2buf(int c, char_u *s)
+char *add_char2buf(int c, char *s)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  char_u temp[MB_MAXBYTES + 1];
-  const int len = utf_char2bytes(c, (char *)temp);
+  char temp[MB_MAXBYTES + 1];
+  const int len = utf_char2bytes(c, temp);
   for (int i = 0; i < len; i++) {
     c = (uint8_t)temp[i];
     // Need to escape K_SPECIAL like in the typeahead buffer.
     if (c == K_SPECIAL) {
-      *s++ = K_SPECIAL;
-      *s++ = KS_SPECIAL;
+      *s++ = (char)(uint8_t)K_SPECIAL;
+      *s++ = (char)(uint8_t)KS_SPECIAL;
       *s++ = KE_FILLER;
     } else {
-      *s++ = (char_u)c;
+      *s++ = (char)(uint8_t)c;
     }
   }
   return s;
@@ -1059,10 +1059,10 @@ char *vim_strsave_escape_ks(char *p)
   // Need a buffer to hold up to three times as much.  Four in case of an
   // illegal utf-8 byte:
   // 0xc0 -> 0xc3 - 0x80 -> 0xc3 K_SPECIAL KS_SPECIAL KE_FILLER
-  char_u *res = xmalloc(strlen(p) * 4 + 1);
-  char_u *d = res;
-  for (char_u *s = (char_u *)p; *s != NUL;) {
-    if (s[0] == K_SPECIAL && s[1] != NUL && s[2] != NUL) {
+  char *res = xmalloc(strlen(p) * 4 + 1);
+  char *d = res;
+  for (char *s = p; *s != NUL;) {
+    if ((uint8_t)s[0] == K_SPECIAL && s[1] != NUL && s[2] != NUL) {
       // Copy special key unmodified.
       *d++ = *s++;
       *d++ = *s++;
@@ -1070,20 +1070,20 @@ char *vim_strsave_escape_ks(char *p)
     } else {
       // Add character, possibly multi-byte to destination, escaping
       // K_SPECIAL. Be careful, it can be an illegal byte!
-      d = add_char2buf(utf_ptr2char((char *)s), d);
-      s += utf_ptr2len((char *)s);
+      d = add_char2buf(utf_ptr2char(s), d);
+      s += utf_ptr2len(s);
     }
   }
   *d = NUL;
 
-  return (char *)res;
+  return res;
 }
 
 /// Remove escaping from K_SPECIAL characters.  Reverse of
 /// vim_strsave_escape_ks().  Works in-place.
-void vim_unescape_ks(char_u *p)
+void vim_unescape_ks(char *p)
 {
-  char_u *s = p, *d = p;
+  char_u *s = (char_u *)p, *d = (char_u *)p;
 
   while (*s != NUL) {
     if (s[0] == K_SPECIAL && s[1] == KS_SPECIAL && s[2] == KE_FILLER) {

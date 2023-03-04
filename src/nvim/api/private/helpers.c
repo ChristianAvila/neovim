@@ -33,7 +33,6 @@
 #include "nvim/pos.h"
 #include "nvim/ui.h"
 #include "nvim/version.h"
-#include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/private/funcs_metadata.generated.h"
@@ -151,7 +150,18 @@ bool try_end(Error *err)
       xfree(msg);
     }
   } else if (did_throw) {
-    api_set_error(err, kErrorTypeException, "%s", current_exception->value);
+    if (*current_exception->throw_name != NUL) {
+      if (current_exception->throw_lnum != 0) {
+        api_set_error(err, kErrorTypeException, "%s, line %" PRIdLINENR ": %s",
+                      current_exception->throw_name, current_exception->throw_lnum,
+                      current_exception->value);
+      } else {
+        api_set_error(err, kErrorTypeException, "%s: %s",
+                      current_exception->throw_name, current_exception->value);
+      }
+    } else {
+      api_set_error(err, kErrorTypeException, "%s", current_exception->value);
+    }
     discard_current_exception();
   }
 
@@ -811,9 +821,38 @@ int object_to_hl_id(Object obj, const char *what, Error *err)
   } else if (obj.type == kObjectTypeInteger) {
     return MAX((int)obj.data.integer, 0);
   } else {
-    api_set_error(err, kErrorTypeValidation,
-                  "%s is not a valid highlight", what);
+    api_set_error(err, kErrorTypeValidation, "Invalid highlight: %s", what);
     return 0;
+  }
+}
+
+char *api_typename(ObjectType t)
+{
+  switch (t) {
+  case kObjectTypeNil:
+    return "nil";
+  case kObjectTypeBoolean:
+    return "Boolean";
+  case kObjectTypeInteger:
+    return "Integer";
+  case kObjectTypeFloat:
+    return "Float";
+  case kObjectTypeString:
+    return "String";
+  case kObjectTypeArray:
+    return "Array";
+  case kObjectTypeDictionary:
+    return "Dict";
+  case kObjectTypeLuaRef:
+    return "Function";
+  case kObjectTypeBuffer:
+    return "Buffer";
+  case kObjectTypeWindow:
+    return "Window";
+  case kObjectTypeTabpage:
+    return "Tabpage";
+  default:
+    abort();
   }
 }
 

@@ -16,6 +16,8 @@
 
 #include "auto/config.h"
 #include "nvim/gettext.h"
+#include "nvim/globals.h"
+#include "nvim/log.h"
 #include "nvim/macros.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
@@ -24,6 +26,10 @@
 #include "nvim/os/os_defs.h"
 #include "nvim/rbuffer.h"
 #include "nvim/types.h"
+
+#ifdef MSWIN
+# include "nvim/os/os_win_console.h"
+#endif
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "os/fileio.c.generated.h"

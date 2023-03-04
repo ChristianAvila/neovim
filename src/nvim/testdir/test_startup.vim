@@ -386,10 +386,10 @@ func Test_m_M_R()
   call delete('Xtestout')
 endfunc
 
-" Test the -A, -F and -H arguments (Arabic, Farsi and Hebrew modes).
-func Test_A_F_H_arg()
+" Test the -A and -H arguments (Arabic and Hebrew modes).
+func Test_A_H_arg()
   let after =<< trim [CODE]
-    call writefile([&rightleft, &arabic, 0, &hkmap], "Xtestout")
+    call writefile([&rightleft, &arabic, 0, &hkmap, &keymap], "Xtestout")
     qall
   [CODE]
 
@@ -397,17 +397,12 @@ func Test_A_F_H_arg()
   " 'encoding' is not utf-8.
   if has('arabic') && &encoding == 'utf-8' && RunVim([], after, '-e -s -A')
     let lines = readfile('Xtestout')
-    call assert_equal(['1', '1', '0', '0'], lines)
-  endif
-
-  if has('farsi') && RunVim([], after, '-F')
-    let lines = readfile('Xtestout')
-    call assert_equal(['1', '0', '1', '0'], lines)
+    call assert_equal(['1', '1', '0', '0', 'arabic'], lines)
   endif
 
   if has('rightleft') && RunVim([], after, '-H')
     let lines = readfile('Xtestout')
-    call assert_equal(['1', '0', '0', '1'], lines)
+    call assert_equal(['1', '0', '0', '0', 'hebrew'], lines)
   endif
 
   call delete('Xtestout')
@@ -721,27 +716,6 @@ func Test_read_stdin()
     let lines = readfile('Xtestout')
     " MS-Windows adds a space after the word
     call assert_equal(['something'], split(lines[0]))
-  endif
-  call delete('Xtestout')
-endfunc
-
-func Test_set_shell()
-  let after =<< trim [CODE]
-    call writefile([&shell], "Xtestout")
-    quit!
-  [CODE]
-
-  if has('win32')
-    let $SHELL = 'C:\with space\cmd.exe'
-    let expected = '"C:\with space\cmd.exe"'
-  else
-    let $SHELL = '/bin/with space/sh'
-    let expected = '"/bin/with space/sh"'
-  endif
-
-  if RunVimPiped([], after, '', '')
-    let lines = readfile('Xtestout')
-    call assert_equal(expected, lines[0])
   endif
   call delete('Xtestout')
 endfunc
@@ -1064,7 +1038,7 @@ func Test_io_not_a_terminal()
         \ 'Vim: Warning: Input is not from a terminal'], l)
 endfunc
 
-" Test for --not-a-term avoiding escape codes.
+" Test for not being a term avoiding escape codes.
 func Test_not_a_term()
   CheckUnix
   CheckNotGui
@@ -1075,18 +1049,14 @@ func Test_not_a_term()
     let redir = &shellredir .. ' Xvimout'
   endif
 
-  " Without --not-a-term there are a few escape sequences.
-  " This will take 2 seconds because of the missing --not-a-term
+  " As nvim checks the environment by itself there will be no escape sequences
+  " This will also happen to take two (2) seconds.
   let cmd = GetVimProg() .. ' --cmd quit ' .. redir
   exe "silent !" . cmd
-  call assert_match("\<Esc>", readfile('Xvimout')->join())
+  call assert_notmatch("\e", readfile('Xvimout')->join())
   call delete('Xvimout')
 
-  " With --not-a-term there are no escape sequences.
-  let cmd = GetVimProg() .. ' --not-a-term --cmd quit ' .. redir
-  exe "silent !" . cmd
-  call assert_notmatch("\<Esc>", readfile('Xvimout')->join())
-  call delete('Xvimout')
+  " --not-a-term flag has thus been deleted
 endfunc
 
 

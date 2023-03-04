@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <lauxlib.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include "nvim/ascii.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/cmdexpand.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
@@ -38,6 +40,7 @@
 #include "nvim/pos.h"
 #include "nvim/regexp.h"
 #include "nvim/runtime.h"
+#include "nvim/search.h"
 #include "nvim/strings.h"
 #include "nvim/vim.h"
 
@@ -320,7 +323,7 @@ static void set_maparg_rhs(const char *const orig_rhs, const size_t orig_rhs_len
     mapargs->orig_rhs_len = 0;
     // stores <lua>ref_no<cr> in map_str
     mapargs->rhs_len = (size_t)vim_snprintf(S_LEN(tmp_buf), "%c%c%c%d\r", K_SPECIAL,
-                                            (char_u)KS_EXTRA, KE_LUA, rhs_lua);
+                                            KS_EXTRA, KE_LUA, rhs_lua);
     mapargs->rhs = xstrdup(tmp_buf);
   }
 }
@@ -1159,12 +1162,12 @@ static bool expand_buffer = false;
 /// @param cpo_flags  Value of various flags present in &cpo
 ///
 /// @return  NULL when there is a problem.
-static char_u *translate_mapping(char_u *str, int cpo_flags)
+static char *translate_mapping(char_u *str, int cpo_flags)
 {
   garray_T ga;
   ga_init(&ga, 1, 40);
 
-  bool cpo_bslash = !(cpo_flags&FLAG_CPO_BSLASH);
+  bool cpo_bslash = cpo_flags & FLAG_CPO_BSLASH;
 
   for (; *str; str++) {
     int c = *str;
@@ -1191,16 +1194,16 @@ static char_u *translate_mapping(char_u *str, int cpo_flags)
     }
 
     if (c == ' ' || c == '\t' || c == Ctrl_J || c == Ctrl_V
-        || (c == '\\' && !cpo_bslash)) {
+        || c == '<' || (c == '\\' && !cpo_bslash)) {
       ga_append(&ga, cpo_bslash ? Ctrl_V : '\\');
     }
 
     if (c) {
-      ga_append(&ga, (char)c);
+      ga_append(&ga, (uint8_t)c);
     }
   }
   ga_append(&ga, NUL);
-  return (char_u *)(ga.ga_data);
+  return (char *)ga.ga_data;
 }
 
 /// Work out what to complete when doing command line completion of mapping
@@ -1209,8 +1212,8 @@ static char_u *translate_mapping(char_u *str, int cpo_flags)
 /// @param forceit  true if '!' given
 /// @param isabbrev  true if abbreviation
 /// @param isunmap  true if unmap/unabbrev command
-char_u *set_context_in_map_cmd(expand_T *xp, char *cmd, char *arg, bool forceit, bool isabbrev,
-                               bool isunmap, cmdidx_T cmdidx)
+char *set_context_in_map_cmd(expand_T *xp, char *cmd, char *arg, bool forceit, bool isabbrev,
+                             bool isunmap, cmdidx_T cmdidx)
 {
   if (forceit && cmdidx != CMD_map && cmdidx != CMD_unmap) {
     xp->xp_context = EXPAND_NOTHING;
@@ -1267,93 +1270,135 @@ char_u *set_context_in_map_cmd(expand_T *xp, char *cmd, char *arg, bool forceit,
 /// Find all mapping/abbreviation names that match regexp "regmatch".
 /// For command line expansion of ":[un]map" and ":[un]abbrev" in all modes.
 /// @return OK if matches found, FAIL otherwise.
-int ExpandMappings(regmatch_T *regmatch, int *num_file, char ***file)
+int ExpandMappings(char *pat, regmatch_T *regmatch, int *numMatches, char ***matches)
 {
-  mapblock_T *mp;
-  int hash;
-  int count;
-  int round;
-  char *p;
-  int i;
+  const bool fuzzy = cmdline_fuzzy_complete(pat);
 
-  *num_file = 0;                    // return values in case of FAIL
-  *file = NULL;
+  *numMatches = 0;                    // return values in case of FAIL
+  *matches = NULL;
 
-  // round == 1: Count the matches.
-  // round == 2: Build the array to keep the matches.
-  for (round = 1; round <= 2; round++) {
-    count = 0;
+  garray_T ga;
+  if (!fuzzy) {
+    ga_init(&ga, sizeof(char *), 3);
+  } else {
+    ga_init(&ga, sizeof(fuzmatch_str_T), 3);
+  }
 
-    for (i = 0; i < 7; i++) {
-      if (i == 0) {
-        p = "<silent>";
-      } else if (i == 1) {
-        p = "<unique>";
-      } else if (i == 2) {
-        p = "<script>";
-      } else if (i == 3) {
-        p = "<expr>";
-      } else if (i == 4 && !expand_buffer) {
-        p = "<buffer>";
-      } else if (i == 5) {
-        p = "<nowait>";
-      } else if (i == 6) {
-        p = "<special>";
-      } else {
+  // First search in map modifier arguments
+  for (int i = 0; i < 7; i++) {
+    char *p;
+    if (i == 0) {
+      p = "<silent>";
+    } else if (i == 1) {
+      p = "<unique>";
+    } else if (i == 2) {
+      p = "<script>";
+    } else if (i == 3) {
+      p = "<expr>";
+    } else if (i == 4 && !expand_buffer) {
+      p = "<buffer>";
+    } else if (i == 5) {
+      p = "<nowait>";
+    } else if (i == 6) {
+      p = "<special>";
+    } else {
+      continue;
+    }
+
+    bool match;
+    int score = 0;
+    if (!fuzzy) {
+      match = vim_regexec(regmatch, p, (colnr_T)0);
+    } else {
+      score = fuzzy_match_str(p, pat);
+      match = (score != 0);
+    }
+
+    if (!match) {
+      continue;
+    }
+
+    if (fuzzy) {
+      GA_APPEND(fuzmatch_str_T, &ga, ((fuzmatch_str_T){
+        .idx = ga.ga_len,
+        .str = xstrdup(p),
+        .score = score,
+      }));
+    } else {
+      GA_APPEND(char *, &ga, xstrdup(p));
+    }
+  }
+
+  for (int hash = 0; hash < 256; hash++) {
+    mapblock_T *mp;
+    if (expand_isabbrev) {
+      if (hash > 0) {    // only one abbrev list
+        break;  // for (hash)
+      }
+      mp = first_abbr;
+    } else if (expand_buffer) {
+      mp = curbuf->b_maphash[hash];
+    } else {
+      mp = maphash[hash];
+    }
+    for (; mp; mp = mp->m_next) {
+      if (mp->m_simplified || !(mp->m_mode & expand_mapmodes)) {
         continue;
       }
 
-      if (vim_regexec(regmatch, p, (colnr_T)0)) {
-        if (round == 1) {
-          count++;
-        } else {
-          (*file)[count++] = xstrdup(p);
-        }
+      char *p = translate_mapping((char_u *)mp->m_keys, CPO_TO_CPO_FLAGS);
+      if (p == NULL) {
+        continue;
       }
-    }
 
-    for (hash = 0; hash < 256; hash++) {
-      if (expand_isabbrev) {
-        if (hash > 0) {    // only one abbrev list
-          break;           // for (hash)
-        }
-        mp = first_abbr;
-      } else if (expand_buffer) {
-        mp = curbuf->b_maphash[hash];
+      bool match;
+      int score = 0;
+      if (!fuzzy) {
+        match = vim_regexec(regmatch, p, (colnr_T)0);
       } else {
-        mp = maphash[hash];
+        score = fuzzy_match_str(p, pat);
+        match = (score != 0);
       }
-      for (; mp; mp = mp->m_next) {
-        if (mp->m_mode & expand_mapmodes) {
-          p = (char *)translate_mapping((char_u *)mp->m_keys, CPO_TO_CPO_FLAGS);
-          if (p != NULL && vim_regexec(regmatch, p, (colnr_T)0)) {
-            if (round == 1) {
-              count++;
-            } else {
-              (*file)[count++] = p;
-              p = NULL;
-            }
-          }
-          xfree(p);
-        }
-      }       // for (mp)
-    }     // for (hash)
 
-    if (count == 0) {  // no match found
-      break;       // for (round)
-    }
+      if (!match) {
+        xfree(p);
+        continue;
+      }
 
-    if (round == 1) {
-      *file = xmalloc((size_t)count * sizeof(char *));
-    }
-  }   // for (round)
+      if (fuzzy) {
+        GA_APPEND(fuzmatch_str_T, &ga, ((fuzmatch_str_T){
+          .idx = ga.ga_len,
+          .str = p,
+          .score = score,
+        }));
+      } else {
+        GA_APPEND(char *, &ga, p);
+      }
+    }  // for (mp)
+  }  // for (hash)
 
+  if (ga.ga_len == 0) {
+    return FAIL;
+  }
+
+  if (!fuzzy) {
+    *matches = ga.ga_data;
+    *numMatches = ga.ga_len;
+  } else {
+    fuzzymatches_to_strmatches(ga.ga_data, matches, ga.ga_len, false);
+    *numMatches = ga.ga_len;
+  }
+
+  int count = *numMatches;
   if (count > 1) {
     // Sort the matches
-    sort_strings(*file, count);
+    // Fuzzy matching already sorts the matches
+    if (!fuzzy) {
+      sort_strings(*matches, count);
+    }
 
     // Remove multiple entries
-    char **ptr1 = *file;
+    char **ptr1 = *matches;
     char **ptr2 = ptr1 + 1;
     char **ptr3 = ptr1 + count;
 
@@ -1367,7 +1412,7 @@ int ExpandMappings(regmatch_T *regmatch, int *num_file, char ***file)
     }
   }
 
-  *num_file = count;
+  *numMatches = count;
   return count == 0 ? FAIL : OK;
 }
 
@@ -1389,15 +1434,11 @@ int ExpandMappings(regmatch_T *regmatch, int *num_file, char ***file)
 // Return true if there is an abbreviation, false if not.
 bool check_abbr(int c, char *ptr, int col, int mincol)
 {
-  int len;
   int scol;                     // starting column of the abbr.
-  int j;
-  char *s;
   char_u tb[MB_MAXBYTES + 4];
   mapblock_T *mp;
   mapblock_T *mp2;
   int clen = 0;                 // length in characters
-  bool is_id = true;
 
   if (typebuf.tb_no_abbr_cnt) {  // abbrev. are not recursive
     return false;
@@ -1417,6 +1458,7 @@ bool check_abbr(int c, char *ptr, int col, int mincol)
   }
 
   {
+    bool is_id = true;
     bool vim_abbr;
     char *p = mb_prevptr(ptr, ptr + col);
     if (!vim_iswordp(p)) {
@@ -1444,7 +1486,7 @@ bool check_abbr(int c, char *ptr, int col, int mincol)
   }
   if (scol < col) {             // there is a word in front of the cursor
     ptr += scol;
-    len = col - scol;
+    int len = col - scol;
     mp = curbuf->b_first_abbr;
     mp2 = first_abbr;
     if (mp == NULL) {
@@ -1461,7 +1503,7 @@ bool check_abbr(int c, char *ptr, int col, int mincol)
       if (strchr((const char *)mp->m_keys, K_SPECIAL) != NULL) {
         // Might have K_SPECIAL escaped mp->m_keys.
         q = xstrdup(mp->m_keys);
-        vim_unescape_ks((char_u *)q);
+        vim_unescape_ks(q);
         qlen = (int)strlen(q);
       }
       // find entries with right mode and keys
@@ -1487,7 +1529,7 @@ bool check_abbr(int c, char *ptr, int col, int mincol)
       //
       // Character CTRL-] is treated specially - it completes the
       // abbreviation, but is not inserted into the input stream.
-      j = 0;
+      int j = 0;
       if (c != Ctrl_RSB) {
         // special key code, split up
         if (IS_SPECIAL(c) || c == K_SPECIAL) {
@@ -1523,6 +1565,7 @@ bool check_abbr(int c, char *ptr, int col, int mincol)
       const bool silent = mp->m_silent;
       const bool expr = mp->m_expr;
 
+      char *s;
       if (expr) {
         s = eval_map_expr(mp, c);
       } else {
@@ -1564,7 +1607,7 @@ char *eval_map_expr(mapblock_T *mp, int c)
   // typeahead.
   if (mp->m_luaref == LUA_NOREF) {
     expr = xstrdup(mp->m_str);
-    vim_unescape_ks((char_u *)expr);
+    vim_unescape_ks(expr);
   }
 
   const bool replace_keycodes = mp->m_replace_keycodes;
@@ -1806,9 +1849,9 @@ int makemap(FILE *fd, buf_T *buf)
           }
 
           if (putc(' ', fd) < 0
-              || put_escstr(fd, (char_u *)mp->m_keys, 0) == FAIL
+              || put_escstr(fd, mp->m_keys, 0) == FAIL
               || putc(' ', fd) < 0
-              || put_escstr(fd, (char_u *)mp->m_str, 1) == FAIL
+              || put_escstr(fd, mp->m_str, 1) == FAIL
               || put_eol(fd) < 0) {
             return FAIL;
           }
@@ -1834,9 +1877,9 @@ int makemap(FILE *fd, buf_T *buf)
 // "what": 0 for :map lhs, 1 for :map rhs, 2 for :set
 //
 // return FAIL for failure, OK otherwise
-int put_escstr(FILE *fd, char_u *strstart, int what)
+int put_escstr(FILE *fd, char *strstart, int what)
 {
-  char_u *str = strstart;
+  uint8_t *str = (uint8_t *)strstart;
   int c;
 
   // :map xx <Nop>
@@ -1913,7 +1956,7 @@ int put_escstr(FILE *fd, char_u *strstart, int what)
       }
     } else if (c < ' ' || c > '~' || c == '|'
                || (what == 0 && c == ' ')
-               || (what == 1 && str == strstart && c == ' ')
+               || (what == 1 && str == (uint8_t *)strstart && c == ' ')
                || (what != 2 && c == '<')) {
       if (putc(Ctrl_V, fd) < 0) {
         return FAIL;
@@ -2340,7 +2383,7 @@ int langmap_adjust_mb(int c)
 void langmap_init(void)
 {
   for (int i = 0; i < 256; i++) {
-    langmap_mapchar[i] = (char_u)i;      // we init with a one-to-one map
+    langmap_mapchar[i] = (uint8_t)i;      // we init with a one-to-one map
   }
   ga_init(&langmap_mapga, sizeof(langmap_entry_T), 8);
 }
@@ -2404,7 +2447,7 @@ void langmap_set(void)
         langmap_set_entry(from, to);
       } else {
         assert(to <= UCHAR_MAX);
-        langmap_mapchar[from & 255] = (char_u)to;
+        langmap_mapchar[from & 255] = (uint8_t)to;
       }
 
       // Advance to next pair

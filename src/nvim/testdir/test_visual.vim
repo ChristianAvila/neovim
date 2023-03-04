@@ -1319,6 +1319,17 @@ func Test_visual_block_with_substitute()
 endfunc
 
 func Test_visual_reselect_with_count()
+  enew
+  call setline(1, ['aaaaaa', '✗ bbbb', '✗ bbbb'])
+  exe "normal! 2Gw\<C-V>jed"
+  exe "normal! gg0lP"
+  call assert_equal(['abbbbaaaaa', '✗bbbb ', '✗ '], getline(1, '$'))
+
+  exe "normal! 1vr."
+  call assert_equal(['a....aaaaa', '✗.... ', '✗ '], getline(1, '$'))
+
+  bwipe!
+
   " this was causing an illegal memory access
   let lines =<< trim END
 
@@ -1524,5 +1535,26 @@ func Test_switch_buffer_ends_visual_mode()
   bwipe!
   exe 'bwipe!' buf2
 endfunc
+
+" Check fix for the heap-based buffer overflow bug found in the function
+" utfc_ptr2len and reported at
+" https://huntr.dev/bounties/ae933869-a1ec-402a-bbea-d51764c6618e
+func Test_heap_buffer_overflow()
+  enew
+  set updatecount=0
+
+  norm R0
+  split other
+  norm R000
+  exe "norm \<C-V>l"
+  ball
+  call assert_equal(getpos("."), getpos("v"))
+  call assert_equal('n', mode())
+  norm zW
+
+  %bwipe!
+  set updatecount&
+endfunc
+
 
 " vim: shiftwidth=2 sts=2 expandtab

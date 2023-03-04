@@ -38,7 +38,6 @@
 #include "nvim/path.h"
 #include "nvim/pos.h"
 #include "nvim/runtime.h"
-#include "nvim/types.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
 
@@ -66,10 +65,10 @@ static int put_view_curpos(FILE *fd, const win_T *wp, char *spaces)
 
 static int ses_winsizes(FILE *fd, int restore_size, win_T *tab_firstwin)
 {
-  int n = 0;
   win_T *wp;
 
   if (restore_size && (ssop_flags & SSOP_WINSIZE)) {
+    int n = 0;
     for (wp = tab_firstwin; wp != NULL; wp = wp->w_next) {
       if (!ses_do_win(wp)) {
         continue;
@@ -113,40 +112,43 @@ static int ses_win_rec(FILE *fd, frame_T *fr)
   frame_T *frc;
   int count = 0;
 
-  if (fr->fr_layout != FR_LEAF) {
-    // Find first frame that's not skipped and then create a window for
-    // each following one (first frame is already there).
-    frc = ses_skipframe(fr->fr_child);
-    if (frc != NULL) {
-      while ((frc = ses_skipframe(frc->fr_next)) != NULL) {
-        // Make window as big as possible so that we have lots of room
-        // to split.
-        if (fprintf(fd, "%s%s",
-                    "wincmd _ | wincmd |\n",
-                    (fr->fr_layout == FR_COL ? "split\n" : "vsplit\n")) < 0) {
-          return FAIL;
-        }
-        count++;
-      }
-    }
+  if (fr->fr_layout == FR_LEAF) {
+    return OK;
+  }
 
-    // Go back to the first window.
-    if (count > 0 && (fprintf(fd, fr->fr_layout == FR_COL
-                              ? "%dwincmd k\n" : "%dwincmd h\n", count) < 0)) {
-      return FAIL;
-    }
-
-    // Recursively create frames/windows in each window of this column or row.
-    frc = ses_skipframe(fr->fr_child);
-    while (frc != NULL) {
-      ses_win_rec(fd, frc);
-      frc = ses_skipframe(frc->fr_next);
-      // Go to next window.
-      if (frc != NULL && put_line(fd, "wincmd w") == FAIL) {
+  // Find first frame that's not skipped and then create a window for
+  // each following one (first frame is already there).
+  frc = ses_skipframe(fr->fr_child);
+  if (frc != NULL) {
+    while ((frc = ses_skipframe(frc->fr_next)) != NULL) {
+      // Make window as big as possible so that we have lots of room
+      // to split.
+      if (fprintf(fd, "%s%s",
+                  "wincmd _ | wincmd |\n",
+                  (fr->fr_layout == FR_COL ? "split\n" : "vsplit\n")) < 0) {
         return FAIL;
       }
+      count++;
     }
   }
+
+  // Go back to the first window.
+  if (count > 0 && (fprintf(fd, fr->fr_layout == FR_COL
+                            ? "%dwincmd k\n" : "%dwincmd h\n", count) < 0)) {
+    return FAIL;
+  }
+
+  // Recursively create frames/windows in each window of this column or row.
+  frc = ses_skipframe(fr->fr_child);
+  while (frc != NULL) {
+    ses_win_rec(fd, frc);
+    frc = ses_skipframe(frc->fr_next);
+    // Go to next window.
+    if (frc != NULL && put_line(fd, "wincmd w") == FAIL) {
+      return FAIL;
+    }
+  }
+
   return OK;
 }
 
@@ -216,14 +218,13 @@ static int ses_do_win(win_T *wp)
 static int ses_arglist(FILE *fd, char *cmd, garray_T *gap, int fullname, unsigned *flagp)
 {
   char *buf = NULL;
-  char *s;
 
   if (fprintf(fd, "%s\n%s\n", cmd, "%argdel") < 0) {
     return FAIL;
   }
   for (int i = 0; i < gap->ga_len; i++) {
     // NULL file names are skipped (only happens when out of memory).
-    s = alist_name(&((aentry_T *)gap->ga_data)[i]);
+    char *s = alist_name(&((aentry_T *)gap->ga_data)[i]);
     if (s != NULL) {
       if (fullname) {
         buf = xmalloc(MAXPATHL);
@@ -549,7 +550,6 @@ static int put_view(FILE *fd, win_T *wp, int add_edit, unsigned *flagp, int curr
 static int makeopens(FILE *fd, char *dirnow)
 {
   int only_save_windows = true;
-  int nr;
   int restore_size = true;
   win_T *wp;
   char *sname;
@@ -751,11 +751,9 @@ static int makeopens(FILE *fd, char *dirnow)
       PUTLINE_FAIL("let &splitright = s:save_splitright");
     }
 
-    //
     // Check if window sizes can be restored (no windows omitted).
     // Remember the window number of the current window after restoring.
-    //
-    nr = 0;
+    int nr = 0;
     for (wp = tab_firstwin; wp != NULL; wp = wp->w_next) {
       if (ses_do_win(wp)) {
         nr++;
@@ -907,12 +905,14 @@ static int makeopens(FILE *fd, char *dirnow)
 void ex_loadview(exarg_T *eap)
 {
   char *fname = get_view_file(*eap->arg);
-  if (fname != NULL) {
-    if (do_source(fname, false, DOSO_NONE) == FAIL) {
-      semsg(_(e_notopen), fname);
-    }
-    xfree(fname);
+  if (fname == NULL) {
+    return;
   }
+
+  if (do_source(fname, false, DOSO_NONE) == FAIL) {
+    semsg(_(e_notopen), fname);
+  }
+  xfree(fname);
 }
 
 /// ":mkexrc", ":mkvimrc", ":mkview", ":mksession".
@@ -923,11 +923,9 @@ void ex_loadview(exarg_T *eap)
 void ex_mkrc(exarg_T *eap)
 {
   FILE *fd;
-  int failed = false;
   int view_session = false;  // :mkview, :mksession
   int using_vdir = false;  // using 'viewdir'?
   char *viewFile = NULL;
-  unsigned *flagp;
 
   if (eap->cmdidx == CMD_mksession || eap->cmdidx == CMD_mkview) {
     view_session = true;
@@ -966,6 +964,8 @@ void ex_mkrc(exarg_T *eap)
 
   fd = open_exfile(fname, eap->forceit, WRITEBIN);
   if (fd != NULL) {
+    int failed = false;
+    unsigned *flagp;
     if (eap->cmdidx == CMD_mkview) {
       flagp = &vop_flags;
     } else {

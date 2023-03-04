@@ -11,6 +11,10 @@
 #include <string.h>
 #include <sys/types.h>
 
+#ifdef NVIM_VENDOR_BIT
+# include "bit.h"
+#endif
+
 #include "auto/config.h"
 #include "cjson/lua_cjson.h"
 #include "mpack/lmpack.h"
@@ -40,17 +44,17 @@
 # include "lua/stdlib.c.generated.h"
 #endif
 
-static int regex_match(lua_State *lstate, regprog_T **prog, char_u *str)
+static int regex_match(lua_State *lstate, regprog_T **prog, char *str)
 {
   regmatch_T rm;
   rm.regprog = *prog;
   rm.rm_ic = false;
-  bool match = vim_regexec(&rm, (char *)str, 0);
+  bool match = vim_regexec(&rm, str, 0);
   *prog = rm.regprog;
 
   if (match) {
-    lua_pushinteger(lstate, (lua_Integer)(rm.startp[0] - (char *)str));
-    lua_pushinteger(lstate, (lua_Integer)(rm.endp[0] - (char *)str));
+    lua_pushinteger(lstate, (lua_Integer)(rm.startp[0] - str));
+    lua_pushinteger(lstate, (lua_Integer)(rm.endp[0] - str));
     return 2;
   }
   return 0;
@@ -60,7 +64,7 @@ static int regex_match_str(lua_State *lstate)
 {
   regprog_T **prog = regex_check(lstate);
   const char *str = luaL_checkstring(lstate, 2);
-  int nret = regex_match(lstate, prog, (char_u *)str);
+  int nret = regex_match(lstate, prog, (char *)str);
 
   if (!*prog) {
     return luaL_error(lstate, "regex: internal error");
@@ -78,20 +82,20 @@ static int regex_match_line(lua_State *lstate)
     return luaL_error(lstate, "not enough args");
   }
 
-  long bufnr = luaL_checkinteger(lstate, 2);
+  handle_T bufnr = (handle_T)luaL_checkinteger(lstate, 2);
   linenr_T rownr = (linenr_T)luaL_checkinteger(lstate, 3);
-  long start = 0, end = -1;
+  int start = 0, end = -1;
   if (narg >= 4) {
-    start = luaL_checkinteger(lstate, 4);
+    start = (int)luaL_checkinteger(lstate, 4);
   }
   if (narg >= 5) {
-    end = luaL_checkinteger(lstate, 5);
+    end = (int)luaL_checkinteger(lstate, 5);
     if (end < 0) {
       return luaL_error(lstate, "invalid end");
     }
   }
 
-  buf_T *buf = bufnr ? handle_get_buffer((int)bufnr) : curbuf;
+  buf_T *buf = bufnr ? handle_get_buffer(bufnr) : curbuf;
   if (!buf || buf->b_ml.ml_mfp == NULL) {
     return luaL_error(lstate, "invalid buffer");
   }
@@ -116,7 +120,7 @@ static int regex_match_line(lua_State *lstate)
     line[end] = NUL;
   }
 
-  int nret = regex_match(lstate, prog, (char_u *)line + start);
+  int nret = regex_match(lstate, prog, line + start);
 
   if (end >= 0) {
     line[end] = save;
@@ -198,7 +202,7 @@ static int nlua_str_utf_pos(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   size_t idx = 1;
   size_t clen;
   for (size_t i = 0; i < s1_len && s1[i] != NUL; i += clen) {
-    clen = (size_t)utf_ptr2len_len((const char_u *)(s1) + i, (int)(s1_len - i));
+    clen = (size_t)utf_ptr2len_len(s1 + i, (int)(s1_len - i));
     lua_pushinteger(lstate, (long)i + 1);
     lua_rawseti(lstate, -2, (int)idx);
     idx++;
@@ -218,11 +222,11 @@ static int nlua_str_utf_start(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
 {
   size_t s1_len;
   const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
-  long offset = luaL_checkinteger(lstate, 2);
+  ptrdiff_t offset = luaL_checkinteger(lstate, 2);
   if (offset < 0 || offset > (intptr_t)s1_len) {
     return luaL_error(lstate, "index out of range");
   }
-  int head_offset = utf_cp_head_off((char_u *)s1, (char_u *)s1 + offset - 1);
+  int head_offset = utf_cp_head_off(s1, s1 + offset - 1);
   lua_pushinteger(lstate, head_offset);
   return 1;
 }
@@ -238,7 +242,7 @@ static int nlua_str_utf_end(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
 {
   size_t s1_len;
   const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
-  long offset = luaL_checkinteger(lstate, 2);
+  ptrdiff_t offset = luaL_checkinteger(lstate, 2);
   if (offset < 0 || offset > (intptr_t)s1_len) {
     return luaL_error(lstate, "index out of range");
   }
@@ -266,8 +270,7 @@ int nlua_str_byteindex(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
     use_utf16 = lua_toboolean(lstate, 3);
   }
 
-  ssize_t byteidx = mb_utf_index_to_bytes((const char_u *)s1, s1_len,
-                                          (size_t)idx, use_utf16);
+  ssize_t byteidx = mb_utf_index_to_bytes(s1, s1_len, (size_t)idx, use_utf16);
   if (byteidx == -1) {
     return luaL_error(lstate, "index out of range");
   }
@@ -483,8 +486,6 @@ static int nlua_stricmp(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   return 1;
 }
 
-#if defined(HAVE_ICONV)
-
 /// Convert string from one encoding to another
 static int nlua_iconv(lua_State *lstate)
 {
@@ -503,14 +504,14 @@ static int nlua_iconv(lua_State *lstate)
   size_t str_len = 0;
   const char *str = lua_tolstring(lstate, 1, &str_len);
 
-  char_u *from = (char_u *)enc_canonize(enc_skip((char *)lua_tolstring(lstate, 2, NULL)));
-  char_u *to   = (char_u *)enc_canonize(enc_skip((char *)lua_tolstring(lstate, 3, NULL)));
+  char *from = enc_canonize(enc_skip((char *)lua_tolstring(lstate, 2, NULL)));
+  char *to   = enc_canonize(enc_skip((char *)lua_tolstring(lstate, 3, NULL)));
 
   vimconv_T vimconv;
   vimconv.vc_type = CONV_NONE;
-  convert_setup_ext(&vimconv, (char *)from, false, (char *)to, false);
+  convert_setup_ext(&vimconv, from, false, to, false);
 
-  char_u *ret = (char_u *)string_convert(&vimconv, (char *)str, &str_len);
+  char *ret = string_convert(&vimconv, (char *)str, &str_len);
 
   convert_setup(&vimconv, NULL, NULL);
 
@@ -520,14 +521,12 @@ static int nlua_iconv(lua_State *lstate)
   if (ret == NULL) {
     lua_pushnil(lstate);
   } else {
-    lua_pushlstring(lstate, (char *)ret, str_len);
+    lua_pushlstring(lstate, ret, str_len);
     xfree(ret);
   }
 
   return 1;
 }
-
-#endif
 
 void nlua_state_add_stdlib(lua_State *const lstate, bool is_thread)
 {
@@ -575,12 +574,10 @@ void nlua_state_add_stdlib(lua_State *const lstate, bool is_thread)
     luaopen_spell(lstate);
     lua_setfield(lstate, -2, "spell");
 
-#if defined(HAVE_ICONV)
     // vim.iconv
     // depends on p_ambw, p_emoji
     lua_pushcfunction(lstate, &nlua_iconv);
     lua_setfield(lstate, -2, "iconv");
-#endif
   }
 
   // vim.mpack
@@ -603,6 +600,13 @@ void nlua_state_add_stdlib(lua_State *const lstate, bool is_thread)
   // vim.json
   lua_cjson_new(lstate);
   lua_setfield(lstate, -2, "json");
+
+#ifdef NVIM_VENDOR_BIT
+  // if building with puc lua, use internal fallback for require'bit'
+  int top = lua_gettop(lstate);
+  luaopen_bit(lstate);
+  lua_settop(lstate, top);
+#endif
 }
 
 /// like luaL_error, but allow cleanup

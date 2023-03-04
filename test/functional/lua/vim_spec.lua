@@ -2,6 +2,7 @@
 local helpers = require('test.functional.helpers')(after_each)
 local Screen = require('test.functional.ui.screen')
 
+local nvim_prog = helpers.nvim_prog
 local funcs = helpers.funcs
 local meths = helpers.meths
 local command = helpers.command
@@ -22,7 +23,6 @@ local remove_trace = helpers.remove_trace
 local mkdir_p = helpers.mkdir_p
 local rmdir = helpers.rmdir
 local write_file = helpers.write_file
-local expect_exit = helpers.expect_exit
 local poke_eventloop = helpers.poke_eventloop
 local assert_alive = helpers.assert_alive
 
@@ -763,6 +763,20 @@ describe('lua stdlib', function()
       pcall_err(exec_lua, code))
   end)
 
+  it('vim.spairs', function()
+    local res = ''
+    local table = {
+      ccc=1,
+      bbb=2,
+      ddd=3,
+      aaa=4
+    }
+    for key, _ in vim.spairs(table) do
+      res = res .. key
+    end
+    matches('aaabbbcccddd', res)
+  end)
+
   it('vim.call, vim.fn', function()
     eq(true, exec_lua([[return vim.call('sin', 0.0) == 0.0 ]]))
     eq(true, exec_lua([[return vim.fn.sin(0.0) == 0.0 ]]))
@@ -1444,7 +1458,7 @@ describe('lua stdlib', function()
     ]]
     eq('', funcs.luaeval "vim.bo.filetype")
     eq(true, funcs.luaeval "vim.bo[BUF].modifiable")
-    matches("no such option: 'nosuchopt'$",
+    matches("Invalid option %(not found%): 'nosuchopt'$",
        pcall_err(exec_lua, 'return vim.bo.nosuchopt'))
     matches("Expected lua string$",
        pcall_err(exec_lua, 'return vim.bo[0][0].autoread'))
@@ -1465,7 +1479,7 @@ describe('lua stdlib', function()
     eq(0, funcs.luaeval "vim.wo.cole")
     eq(0, funcs.luaeval "vim.wo[0].cole")
     eq(0, funcs.luaeval "vim.wo[1001].cole")
-    matches("no such option: 'notanopt'$",
+    matches("Invalid option %(not found%): 'notanopt'$",
        pcall_err(exec_lua, 'return vim.wo.notanopt'))
     matches("Expected lua string$",
        pcall_err(exec_lua, 'return vim.wo[0][0].list'))
@@ -2910,9 +2924,14 @@ describe('lua: builtin modules', function()
   end)
 
 
-  it('does not work when disabled without runtime', function()
-    clear{args={'--luamod-dev'}, env={VIMRUNTIME='fixtures/a'}}
-    expect_exit(exec_lua, [[return vim.tbl_count {x=1,y=2}]])
+  it('fails when disabled without runtime', function()
+    clear()
+    command("let $VIMRUNTIME='fixtures/a'")
+    -- Use system([nvim,…]) instead of clear() to avoid stderr noise. #21844
+    local out = funcs.system({nvim_prog, '--clean', '--luamod-dev',
+      [[+call nvim_exec_lua('return vim.tbl_count {x=1,y=2}')]], '+qa!'}):gsub('\r\n', '\n')
+    eq(1, eval('v:shell_error'))
+    matches("'vim%.shared' not found", out)
   end)
 end)
 

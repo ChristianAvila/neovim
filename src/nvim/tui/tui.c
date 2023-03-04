@@ -16,7 +16,6 @@
 #include "klib/kvec.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/api/vim.h"
 #include "nvim/ascii.h"
 #include "nvim/cursor_shape.h"
 #include "nvim/event/defs.h"
@@ -32,21 +31,20 @@
 #include "nvim/main.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
-#include "nvim/message.h"
 #include "nvim/msgpack_rpc/channel.h"
-#include "nvim/option.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
-#include "nvim/os/signal.h"
-#ifdef MSWIN
-# include "nvim/os/os_win_console.h"
-#endif
 #include "nvim/tui/input.h"
 #include "nvim/tui/terminfo.h"
 #include "nvim/tui/tui.h"
 #include "nvim/ugrid.h"
 #include "nvim/ui.h"
-#include "nvim/vim.h"
+#include "nvim/ui_client.h"
+
+#ifdef MSWIN
+# include "nvim/os/os_win_console.h"
+# include "nvim/os/tty.h"
+#endif
 
 // Space reserved in two output buffers to make the cursor normal or invisible
 // when flushing. No existing terminal will require 32 bytes to do that.
@@ -62,27 +60,14 @@
 #define LINUXSET0C "\x1b[?0c"
 #define LINUXSET1C "\x1b[?1c"
 
-#ifdef NVIM_UNIBI_HAS_VAR_FROM
-# define UNIBI_SET_NUM_VAR(var, num) \
+#define UNIBI_SET_NUM_VAR(var, num) \
   do { \
     (var) = unibi_var_from_num((num)); \
   } while (0)
-# define UNIBI_SET_STR_VAR(var, str) \
+#define UNIBI_SET_STR_VAR(var, str) \
   do { \
     (var) = unibi_var_from_str((str)); \
   } while (0)
-#else
-# define UNIBI_SET_NUM_VAR(var, num) \
-  do { \
-    (var).p = NULL; \
-    (var).i = (num); \
-  } while (0)
-# define UNIBI_SET_STR_VAR(var, str) \
-  do { \
-    (var).i = INT_MIN; \
-    (var).p = str; \
-  } while (0)
-#endif
 
 typedef struct {
   int top, bot, left, right;
@@ -141,6 +126,7 @@ struct TUIData {
     int enable_bracketed_paste, disable_bracketed_paste;
     int enable_lr_margin, disable_lr_margin;
     int enter_strikethrough_mode;
+    int enter_altfont_mode;
     int set_rgb_foreground, set_rgb_background;
     int set_cursor_color;
     int reset_cursor_color;
@@ -168,7 +154,7 @@ static bool cursor_style_enabled = false;
 # include "tui/tui.c.generated.h"
 #endif
 
-TUIData *tui_start(int *width, int *height, char **term)
+void tui_start(TUIData **tui_p, int *width, int *height, char **term)
 {
   TUIData *tui = xcalloc(1, sizeof(TUIData));
   tui->is_starting = true;
@@ -191,11 +177,11 @@ TUIData *tui_start(int *width, int *height, char **term)
   uv_timer_start(&tui->startup_delay_timer, after_startup_cb,
                  100, 0);
 
+  *tui_p = tui;
   loop_poll_events(&main_loop, 1);
   *width = tui->width;
   *height = tui->height;
   *term = tui->term;
-  return tui;
 }
 
 void tui_enable_extkeys(TUIData *tui)
@@ -255,6 +241,7 @@ static void terminfo_start(TUIData *tui)
   tui->unibi_ext.enable_bracketed_paste = -1;
   tui->unibi_ext.disable_bracketed_paste = -1;
   tui->unibi_ext.enter_strikethrough_mode = -1;
+  tui->unibi_ext.enter_altfont_mode = -1;
   tui->unibi_ext.enable_lr_margin = -1;
   tui->unibi_ext.disable_lr_margin = -1;
   tui->unibi_ext.enable_focus_reporting = -1;
@@ -359,12 +346,7 @@ static void terminfo_start(TUIData *tui)
     if (ret) {
       ELOG("uv_tty_init failed: %s", uv_strerror(ret));
     }
-#ifdef MSWIN
-    ret = uv_tty_set_mode(&tui->output_handle.tty, UV_TTY_MODE_RAW);
-    if (ret) {
-      ELOG("uv_tty_set_mode failed: %s", uv_strerror(ret));
-    }
-#else
+#ifndef MSWIN
     int retry_count = 10;
     // A signal may cause uv_tty_set_mode() to fail (e.g., SIGCONT). Retry a
     // few times. #12322
@@ -461,6 +443,7 @@ static void tui_terminal_stop(TUIData *tui)
 void tui_stop(TUIData *tui)
 {
   tui_terminal_stop(tui);
+  stream_set_blocking(tui->input.in_fd, true);   // normalize stream (#2598)
   tinput_destroy(&tui->input);
   tui->stopped = true;
   signal_watcher_close(&tui->winch_handle, NULL);
@@ -468,7 +451,7 @@ void tui_stop(TUIData *tui)
 }
 
 /// Returns true if UI `ui` is stopped.
-static bool tui_is_stopped(TUIData *tui)
+bool tui_is_stopped(TUIData *tui)
 {
   return tui->stopped;
 }
@@ -515,7 +498,7 @@ static bool attrs_differ(TUIData *tui, int id1, int id2, bool rgb)
     return a1.cterm_fg_color != a2.cterm_fg_color
            || a1.cterm_bg_color != a2.cterm_bg_color
            || a1.cterm_ae_attr != a2.cterm_ae_attr
-           || (a1.cterm_ae_attr & HL_ANY_UNDERLINE
+           || (a1.cterm_ae_attr & HL_UNDERLINE_MASK
                && a1.rgb_sp_color != a2.rgb_sp_color);
   }
 }
@@ -535,6 +518,7 @@ static void update_attrs(TUIData *tui, int attr_id)
   bool reverse = attr & HL_INVERSE;
   bool standout = attr & HL_STANDOUT;
   bool strikethrough = attr & HL_STRIKETHROUGH;
+  bool altfont = attr & HL_ALTFONT;
 
   bool underline;
   bool undercurl;
@@ -542,13 +526,14 @@ static void update_attrs(TUIData *tui, int attr_id)
   bool underdotted;
   bool underdashed;
   if (tui->unibi_ext.set_underline_style != -1) {
-    underline = attr & HL_UNDERLINE;
-    undercurl = attr & HL_UNDERCURL;
-    underdouble = attr & HL_UNDERDOUBLE;
-    underdashed = attr & HL_UNDERDASHED;
-    underdotted = attr & HL_UNDERDOTTED;
+    int ul = attr & HL_UNDERLINE_MASK;
+    underline = ul == HL_UNDERLINE;
+    undercurl = ul == HL_UNDERCURL;
+    underdouble = ul == HL_UNDERDOUBLE;
+    underdashed = ul == HL_UNDERDASHED;
+    underdotted = ul == HL_UNDERDOTTED;
   } else {
-    underline = attr & HL_ANY_UNDERLINE;
+    underline = attr & HL_UNDERLINE_MASK;
     undercurl = false;
     underdouble = false;
     underdotted = false;
@@ -592,6 +577,9 @@ static void update_attrs(TUIData *tui, int attr_id)
   }
   if (italic) {
     unibi_out(tui, unibi_enter_italics_mode);
+  }
+  if (altfont && tui->unibi_ext.enter_altfont_mode != -1) {
+    unibi_out_ext(tui, tui->unibi_ext.enter_altfont_mode);
   }
   if (strikethrough && tui->unibi_ext.enter_strikethrough_mode != -1) {
     unibi_out_ext(tui, tui->unibi_ext.enter_strikethrough_mode);
@@ -1108,8 +1096,8 @@ void tui_set_mode(TUIData *tui, ModeShape mode)
       // Hopefully the user's default cursor color is inverse.
       unibi_out_ext(tui, tui->unibi_ext.reset_cursor_color);
     } else {
+      char hexbuf[8];
       if (tui->set_cursor_color_as_str) {
-        char hexbuf[8];
         snprintf(hexbuf, 7 + 1, "#%06x", aep.rgb_bg_color);
         UNIBI_SET_STR_VAR(tui->params[0], hexbuf);
       } else {
@@ -1146,7 +1134,7 @@ void tui_mode_change(TUIData *tui, String mode, Integer mode_idx)
   // If stdin is not a TTY, the LHS of pipe may change the state of the TTY
   // after calling uv_tty_set_mode. So, set the mode of the TTY again here.
   // #13073
-  if (tui->is_starting && tui->input.in_fd == STDERR_FILENO) {
+  if (tui->is_starting && !stdin_isatty) {
     int ret = uv_tty_set_mode(&tui->output_handle.tty, UV_TTY_MODE_NORMAL);
     if (ret) {
       ELOG("uv_tty_set_mode failed: %s", uv_strerror(ret));
@@ -1340,9 +1328,10 @@ static void show_verbose_terminfo(TUIData *tui)
 static void suspend_event(void **argv)
 {
   TUIData *tui = argv[0];
+  ui_client_detach();
   bool enable_mouse = tui->mouse_enabled;
   tui_terminal_stop(tui);
-  stream_set_blocking(input_global_fd(), true);   // normalize stream (#2598)
+  stream_set_blocking(tui->input.in_fd, true);   // normalize stream (#2598)
 
   kill(0, SIGTSTP);
 
@@ -1351,7 +1340,8 @@ static void suspend_event(void **argv)
   if (enable_mouse) {
     tui_mouse_on(tui);
   }
-  stream_set_blocking(input_global_fd(), false);  // libuv expects this
+  stream_set_blocking(tui->input.in_fd, false);  // libuv expects this
+  ui_client_attach(tui->width, tui->height, tui->term);
 }
 #endif
 
@@ -2041,6 +2031,11 @@ static void augment_terminfo(TUIData *tui, const char *term, long vte_version, l
   // to the ECMA-48 strikeout/crossed-out attributes.
   tui->unibi_ext.enter_strikethrough_mode = unibi_find_ext_str(ut, "smxx");
 
+  // It should be pretty safe to always enable this, as terminals will ignore
+  // unrecognised SGR numbers.
+  tui->unibi_ext.enter_altfont_mode = (int)unibi_add_ext_str(ut, "ext.enter_altfont_mode",
+                                                             "\x1b[11m");
+
   // Dickey ncurses terminfo does not include the setrgbf and setrgbb
   // capabilities, proposed by Rüdiger Sonderfeld on 2013-10-15.  Adding
   // them here when terminfo lacks them is an augmentation, not a fixup.
@@ -2238,12 +2233,12 @@ static void flush_buf(TUIData *tui)
 ///
 /// @see tmux/tty-keys.c fe4e9470bb504357d073320f5d305b22663ee3fd
 /// @see https://bugzilla.redhat.com/show_bug.cgi?id=142659
-static const char *tui_get_stty_erase(void)
+static const char *tui_get_stty_erase(int fd)
 {
   static char stty_erase[2] = { 0 };
 #if defined(HAVE_TERMIOS_H)
   struct termios t;
-  if (tcgetattr(input_global_fd(), &t) != -1) {
+  if (tcgetattr(fd, &t) != -1) {
     stty_erase[0] = (char)t.c_cc[VERASE];
     stty_erase[1] = '\0';
     DLOG("stty/termios:erase=%s", stty_erase);
@@ -2256,9 +2251,10 @@ static const char *tui_get_stty_erase(void)
 /// @see TermInput.tk_ti_hook_fn
 static const char *tui_tk_ti_getstr(const char *name, const char *value, void *data)
 {
+  TermInput *input = data;
   static const char *stty_erase = NULL;
   if (stty_erase == NULL) {
-    stty_erase = tui_get_stty_erase();
+    stty_erase = tui_get_stty_erase(input->in_fd);
   }
 
   if (strequal(name, "key_backspace")) {

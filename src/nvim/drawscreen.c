@@ -126,12 +126,14 @@ static char *provider_err = NULL;
 void conceal_check_cursor_line(void)
 {
   bool should_conceal = conceal_cursor_line(curwin);
-  if (curwin->w_p_cole > 0 && (conceal_cursor_used != should_conceal)) {
-    redrawWinline(curwin, curwin->w_cursor.lnum);
-    // Need to recompute cursor column, e.g., when starting Visual mode
-    // without concealing.
-    curs_columns(curwin, true);
+  if (curwin->w_p_cole <= 0 || conceal_cursor_used == should_conceal) {
+    return;
   }
+
+  redrawWinline(curwin, curwin->w_cursor.lnum);
+  // Need to recompute cursor column, e.g., when starting Visual mode
+  // without concealing.
+  curs_columns(curwin, true);
 }
 
 /// Resize default_grid to Rows and Columns.
@@ -315,6 +317,10 @@ void screen_resize(int width, int height)
 
   resizing_autocmd = false;
   redraw_all_later(UPD_CLEAR);
+
+  if (State != MODE_ASKMORE && State != MODE_EXTERNCMD && State != MODE_CONFIRM) {
+    screenclear();
+  }
 
   if (starting != NO_SCREEN) {
     maketitle();
@@ -837,25 +843,29 @@ static bool vsep_connected(win_T *wp, WindowCorner corner)
 /// Draw the vertical separator right of window "wp"
 static void draw_vsep_win(win_T *wp)
 {
-  if (wp->w_vsep_width) {
-    // draw the vertical separator right of this window
-    int hl;
-    int c = fillchar_vsep(wp, &hl);
-    grid_fill(&default_grid, wp->w_winrow, W_ENDROW(wp),
-              W_ENDCOL(wp), W_ENDCOL(wp) + 1, c, ' ', hl);
+  if (!wp->w_vsep_width) {
+    return;
   }
+
+  // draw the vertical separator right of this window
+  int hl;
+  int c = fillchar_vsep(wp, &hl);
+  grid_fill(&default_grid, wp->w_winrow, W_ENDROW(wp),
+            W_ENDCOL(wp), W_ENDCOL(wp) + 1, c, ' ', hl);
 }
 
 /// Draw the horizontal separator below window "wp"
 static void draw_hsep_win(win_T *wp)
 {
-  if (wp->w_hsep_height) {
-    // draw the horizontal separator below this window
-    int hl;
-    int c = fillchar_hsep(wp, &hl);
-    grid_fill(&default_grid, W_ENDROW(wp), W_ENDROW(wp) + 1,
-              wp->w_wincol, W_ENDCOL(wp), c, c, hl);
+  if (!wp->w_hsep_height) {
+    return;
   }
+
+  // draw the horizontal separator below this window
+  int hl;
+  int c = fillchar_hsep(wp, &hl);
+  grid_fill(&default_grid, W_ENDROW(wp), W_ENDROW(wp) + 1,
+            wp->w_wincol, W_ENDCOL(wp), c, c, hl);
 }
 
 /// Get the separator connector for specified window corner of window "wp"
@@ -1542,7 +1552,15 @@ static void win_update(win_T *wp, DecorProviders *providers)
     wp->w_old_visual_col = 0;
   }
 
-  bool cursorline_standout = win_cursorline_standout(wp);
+  foldinfo_T cursorline_fi = { 0 };
+  wp->w_cursorline = win_cursorline_standout(wp) ? wp->w_cursor.lnum : 0;
+  if (wp->w_p_cul) {
+    // Make sure that the cursorline on a closed fold is redrawn
+    cursorline_fi = fold_info(wp, wp->w_cursor.lnum);
+    if (cursorline_fi.fi_level > 0 && cursorline_fi.fi_lines > 0) {
+      wp->w_cursorline = cursorline_fi.fi_lnum;
+    }
+  }
 
   win_check_ns_hl(wp);
 
@@ -1598,7 +1616,7 @@ static void win_update(win_T *wp, DecorProviders *providers)
                         // if lines were inserted or deleted
                         || (wp->w_match_head != NULL
                             && buf->b_mod_xlines != 0)))))
-        || (cursorline_standout && lnum == wp->w_cursor.lnum)
+        || lnum == wp->w_cursorline
         || lnum == wp->w_last_cursorline) {
       if (lnum == mod_top) {
         top_to_mod = false;
@@ -1614,8 +1632,6 @@ static void win_update(win_T *wp, DecorProviders *providers)
           && !(dollar_vcol >= 0 && mod_bot == mod_top + 1)
           && row >= top_end) {
         int old_rows = 0;
-        int new_rows = 0;
-        int xtra_rows;
         linenr_T l;
         int i;
 
@@ -1650,6 +1666,7 @@ static void win_update(win_T *wp, DecorProviders *providers)
           bot_start = 0;
           bot_scroll_start = 0;
         } else {
+          int new_rows = 0;
           // Able to count old number of rows: Count new window
           // rows, and may insert/delete lines
           long j = idx;
@@ -1668,7 +1685,7 @@ static void win_update(win_T *wp, DecorProviders *providers)
               break;
             }
           }
-          xtra_rows = new_rows - old_rows;
+          int xtra_rows = new_rows - old_rows;
           if (xtra_rows < 0) {
             // May scroll text up.  If there is not enough
             // remaining text or scrolling fails, must redraw the
@@ -1750,7 +1767,8 @@ static void win_update(win_T *wp, DecorProviders *providers)
       // When lines are folded, display one line for all of them.
       // Otherwise, display normally (can be several display lines when
       // 'wrap' is on).
-      foldinfo_T foldinfo = fold_info(wp, lnum);
+      foldinfo_T foldinfo = wp->w_p_cul && lnum == wp->w_cursor.lnum ?
+                            cursorline_fi : fold_info(wp, lnum);
 
       if (foldinfo.fi_lines == 0
           && idx < wp->w_lines_valid
@@ -1809,7 +1827,8 @@ static void win_update(win_T *wp, DecorProviders *providers)
       if (wp->w_p_rnu && wp->w_last_cursor_lnum_rnu != wp->w_cursor.lnum) {
         // 'relativenumber' set and cursor moved vertically: The
         // text doesn't need to be drawn, but the number column does.
-        foldinfo_T info = fold_info(wp, lnum);
+        foldinfo_T info = wp->w_p_cul && lnum == wp->w_cursor.lnum ?
+                          cursorline_fi : fold_info(wp, lnum);
         (void)win_line(wp, lnum, srow, wp->w_grid.rows, true, true,
                        info, &line_providers, &provider_err);
       }
@@ -1844,7 +1863,7 @@ static void win_update(win_T *wp, DecorProviders *providers)
 
   // Now that the window has been redrawn with the old and new cursor line,
   // update w_last_cursorline.
-  wp->w_last_cursorline = cursorline_standout ? wp->w_cursor.lnum : 0;
+  wp->w_last_cursorline = wp->w_cursorline;
 
   wp->w_last_cursor_lnum_rnu = wp->w_p_rnu ? wp->w_cursor.lnum : 0;
 
@@ -1906,7 +1925,7 @@ static void win_update(win_T *wp, DecorProviders *providers)
       if (j > 0 && !wp->w_botfill && row < wp->w_grid.rows) {
         // Display filler text below last line. win_line() will check
         // for ml_line_count+1 and only draw filler lines
-        foldinfo_T info = FOLDINFO_INIT;
+        foldinfo_T info = { 0 };
         row = win_line(wp, wp->w_botline, row, wp->w_grid.rows,
                        false, false, info, &line_providers, &provider_err);
       }

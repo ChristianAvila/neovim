@@ -945,6 +945,82 @@ describe('ui/ext_popupmenu', function()
     }}
 
   end)
+
+  it('does not interfere with mousemodel=popup', function()
+    exec([[
+      set mouse=a mousemodel=popup
+
+      aunmenu PopUp
+      menu PopUp.foo :let g:menustr = 'foo'<CR>
+      menu PopUp.bar :let g:menustr = 'bar'<CR>
+      menu PopUp.baz :let g:menustr = 'baz'<CR>
+    ]])
+    feed('o<C-r>=TestComplete()<CR>')
+    screen:expect{grid=[[
+                                                                  |
+      foo^                                                         |
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {2:-- INSERT --}                                                |
+    ]], popupmenu={
+      items=expected,
+      pos=0,
+      anchor={1,1,0},
+    }}
+
+    feed('<c-p>')
+    screen:expect{grid=[[
+                                                                  |
+      ^                                                            |
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {2:-- INSERT --}                                                |
+    ]], popupmenu={
+      items=expected,
+      pos=-1,
+      anchor={1,1,0},
+    }}
+
+    feed('<esc>')
+    screen:expect{grid=[[
+                                                                  |
+      ^                                                            |
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+                                                                  |
+    ]]}
+    feed('<RightMouse><0,0>')
+    screen:expect([[
+                                                                  |
+      {7:^foo }                                                        |
+      {7:bar }{1:                                                        }|
+      {7:baz }{1:                                                        }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+                                                                  |
+    ]])
+    feed('<esc>')
+    screen:expect([[
+                                                                  |
+      ^                                                            |
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+                                                                  |
+    ]])
+  end)
 end)
 
 
@@ -968,6 +1044,7 @@ describe('builtin popupmenu', function()
       [5] = {bold = true, foreground = Screen.colors.SeaGreen},
       [6] = {foreground = Screen.colors.Grey100, background = Screen.colors.Red},
       [7] = {background = Screen.colors.Yellow},  -- Search
+      [8] = {foreground = Screen.colors.Red},
     })
   end)
 
@@ -1112,6 +1189,66 @@ describe('builtin popupmenu', function()
       hh                              |
       {3:[No Name] [Preview][+]          }|
       {2:-- }{5:match 1 of 10}                |
+    ]])
+  end)
+
+  -- oldtest: Test_pum_with_preview_win()
+  it('preview window opened during completion', function()
+    exec([[
+      funct Omni_test(findstart, base)
+        if a:findstart
+          return col(".") - 1
+        endif
+        return [#{word: "one", info: "1info"}, #{word: "two", info: "2info"}, #{word: "three", info: "3info"}]
+      endfunc
+      set omnifunc=Omni_test
+      set completeopt+=longest
+    ]])
+    feed('Gi<C-X><C-O>')
+    screen:expect([[
+      ^                                |
+      {n:one            }{1:                 }|
+      {n:two            }{1:                 }|
+      {n:three          }{1:                 }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {2:-- }{8:Back at original}             |
+    ]])
+    feed('<C-N>')
+    screen:expect([[
+      1info                           |
+                                      |
+      {1:~                               }|
+      {3:[Scratch] [Preview]             }|
+      one^                             |
+      {s:one            }{1:                 }|
+      {n:two            }{1:                 }|
+      {n:three          }{1:                 }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {1:~                               }|
+      {4:[No Name] [+]                   }|
+      {2:-- }{5:match 1 of 3}                 |
     ]])
   end)
 
@@ -2703,6 +2840,26 @@ describe('builtin popupmenu', function()
       {1:~    }{s: unplace        }{1:         }|
       :sign unplace^                 |
     ]]}
+  end)
+
+  it('wildoptions=pum with a wrapped line in buffer vim-patch:8.2.4655', function()
+    screen:try_resize(32, 10)
+    meths.buf_set_lines(0, 0, -1, true, { ('a'):rep(100) })
+    command('set wildoptions+=pum')
+    feed('$')
+    feed(':sign <Tab>')
+    screen:expect([[
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+      aaaa {s: define         }           |
+      {1:~    }{n: jump           }{1:           }|
+      {1:~    }{n: list           }{1:           }|
+      {1:~    }{n: place          }{1:           }|
+      {1:~    }{n: undefine       }{1:           }|
+      {1:~    }{n: unplace        }{1:           }|
+      :sign define^                    |
+    ]])
   end)
 
   -- oldtest: Test_wildmenu_pum_clear_entries()

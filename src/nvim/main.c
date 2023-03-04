@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "auto/config.h"
 #include "nvim/arglist.h"
@@ -42,7 +41,6 @@
 #include "nvim/highlight.h"
 #include "nvim/highlight_group.h"
 #include "nvim/keycodes.h"
-#include "nvim/locale.h"
 #include "nvim/log.h"
 #include "nvim/lua/executor.h"
 #include "nvim/macros.h"
@@ -61,8 +59,8 @@
 #include "nvim/optionstr.h"
 #include "nvim/os/fileio.h"
 #include "nvim/os/input.h"
+#include "nvim/os/lang.h"
 #include "nvim/os/os.h"
-#include "nvim/os/pty_process.h"
 #include "nvim/os/stdpaths_defs.h"
 #include "nvim/os/time.h"
 #include "nvim/path.h"
@@ -97,7 +95,6 @@
 #include "nvim/msgpack_rpc/helpers.h"
 #include "nvim/msgpack_rpc/server.h"
 #include "nvim/os/signal.h"
-#include "nvim/tui/tui.h"
 
 // values for "window_layout"
 enum {
@@ -185,6 +182,9 @@ void early_init(mparm_T *paramp)
 #ifdef MSWIN
   OSVERSIONINFO ovi;
   ovi.dwOSVersionInfoSize = sizeof(ovi);
+  // Disable warning about GetVersionExA being deprecated. There doesn't seem to be a convenient
+  // replacement that doesn't add a ton of extra code as of writing this.
+# pragma warning(suppress : 4996)
   GetVersionEx(&ovi);
   snprintf(windowsVersion, sizeof(windowsVersion), "%d.%d",
            (int)ovi.dwMajorVersion, (int)ovi.dwMinorVersion);
@@ -192,12 +192,10 @@ void early_init(mparm_T *paramp)
 
   TIME_MSG("early init");
 
-#if defined(HAVE_LOCALE_H)
   // Setup to use the current locale (for ctype() and many other things).
   // NOTE: Translated messages with encodings other than latin1 will not
   // work until set_init_1() has been called!
   init_locale();
-#endif
 
   // tabpage local options (p_ch) must be set before allocating first tabpage.
   set_init_tablocal();
@@ -241,6 +239,14 @@ int main(int argc, char **argv)
 #endif
 
   argv0 = argv[0];
+
+  if (argc > 1 && STRICMP(argv[1], "-ll") == 0) {
+    if (argc == 2) {
+      print_mainerr(err_arg_missing, argv[1]);
+      exit(1);
+    }
+    nlua_run_script(argv, argc, 3);
+  }
 
   char *fname = NULL;     // file name from command line
   mparm_T params;         // various parameters passed between
@@ -289,7 +295,13 @@ int main(int argc, char **argv)
     }
   }
 
-  bool use_builtin_ui = (!headless_mode && !embedded_mode && !silent_mode);
+#ifdef MSWIN
+  // on windows we use CONIN special file, thus we don't know this yet.
+  bool has_term = true;
+#else
+  bool has_term = (stdin_isatty || stdout_isatty || stderr_isatty);
+#endif
+  bool use_builtin_ui = (has_term && !headless_mode && !embedded_mode && !silent_mode);
 
   // don't bind the server yet, if we are using builtin ui.
   // This will be done when nvim server has been forked from the ui process
@@ -305,7 +317,7 @@ int main(int argc, char **argv)
   bool remote_ui = (ui_client_channel_id != 0);
 
   if (use_builtin_ui && !remote_ui) {
-    ui_client_forward_stdin = !params.input_isatty;
+    ui_client_forward_stdin = !stdin_isatty;
     uint64_t rv = ui_client_start_server(params.argc, params.argv);
     if (!rv) {
       os_errmsg("Failed to start Nvim server!\n");
@@ -362,13 +374,14 @@ int main(int argc, char **argv)
   debug_break_level = params.use_debug_break_level;
 
   // Read ex-commands if invoked with "-es".
-  if (!params.input_isatty && !params.input_istext && silent_mode && exmode_active) {
-    input_start(STDIN_FILENO);
+  if (!stdin_isatty && !params.input_istext && silent_mode && exmode_active) {
+    input_start();
   }
 
   if (ui_client_channel_id) {
     ui_client_run(remote_ui);  // NORETURN
   }
+  assert(!ui_client_channel_id && !use_builtin_ui);
 
   // Wait for UIs to set up Nvim or show early messages
   // and prompts (--cmd, swapfile dialog, …).
@@ -393,19 +406,16 @@ int main(int argc, char **argv)
 
   open_script_files(&params);
 
-  // Default mappings (incl. menus)
+  // Default mappings (incl. menus) & autocommands
   Error err = ERROR_INIT;
-  Object o = NLUA_EXEC_STATIC("return vim._init_default_mappings()",
+  Object o = NLUA_EXEC_STATIC("return vim._init_defaults()",
                               (Array)ARRAY_DICT_INIT, &err);
   assert(!ERROR_SET(&err));
   api_clear_error(&err);
   assert(o.type == kObjectTypeNil);
   api_free_object(o);
 
-  TIME_MSG("init default mappings");
-
-  init_default_autocmds();
-  TIME_MSG("init default autocommands");
+  TIME_MSG("init default mappings & autocommands");
 
   bool vimrc_none = strequal(params.use_vimrc, "NONE");
 
@@ -542,7 +552,9 @@ int main(int argc, char **argv)
   if (params.diff_mode) {
     // set options in each window for "nvim -d".
     FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
-      diff_win_options(wp, true);
+      if (!wp->w_arg_idx_invalid) {
+        diff_win_options(wp, true);
+      }
     }
   }
 
@@ -570,15 +582,16 @@ int main(int argc, char **argv)
   set_vim_var_nr(VV_VIM_DID_ENTER, 1L);
   apply_autocmds(EVENT_VIMENTER, NULL, NULL, false, curbuf);
   TIME_MSG("VimEnter autocommands");
-  if (use_remote_ui || use_builtin_ui) {
-    do_autocmd_uienter(use_remote_ui ? CHAN_STDIO : 0, true);
+  if (use_remote_ui) {
+    do_autocmd_uienter(CHAN_STDIO, true);
     TIME_MSG("UIEnter autocommands");
   }
 
 #ifdef MSWIN
-  if (use_builtin_ui) {
+  if (use_remote_ui) {
     os_icon_init();
   }
+  os_title_save();
 #endif
 
   // Adjust default register name for "unnamed" in 'clipboard'. Can only be
@@ -640,8 +653,8 @@ void os_exit(int r)
   if (!event_teardown() && r == 0) {
     r = 1;  // Exit with error if main_loop did not teardown gracefully.
   }
-  if (input_global_fd() >= 0) {
-    stream_set_blocking(input_global_fd(), true);  // normalize stream (#2598)
+  if (used_stdin) {
+    stream_set_blocking(STDIN_FILENO, true);  // normalize stream (#2598)
   }
 
   ILOG("Nvim exit: %d", r);
@@ -657,6 +670,7 @@ void os_exit(int r)
 void getout(int exitval)
   FUNC_ATTR_NORETURN
 {
+  assert(!ui_client_channel_id);
   exiting = true;
 
   // On error during Ex mode, exit with a non-zero code.
@@ -760,7 +774,7 @@ void getout(int exitval)
 
   // Apply 'titleold'.
   if (p_title && *p_titleold != NUL) {
-    ui_call_set_title(cstr_as_string((char *)p_titleold));
+    ui_call_set_title(cstr_as_string(p_titleold));
   }
 
   if (garbage_collect_at_exit) {
@@ -770,15 +784,17 @@ void getout(int exitval)
 #ifdef MSWIN
   // Restore Windows console icon before exiting.
   os_icon_set(NULL, NULL);
+  os_title_reset();
 #endif
 
   os_exit(exitval);
 }
 
-/// Preserve files, print contents of `IObuff`, and exit 1.
+/// Preserve files, print contents of `errmsg`, and exit 1.
+/// @param errmsg  If NULL, this function will not print anything.
 ///
 /// May be called from deadly_signal().
-void preserve_exit(void)
+void preserve_exit(const char *errmsg)
   FUNC_ATTR_NORETURN
 {
   // 'true' when we are sure to exit, e.g., after a deadly signal
@@ -786,9 +802,9 @@ void preserve_exit(void)
 
   // Prevent repeated calls into this method.
   if (really_exiting) {
-    if (input_global_fd() >= 0) {
+    if (used_stdin) {
       // normalize stream (#2598)
-      stream_set_blocking(input_global_fd(), true);
+      stream_set_blocking(STDIN_FILENO, true);
     }
     exit(2);
   }
@@ -796,16 +812,26 @@ void preserve_exit(void)
   really_exiting = true;
   // Ignore SIGHUP while we are already exiting. #9274
   signal_reject_deadly();
-  os_errmsg(IObuff);
-  os_errmsg("\n");
-  ui_flush();
+
+  if (ui_client_channel_id) {
+    // For TUI: exit alternate screen so that the error messages can be seen.
+    ui_client_stop();
+  }
+  if (errmsg != NULL) {
+    os_errmsg(errmsg);
+    os_errmsg("\n");
+  }
+  if (ui_client_channel_id) {
+    os_exit(1);
+  }
 
   ml_close_notmod();                // close all not-modified buffers
 
   FOR_ALL_BUFFERS(buf) {
     if (buf->b_ml.ml_mfp != NULL && buf->b_ml.ml_mfp->mf_fname != NULL) {
-      os_errmsg("Vim: preserving files...\r\n");
-      ui_flush();
+      if (errmsg != NULL) {
+        os_errmsg("Vim: preserving files...\r\n");
+      }
       ml_sync_all(false, false, true);  // preserve all swap files
       break;
     }
@@ -813,7 +839,9 @@ void preserve_exit(void)
 
   ml_close_all(false);              // close all memfiles, without deleting
 
-  os_errmsg("Vim: Finished.\r\n");
+  if (errmsg != NULL) {
+    os_errmsg("Vim: Finished.\r\n");
+  }
 
   getout(1);
 }
@@ -880,7 +908,7 @@ static void remote_request(mparm_T *params, int remote_args, char *server_addr, 
       os_errmsg("Remote ui failed to start: ");
       os_errmsg(connect_error);
       os_errmsg("\n");
-      exit(1);
+      os_exit(1);
     }
 
     ui_client_channel_id = chan;
@@ -888,9 +916,8 @@ static void remote_request(mparm_T *params, int remote_args, char *server_addr, 
   }
 
   Array args = ARRAY_DICT_INIT;
-  String arg_s;
   for (int t_argc = remote_args; t_argc < argc; t_argc++) {
-    arg_s = cstr_to_string(argv[t_argc]);
+    String arg_s = cstr_to_string(argv[t_argc]);
     ADD(args, STRING_OBJ(arg_s));
   }
 
@@ -964,7 +991,7 @@ static bool edit_stdin(mparm_T *parmp)
   bool implicit = !headless_mode
                   && !(embedded_mode && stdin_fd <= 0)
                   && (!exmode_active || parmp->input_istext)
-                  && !parmp->input_isatty
+                  && !stdin_isatty
                   && parmp->scriptin == NULL;  // `-s -` was not given.
   return parmp->had_stdin_file || implicit;
 }
@@ -1118,8 +1145,8 @@ static void command_line_scan(mparm_T *parmp)
       case 'h':    // "-h" give help message
         usage();
         os_exit(0);
-      case 'H':    // "-H" start in Hebrew mode: rl + hkmap set.
-        p_hkmap = true;
+      case 'H':    // "-H" start in Hebrew mode: rl + keymap=hebrew set.
+        set_option_value_give_err("keymap", 0L, "hebrew", 0);
         set_option_value_give_err("rl", 1L, NULL, 0);
         break;
       case 'M':    // "-M"  no changes or writing of files
@@ -1450,11 +1477,9 @@ static void init_startuptime(mparm_T *paramp)
 
 static void check_and_set_isatty(mparm_T *paramp)
 {
-  stdin_isatty
-    = paramp->input_isatty = os_isatty(STDIN_FILENO);
-  stdout_isatty
-    = paramp->output_isatty = os_isatty(STDOUT_FILENO);
-  paramp->err_isatty = os_isatty(STDERR_FILENO);
+  stdin_isatty = os_isatty(STDIN_FILENO);
+  stdout_isatty = os_isatty(STDOUT_FILENO);
+  stderr_isatty = os_isatty(STDERR_FILENO);
   TIME_MSG("window checked");
 }
 
@@ -1506,7 +1531,7 @@ static void handle_quickfix(mparm_T *paramp)
       set_string_option_direct("ef", -1, paramp->use_ef, OPT_FREE, SID_CARG);
     }
     vim_snprintf(IObuff, IOSIZE, "cfile %s", p_ef);
-    if (qf_init(NULL, (char *)p_ef, p_efm, true, IObuff, p_menc) < 0) {
+    if (qf_init(NULL, p_ef, p_efm, true, IObuff, p_menc) < 0) {
       msg_putchar('\n');
       os_exit(3);
     }
@@ -1565,7 +1590,7 @@ static void open_script_files(mparm_T *parmp)
       scriptin[0] = file_open_new(&error, parmp->scriptin,
                                   kFileReadOnly|kFileNonBlocking, 0);
       if (scriptin[0] == NULL) {
-        vim_snprintf((char *)IObuff, IOSIZE,
+        vim_snprintf(IObuff, IOSIZE,
                      _("Cannot open for reading: \"%s\": %s\n"),
                      parmp->scriptin, os_strerror(error));
         os_errmsg(IObuff);
@@ -1590,9 +1615,6 @@ static void open_script_files(mparm_T *parmp)
 // Also does recovery if "recoverymode" set.
 static void create_windows(mparm_T *parmp)
 {
-  int dorewind;
-  int done = 0;
-
   // Create the number of windows that was requested.
   if (parmp->window_count == -1) {      // was not set
     parmp->window_count = 1;
@@ -1628,6 +1650,7 @@ static void create_windows(mparm_T *parmp)
     }
     do_modelines(0);                    // do modelines
   } else {
+    int done = 0;
     // Open a buffer for windows that don't have one yet.
     // Commands in the vimrc might have loaded a file or split the window.
     // Watch out for autocommands that delete a window.
@@ -1635,7 +1658,7 @@ static void create_windows(mparm_T *parmp)
     // Don't execute Win/Buf Enter/Leave autocommands here
     autocmd_no_enter++;
     autocmd_no_leave++;
-    dorewind = true;
+    int dorewind = true;
     while (done++ < 1000) {
       if (dorewind) {
         if (parmp->window_layout == WIN_TABS) {
@@ -2106,6 +2129,12 @@ static int execute_env(char *env)
 static void mainerr(const char *errstr, const char *str)
   FUNC_ATTR_NORETURN
 {
+  print_mainerr(errstr, str);
+  os_exit(1);
+}
+
+static void print_mainerr(const char *errstr, const char *str)
+{
   char *prgname = path_tail(argv0);
 
   signal_stop();              // kill us with CTRL-C here, if you like
@@ -2121,8 +2150,6 @@ static void mainerr(const char *errstr, const char *str)
   os_errmsg(_("\nMore info with \""));
   os_errmsg(prgname);
   os_errmsg(" -h\"\n");
-
-  os_exit(1);
 }
 
 /// Prints version information for "nvim -v" or "nvim --version".

@@ -12,14 +12,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <uv.h>
 
 #include "auto/config.h"
+#include "nvim/ascii.h"
 #include "nvim/gettext.h"
 #include "nvim/globals.h"
 #include "nvim/log.h"
 #include "nvim/macros.h"
+#include "nvim/memory.h"
+#include "nvim/message.h"
 #include "nvim/option_defs.h"
 #include "nvim/os/fs_defs.h"
+#include "nvim/os/os.h"
+#include "nvim/path.h"
 #include "nvim/types.h"
 #include "nvim/vim.h"
 
@@ -27,23 +33,16 @@
 # include <sys/uio.h>
 #endif
 
-#include <uv.h>
-
-#include "nvim/ascii.h"
-#include "nvim/memory.h"
-#include "nvim/message.h"
-#include "nvim/os/os.h"
-#include "nvim/path.h"
-
-struct iovec;
-
 #ifdef MSWIN
-# include "nvim/mbyte.h"  // for utf8_to_utf16, utf16_to_utf8
+# include "nvim/mbyte.h"
+# include "nvim/option.h"
 #endif
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "os/fs.c.generated.h"
 #endif
+
+struct iovec;
 
 #define RUN_UV_FS_FUNC(ret, func, ...) \
   do { \
@@ -146,11 +145,7 @@ bool os_isdir(const char *name)
     return false;
   }
 
-  if (!S_ISDIR(mode)) {
-    return false;
-  }
-
-  return true;
+  return S_ISDIR(mode);
 }
 
 /// Check what `name` is:
@@ -302,7 +297,9 @@ static bool is_executable(const char *name, char **abspath)
 static bool is_executable_ext(const char *name, char **abspath)
   FUNC_ATTR_NONNULL_ARG(1)
 {
-  const bool is_unix_shell = strstr((char *)path_tail(p_sh), "sh") != NULL;
+  const bool is_unix_shell = strstr(path_tail(p_sh), "powershell") == NULL
+                             && strstr(path_tail(p_sh), "pwsh") == NULL
+                             && strstr(path_tail(p_sh), "sh") != NULL;
   char *nameext = strrchr(name, '.');
   size_t nameext_len = nameext ? strlen(nameext) : 0;
   xstrlcpy(os_buf, name, sizeof(os_buf));
@@ -328,11 +325,11 @@ static bool is_executable_ext(const char *name, char **abspath)
 
     const char *ext_end = ext;
     size_t ext_len =
-      copy_option_part(&ext_end, (char_u *)buf_end,
+      copy_option_part((char **)&ext_end, buf_end,
                        sizeof(os_buf) - (size_t)(buf_end - os_buf), ENV_SEPSTR);
     if (ext_len != 0) {
       bool in_pathext = nameext_len == ext_len
-                        && 0 == mb_strnicmp((char_u *)nameext, (char_u *)ext, ext_len);
+                        && 0 == mb_strnicmp(nameext, ext, ext_len);
 
       if (((in_pathext || is_unix_shell) && is_executable(name, abspath))
           || is_executable(os_buf, abspath)) {
@@ -786,17 +783,18 @@ int os_setperm(const char *const name, int perm)
 # ifdef HAVE_SYS_ACCESS_H
 #  include <sys/access.h>
 # endif
+#endif
 
 // Return a pointer to the ACL of file "fname" in allocated memory.
 // Return NULL if the ACL is not available for whatever reason.
-vim_acl_T os_get_acl(const char_u *fname)
+vim_acl_T os_get_acl(const char *fname)
 {
   vim_acl_T ret = NULL;
   return ret;
 }
 
 // Set the ACL of file "fname" to "acl" (unless it's NULL).
-void os_set_acl(const char_u *fname, vim_acl_T aclent)
+void os_set_acl(const char *fname, vim_acl_T aclent)
 {
   if (aclent == NULL) {
     return;
@@ -809,7 +807,6 @@ void os_free_acl(vim_acl_T aclent)
     return;
   }
 }
-#endif
 
 #ifdef UNIX
 /// Checks if the current user owns a file.
@@ -912,12 +909,11 @@ int os_file_is_writable(const char *name)
 /// Rename a file or directory.
 ///
 /// @return `OK` for success, `FAIL` for failure.
-int os_rename(const char_u *path, const char_u *new_path)
+int os_rename(const char *path, const char *new_path)
   FUNC_ATTR_NONNULL_ALL
 {
   int r;
-  RUN_UV_FS_FUNC(r, uv_fs_rename, (const char *)path, (const char *)new_path,
-                 NULL);
+  RUN_UV_FS_FUNC(r, uv_fs_rename, path, new_path, NULL);
   return (r == kLibuvSuccess ? OK : FAIL);
 }
 
@@ -1380,7 +1376,7 @@ bool os_is_reparse_point_include(const char *path)
   }
 
   p = utf16_path;
-  if (isalpha(p[0]) && p[1] == L':' && IS_PATH_SEP(p[2])) {
+  if (isalpha((uint8_t)p[0]) && p[1] == L':' && IS_PATH_SEP(p[2])) {
     p += 3;
   } else if (IS_PATH_SEP(p[0]) && IS_PATH_SEP(p[1])) {
     p += 2;

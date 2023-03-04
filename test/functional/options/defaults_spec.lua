@@ -3,6 +3,7 @@ local helpers = require('test.functional.helpers')(after_each)
 local Screen = require('test.functional.ui.screen')
 
 local assert_alive = helpers.assert_alive
+local assert_log = helpers.assert_log
 local meths = helpers.meths
 local command = helpers.command
 local clear = helpers.clear
@@ -19,6 +20,8 @@ local alter_slashes = helpers.alter_slashes
 local tbl_contains = helpers.tbl_contains
 local expect_exit = helpers.expect_exit
 local is_os = helpers.is_os
+
+local testlog = 'Xtest-defaults-log'
 
 describe('startup defaults', function()
   describe(':filetype', function()
@@ -275,6 +278,10 @@ describe('XDG defaults', function()
   -- Need separate describe() blocks to not run clear() twice.
   -- Do not put before_each() here for the same reasons.
 
+  after_each(function()
+    os.remove(testlog)
+  end)
+
   it("&runtimepath data-dir matches stdpath('data') #9910", function()
     clear()
     local rtp = eval('split(&runtimepath, ",")')
@@ -337,6 +344,7 @@ describe('XDG defaults', function()
       clear({
         args_rm={'runtimepath'},
         env={
+          NVIM_LOG_FILE=testlog,
           XDG_CONFIG_HOME=(root_path .. ('/x'):rep(4096)),
           XDG_CONFIG_DIRS=(root_path .. ('/a'):rep(2048)
                            .. env_sep.. root_path .. ('/b'):rep(2048)
@@ -351,6 +359,10 @@ describe('XDG defaults', function()
     end)
 
     it('are correctly set', function()
+      if not is_os('win') then
+        assert_log('Failed to start server: no such file or directory: /X/X/X', testlog, 10)
+      end
+
       local vimruntime, libdir = vimruntime_and_libdir()
 
       eq(((root_path .. ('/x'):rep(4096) .. '/nvim'
@@ -412,6 +424,7 @@ describe('XDG defaults', function()
       clear({
         args_rm={'runtimepath'},
         env={
+          NVIM_LOG_FILE=testlog,
           XDG_CONFIG_HOME='$XDG_DATA_HOME',
           XDG_CONFIG_DIRS='$XDG_DATA_DIRS',
           XDG_DATA_HOME='$XDG_CONFIG_HOME',
@@ -422,6 +435,10 @@ describe('XDG defaults', function()
     end)
 
     it('are not expanded', function()
+      if not is_os('win') then
+        assert_log('Failed to start server: no such file or directory: %$XDG_RUNTIME_DIR%/', testlog, 10)
+      end
+
       local vimruntime, libdir = vimruntime_and_libdir()
       eq((('$XDG_DATA_HOME/nvim'
           .. ',$XDG_DATA_DIRS/nvim'
@@ -549,8 +566,12 @@ end)
 describe('stdpath()', function()
   -- Windows appends 'nvim-data' instead of just 'nvim' to prevent collisions
   -- due to XDG_CONFIG_HOME, XDG_DATA_HOME and XDG_STATE_HOME being the same.
-  local datadir = is_os('win') and 'nvim-data' or 'nvim'
-  local statedir = is_os('win') and 'nvim-data' or 'nvim'
+  local function maybe_data(name)
+    return is_os('win') and name .. '-data' or name
+  end
+
+  local datadir = maybe_data('nvim')
+  local statedir = maybe_data('nvim')
   local env_sep = is_os('win') and ';' or ':'
 
   it('acceptance', function()
@@ -563,6 +584,24 @@ describe('stdpath()', function()
     eq('table', type(funcs.stdpath('config_dirs')))
     eq('table', type(funcs.stdpath('data_dirs')))
     eq('string', type(funcs.stdpath('run')))
+    assert_alive()  -- Check for crash. #8393
+  end)
+
+  it('reacts to #NVIM_APPNAME', function()
+    local appname = "NVIM_APPNAME_TEST____________________________________" ..
+      "______________________________________________________________________"
+    clear({env={ NVIM_APPNAME=appname }})
+    eq(appname, funcs.fnamemodify(funcs.stdpath('config'), ':t'))
+    eq(appname, funcs.fnamemodify(funcs.stdpath('cache'), ':t'))
+    eq(maybe_data(appname), funcs.fnamemodify(funcs.stdpath('log'), ':t'))
+    eq(maybe_data(appname), funcs.fnamemodify(funcs.stdpath('data'), ':t'))
+    eq(maybe_data(appname), funcs.fnamemodify(funcs.stdpath('state'), ':t'))
+    -- config_dirs and data_dirs are empty on windows, so don't check them on
+    -- that platform
+    if not is_os('win') then
+      eq(appname, funcs.fnamemodify(funcs.stdpath('config_dirs')[1], ':t'))
+      eq(appname, funcs.fnamemodify(funcs.stdpath('data_dirs')[1], ':t'))
+    end
     assert_alive()  -- Check for crash. #8393
   end)
 

@@ -20,14 +20,15 @@
 #include "nvim/channel.h"
 #include "nvim/event/defs.h"
 #include "nvim/event/loop.h"
+#include "nvim/event/process.h"
 #include "nvim/event/rstream.h"
 #include "nvim/event/stream.h"
 #include "nvim/event/wstream.h"
-#include "nvim/globals.h"
 #include "nvim/log.h"
 #include "nvim/main.h"
 #include "nvim/map.h"
 #include "nvim/memory.h"
+#include "nvim/message.h"
 #include "nvim/msgpack_rpc/channel.h"
 #include "nvim/msgpack_rpc/channel_defs.h"
 #include "nvim/msgpack_rpc/helpers.h"
@@ -246,10 +247,13 @@ static void parse_msgpack(Channel *channel)
   Unpacker *p = channel->rpc.unpacker;
   while (unpacker_advance(p)) {
     if (p->type == kMessageTypeRedrawEvent) {
-      if (p->grid_line_event) {
-        ui_client_event_raw_line(p->grid_line_event);
-      } else if (p->ui_handler.fn != NULL && p->result.type == kObjectTypeArray) {
-        p->ui_handler.fn(p->result.data.array);
+      // When exiting, ui_client_stop() has already been called, so don't handle UI events.
+      if (ui_client_channel_id && !exiting) {
+        if (p->grid_line_event) {
+          ui_client_event_raw_line(p->grid_line_event);
+        } else if (p->ui_handler.fn != NULL && p->result.type == kObjectTypeArray) {
+          p->ui_handler.fn(p->result.data.array);
+        }
       }
       arena_mem_free(arena_finish(&p->arena));
     } else if (p->type == kMessageTypeResponse) {
@@ -546,6 +550,10 @@ void rpc_close(Channel *channel)
 
   if (channel->streamtype == kChannelStreamStdio
       || (channel->id == ui_client_channel_id && channel->streamtype != kChannelStreamProc)) {
+    if (channel->streamtype == kChannelStreamStdio) {
+      // Avoid hanging when there are no other UIs and a prompt is triggered on exit.
+      remote_ui_disconnect(channel->id);
+    }
     exit_from_channel(0);
   }
 }

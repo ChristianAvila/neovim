@@ -15,9 +15,6 @@ function(BuildLuajit)
     set(_luajit_TARGET "luajit")
   endif()
 
-  if(USE_EXISTING_SRC_DIR)
-    unset(LUAJIT_URL)
-  endif()
   ExternalProject_Add(${_luajit_TARGET}
     URL ${LUAJIT_URL}
     URL_HASH SHA256=${LUAJIT_SHA256}
@@ -38,7 +35,7 @@ function(BuildLuajit)
 endfunction()
 
 check_c_compiler_flag(-fno-stack-check HAS_NO_STACK_CHECK)
-if(CMAKE_SYSTEM_NAME MATCHES "Darwin" AND HAS_NO_STACK_CHECK)
+if(APPLE AND HAS_NO_STACK_CHECK)
   set(NO_STACK_CHECK "CFLAGS+=-fno-stack-check")
 else()
   set(NO_STACK_CHECK "")
@@ -48,7 +45,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "OpenBSD")
 else()
   set(AMD64_ABI "")
 endif()
-set(BUILDCMD_UNIX ${MAKE_PRG} CFLAGS=-fPIC
+set(BUILDCMD_UNIX ${MAKE_PRG} -j CFLAGS=-fPIC
                               CFLAGS+=-DLUA_USE_APICHECK
                               CFLAGS+=-funwind-tables
                               ${NO_STACK_CHECK}
@@ -58,7 +55,7 @@ set(BUILDCMD_UNIX ${MAKE_PRG} CFLAGS=-fPIC
 
 # Setting MACOSX_DEPLOYMENT_TARGET is mandatory for LuaJIT; use version set by
 # cmake.deps/CMakeLists.txt (either environment variable or current system version).
-if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+if(APPLE)
   set(DEPLOYMENT_TARGET "MACOSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}")
 endif()
 
@@ -149,4 +146,10 @@ else()
   message(FATAL_ERROR "Trying to build luajit in an unsupported system ${CMAKE_SYSTEM_NAME}/${CMAKE_C_COMPILER_ID}")
 endif()
 
-list(APPEND THIRD_PARTY_DEPS luajit)
+if (NOT MSVC)
+  add_custom_target(clean_shared_libraries_luajit ALL
+    COMMAND ${CMAKE_COMMAND}
+      -D REMOVE_FILE_GLOB=${DEPS_INSTALL_DIR}/lib/${CMAKE_SHARED_LIBRARY_PREFIX}*${CMAKE_SHARED_LIBRARY_SUFFIX}*
+      -P ${PROJECT_SOURCE_DIR}/cmake/RemoveFiles.cmake)
+  add_dependencies(clean_shared_libraries_luajit luajit)
+endif()

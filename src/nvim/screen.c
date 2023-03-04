@@ -248,11 +248,8 @@ size_t fill_foldcolumn(char *p, win_T *wp, foldinfo_T foldinfo, linenr_T lnum)
 /// Only works for single-byte characters (e.g., numbers).
 void rl_mirror(char *str)
 {
-  char *p1, *p2;
-  char t;
-
-  for (p1 = str, p2 = str + strlen(str) - 1; p1 < p2; p1++, p2--) {
-    t = *p1;
+  for (char *p1 = str, *p2 = str + strlen(str) - 1; p1 < p2; p1++, p2--) {
+    char t = *p1;
     *p1 = *p2;
     *p2 = t;
   }
@@ -264,9 +261,7 @@ void rl_mirror(char *str)
 /// line of the window right of it.  If not, then it's a vertical separator.
 bool stl_connected(win_T *wp)
 {
-  frame_T *fr;
-
-  fr = wp->w_frame;
+  frame_T *fr = wp->w_frame;
   while (fr->fr_parent != NULL) {
     if (fr->fr_parent->fr_layout == FR_COL) {
       if (fr->fr_next != NULL) {
@@ -295,52 +290,54 @@ bool get_keymap_str(win_T *wp, char *fmt, char *buf, int len)
     return false;
   }
 
-  {
-    buf_T *old_curbuf = curbuf;
-    win_T *old_curwin = curwin;
-    char *s;
+  buf_T *old_curbuf = curbuf;
+  win_T *old_curwin = curwin;
+  char *s;
 
-    curbuf = wp->w_buffer;
-    curwin = wp;
-    STRCPY(buf, "b:keymap_name");       // must be writable
-    emsg_skip++;
-    s = p = eval_to_string(buf, NULL, false);
-    emsg_skip--;
-    curbuf = old_curbuf;
-    curwin = old_curwin;
-    if (p == NULL || *p == NUL) {
-      if (wp->w_buffer->b_kmap_state & KEYMAP_LOADED) {
-        p = wp->w_buffer->b_p_keymap;
-      } else {
-        p = "lang";
-      }
+  curbuf = wp->w_buffer;
+  curwin = wp;
+  STRCPY(buf, "b:keymap_name");       // must be writable
+  emsg_skip++;
+  s = p = eval_to_string(buf, NULL, false);
+  emsg_skip--;
+  curbuf = old_curbuf;
+  curwin = old_curwin;
+  if (p == NULL || *p == NUL) {
+    if (wp->w_buffer->b_kmap_state & KEYMAP_LOADED) {
+      p = wp->w_buffer->b_p_keymap;
+    } else {
+      p = "lang";
     }
-    if (vim_snprintf(buf, (size_t)len, fmt, p) > len - 1) {
-      buf[0] = NUL;
-    }
-    xfree(s);
   }
+  if (vim_snprintf(buf, (size_t)len, fmt, p) > len - 1) {
+    buf[0] = NUL;
+  }
+  xfree(s);
   return buf[0] != NUL;
 }
 
 /// Prepare for 'hlsearch' highlighting.
 void start_search_hl(void)
 {
-  if (p_hls && !no_hlsearch) {
-    end_search_hl();  // just in case it wasn't called before
-    last_pat_prog(&screen_search_hl.rm);
-    // Set the time limit to 'redrawtime'.
-    screen_search_hl.tm = profile_setlimit(p_rdt);
+  if (!p_hls || no_hlsearch) {
+    return;
   }
+
+  end_search_hl();  // just in case it wasn't called before
+  last_pat_prog(&screen_search_hl.rm);
+  // Set the time limit to 'redrawtime'.
+  screen_search_hl.tm = profile_setlimit(p_rdt);
 }
 
 /// Clean up for 'hlsearch' highlighting.
 void end_search_hl(void)
 {
-  if (screen_search_hl.rm.regprog != NULL) {
-    vim_regfree(screen_search_hl.rm.regprog);
-    screen_search_hl.rm.regprog = NULL;
+  if (screen_search_hl.rm.regprog == NULL) {
+    return;
   }
+
+  vim_regfree(screen_search_hl.rm.regprog);
+  screen_search_hl.rm.regprog = NULL;
 }
 
 /// Check if there should be a delay.  Used before clearing or redrawing the
@@ -435,11 +432,7 @@ bool skip_showmode(void)
 /// @return the length of the message (0 if no message).
 int showmode(void)
 {
-  bool need_clear;
   int length = 0;
-  int do_mode;
-  int attr;
-  int sub_attr;
 
   if (ui_has(kUIMessages) && clear_cmdline) {
     msg_ext_clear(true);
@@ -450,12 +443,13 @@ int showmode(void)
 
   msg_grid_validate();
 
-  do_mode = ((p_smd && msg_silent == 0)
-             && ((State & MODE_TERMINAL)
-                 || (State & MODE_INSERT)
-                 || restart_edit != NUL
-                 || VIsual_active));
+  int do_mode = ((p_smd && msg_silent == 0)
+                 && ((State & MODE_TERMINAL)
+                     || (State & MODE_INSERT)
+                     || restart_edit != NUL
+                     || VIsual_active));
   if (do_mode || reg_recording != 0) {
+    int sub_attr;
     if (skip_showmode()) {
       return 0;  // show mode later
     }
@@ -466,14 +460,14 @@ int showmode(void)
     check_for_delay(false);
 
     // if the cmdline is more than one line high, erase top lines
-    need_clear = clear_cmdline;
+    bool need_clear = clear_cmdline;
     if (clear_cmdline && cmdline_row < Rows - 1) {
       msg_clr_cmdline();  // will reset clear_cmdline
     }
 
     // Position on the last line in the window, column 0
     msg_pos_mode();
-    attr = HL_ATTR(HLF_CM);                     // Highlight mode
+    int attr = HL_ATTR(HLF_CM);                     // Highlight mode
 
     // When the screen is too narrow to show the entire mode message,
     // avoid scrolling and truncate instead.
@@ -539,9 +533,6 @@ int showmode(void)
           msg_puts_attr(_(" (replace)"), attr);
         } else if (restart_edit == 'V') {
           msg_puts_attr(_(" (vreplace)"), attr);
-        }
-        if (p_hkmap) {
-          msg_puts_attr(_(" Hebrew"), attr);
         }
         if (State & MODE_LANGMAP) {
           if (curwin->w_p_arab) {
@@ -671,11 +662,13 @@ void clearmode(void)
 static void recording_mode(int attr)
 {
   msg_puts_attr(_("recording"), attr);
-  if (!shortmess(SHM_RECORDING)) {
-    char s[4];
-    snprintf(s, ARRAY_SIZE(s), " @%c", reg_recording);
-    msg_puts_attr(s, attr);
+  if (shortmess(SHM_RECORDING)) {
+    return;
   }
+
+  char s[4];
+  snprintf(s, ARRAY_SIZE(s), " @%c", reg_recording);
+  msg_puts_attr(s, attr);
 }
 
 void get_trans_bufname(buf_T *buf)
@@ -764,7 +757,6 @@ void comp_col(void)
 /// Otherwise it depends on 'numberwidth' and the line count.
 int number_width(win_T *wp)
 {
-  int n;
   linenr_T lnum;
 
   if (wp->w_p_rnu && !wp->w_p_nu) {
@@ -780,17 +772,13 @@ int number_width(win_T *wp)
   }
   wp->w_nrwidth_line_count = lnum;
 
-  // make best estimate for 'statuscolumn'
+  // reset for 'statuscolumn'
   if (*wp->w_p_stc != NUL) {
-    char buf[MAXPATHL];
-    wp->w_nrwidth_width = 0;
-    n = build_statuscol_str(wp, true, false, lnum, 0, 0, NUL, buf, NULL, NULL);
-    n = MAX(n, (wp->w_p_nu || wp->w_p_rnu) * (int)wp->w_p_nuw);
-    wp->w_nrwidth_width = MIN(n, MAX_NUMBERWIDTH);
+    wp->w_nrwidth_width = (wp->w_p_nu || wp->w_p_rnu) * (int)wp->w_p_nuw;
     return wp->w_nrwidth_width;
   }
 
-  n = 0;
+  int n = 0;
   do {
     lnum /= 10;
     n++;
@@ -815,15 +803,15 @@ int number_width(win_T *wp)
 /// Calls mb_cptr2char_adv(p) and returns the character.
 /// If "p" starts with "\x", "\u" or "\U" the hex or unicode value is used.
 /// Returns 0 for invalid hex or invalid UTF-8 byte.
-static int get_encoded_char_adv(const char_u **p)
+static int get_encoded_char_adv(const char **p)
 {
-  const char *s = (const char *)(*p);
+  const char *s = *p;
 
   if (s[0] == '\\' && (s[1] == 'x' || s[1] == 'u' || s[1] == 'U')) {
     int64_t num = 0;
     for (int bytes = s[1] == 'x' ? 1 : s[1] == 'u' ? 2 : 4; bytes > 0; bytes--) {
       *p += 2;
-      int n = hexhex2nr((char *)(*p));
+      int n = hexhex2nr(*p);
       if (n < 0) {
         return 0;
       }
@@ -952,7 +940,7 @@ char *set_chars_option(win_T *wp, char **varp, bool apply)
         if (strncmp(p, tab[i].name, len) == 0
             && p[len] == ':'
             && p[len + 1] != NUL) {
-          const char_u *s = (char_u *)p + len + 1;
+          const char *s = p + len + 1;
           int c1 = get_encoded_char_adv(&s);
           if (c1 == 0 || char2cells(c1) > 1) {
             return e_invarg;
@@ -983,7 +971,7 @@ char *set_chars_option(win_T *wp, char **varp, bool apply)
                 *(tab[i].cp) = c1;
               }
             }
-            p = (char *)s;
+            p = s;
             break;
           }
         }
@@ -996,7 +984,7 @@ char *set_chars_option(win_T *wp, char **varp, bool apply)
             && strncmp(p, "multispace", len) == 0
             && p[len] == ':'
             && p[len + 1] != NUL) {
-          const char_u *s = (char_u *)p + len + 1;
+          const char *s = p + len + 1;
           if (round == 0) {
             // Get length of lcs-multispace string in the first round
             last_multispace = p;
@@ -1012,7 +1000,7 @@ char *set_chars_option(win_T *wp, char **varp, bool apply)
               // lcs-multispace cannot be an empty string
               return e_invarg;
             }
-            p = (char *)s;
+            p = s;
           } else {
             int multispace_pos = 0;
             while (*s != NUL && *s != ',') {
@@ -1021,13 +1009,13 @@ char *set_chars_option(win_T *wp, char **varp, bool apply)
                 wp->w_p_lcs_chars.multispace[multispace_pos++] = c1;
               }
             }
-            p = (char *)s;
+            p = s;
           }
         } else if (is_listchars
                    && strncmp(p, "leadmultispace", len2) == 0
                    && p[len2] == ':'
                    && p[len2 + 1] != NUL) {
-          const char_u *s = (char_u *)p + len2 + 1;
+          const char *s = p + len2 + 1;
           if (round == 0) {
             // get length of lcs-leadmultispace string in first round
             last_lmultispace = p;
@@ -1043,7 +1031,7 @@ char *set_chars_option(win_T *wp, char **varp, bool apply)
               // lcs-leadmultispace cannot be an empty string
               return e_invarg;
             }
-            p = (char *)s;
+            p = s;
           } else {
             int multispace_pos = 0;
             while (*s != NUL && *s != ',') {
@@ -1052,7 +1040,7 @@ char *set_chars_option(win_T *wp, char **varp, bool apply)
                 wp->w_p_lcs_chars.leadmultispace[multispace_pos++] = c1;
               }
             }
-            p = (char *)s;
+            p = s;
           }
         } else {
           return e_invarg;

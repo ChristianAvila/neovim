@@ -43,10 +43,8 @@ describe('startup', function()
 
   it('--startuptime', function()
     clear({ args = {'--startuptime', testfile}})
-    retry(nil, 1000, function()
-      assert_log('sourcing', testfile, 100)
-      assert_log("require%('vim%._editor'%)", testfile, 100)
-    end)
+    assert_log('sourcing', testfile, 100)
+    assert_log("require%('vim%._editor'%)", testfile, 100)
   end)
 
   it('-D does not hang #12647', function()
@@ -104,6 +102,13 @@ describe('startup', function()
     end)
 
     it('os.exit() sets Nvim exitcode', function()
+      -- tricky: LeakSanitizer triggers on os.exit() and disrupts the return value, disable it
+      exec_lua [[
+        local asan_options = os.getenv 'ASAN_OPTIONS'
+        if asan_options ~= nil and asan_options ~= '' then
+          vim.loop.os_setenv('ASAN_OPTIONS', asan_options..':detect_leaks=0')
+        end
+      ]]
       -- nvim -l foo.lua -arg1 -- a b c
       assert_l_out([[
           bufs:

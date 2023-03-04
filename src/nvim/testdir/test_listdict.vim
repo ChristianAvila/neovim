@@ -357,7 +357,7 @@ endfunc
 " Locked variables
 func Test_list_locked_var()
   let expected = [
-	      \ [['0000-000', 'ppppppp'],
+	      \ [['1000-000', 'ppppppF'],
 	      \  ['0000-000', 'ppppppp'],
 	      \  ['0000-000', 'ppppppp']],
 	      \ [['1000-000', 'ppppppF'],
@@ -384,7 +384,7 @@ func Test_list_locked_var()
         exe "unlockvar " . depth . " l"
       endif
       let ps = islocked("l").islocked("l[1]").islocked("l[1][1]").islocked("l[1][1][0]").'-'.islocked("l[2]").islocked("l[2]['6']").islocked("l[2]['6'][7]")
-      call assert_equal(expected[depth][u][0], ps)
+      call assert_equal(expected[depth][u][0], ps, 'depth: ' .. depth)
       let ps = ''
       try
         let l[1][1][0] = 99
@@ -428,7 +428,7 @@ func Test_list_locked_var()
       catch
         let ps .= 'F'
       endtry
-      call assert_equal(expected[depth][u][1], ps)
+      call assert_equal(expected[depth][u][1], ps, 'depth: ' .. depth)
     endfor
   endfor
   call assert_fails("let x=islocked('a b')", 'E488:')
@@ -441,7 +441,7 @@ endfunc
 " Unletting locked variables
 func Test_list_locked_var_unlet()
   let expected = [
-	      \ [['0000-000', 'ppppppp'],
+	      \ [['1000-000', 'ppppppp'],
 	      \  ['0000-000', 'ppppppp'],
 	      \  ['0000-000', 'ppppppp']],
 	      \ [['1000-000', 'ppFppFp'],
@@ -469,7 +469,7 @@ func Test_list_locked_var_unlet()
         exe "unlockvar " . depth . " l"
       endif
       let ps = islocked("l").islocked("l[1]").islocked("l[1][1]").islocked("l[1][1][0]").'-'.islocked("l[2]").islocked("l[2]['6']").islocked("l[2]['6'][7]")
-      call assert_equal(expected[depth][u][0], ps)
+      call assert_equal(expected[depth][u][0], ps, 'depth: ' .. depth)
       let ps = ''
       try
         unlet l[2]['6'][7]
@@ -671,6 +671,9 @@ endfunc
 
 func Test_func_arg_list()
   call s:arg_list_test(1, 2, [3, 4], {5: 6})
+endfunc
+
+func Test_dict_item_locked()
 endfunc
 
 " Tests for reverse(), sort(), uniq()
@@ -878,6 +881,22 @@ func Test_listdict_extend()
   call assert_equal([1, 5, 7, 1, 5, 7], l)
 endfunc
 
+func Test_listdict_extendnew()
+  " Test extendnew() with lists
+  let l = [1, 2, 3]
+  call assert_equal([1, 2, 3, 4, 5], extendnew(l, [4, 5]))
+  call assert_equal([1, 2, 3], l)
+  lockvar l
+  call assert_equal([1, 2, 3, 4, 5], extendnew(l, [4, 5]))
+
+  " Test extendnew() with dictionaries.
+  let d = {'a': {'b': 'B'}}
+  call assert_equal({'a': {'b': 'B'}, 'c': 'cc'}, extendnew(d, {'c': 'cc'}))
+  call assert_equal({'a': {'b': 'B'}}, d)
+  lockvar d
+  call assert_equal({'a': {'b': 'B'}, 'c': 'cc'}, extendnew(d, {'c': 'cc'}))
+endfunc
+
 func s:check_scope_dict(x, fixed)
   func s:gen_cmd(cmd, x)
     return substitute(a:cmd, '\<x\ze:', a:x, 'g')
@@ -1062,6 +1081,58 @@ func Test_null_dict()
   call assert_equal('{}', string(d))
   call assert_fails('let x = v:_null_dict[10]')
   call assert_equal({}, {})
+endfunc
+
+" Test for the indexof() function
+func Test_indexof()
+  let l = [#{color: 'red'}, #{color: 'blue'}, #{color: 'green'}]
+  call assert_equal(0, indexof(l, {i, v -> v.color == 'red'}))
+  call assert_equal(2, indexof(l, {i, v -> v.color == 'green'}))
+  call assert_equal(-1, indexof(l, {i, v -> v.color == 'grey'}))
+  call assert_equal(1, indexof(l, "v:val.color == 'blue'"))
+  call assert_equal(-1, indexof(l, "v:val.color == 'cyan'"))
+
+  let l = [#{n: 10}, #{n: 10}, #{n: 20}]
+  call assert_equal(0, indexof(l, "v:val.n == 10", #{startidx: 0}))
+  call assert_equal(1, indexof(l, "v:val.n == 10", #{startidx: -2}))
+  call assert_equal(-1, indexof(l, "v:val.n == 10", #{startidx: 4}))
+  call assert_equal(-1, indexof(l, "v:val.n == 10", #{startidx: -4}))
+  call assert_equal(0, indexof(l, "v:val.n == 10", v:_null_dict))
+
+  let s = ["a", "b", "c"]
+  call assert_equal(2, indexof(s, {_, v -> v == 'c'}))
+  call assert_equal(-1, indexof(s, {_, v -> v == 'd'}))
+  call assert_equal(-1, indexof(s, {_, v -> "v == 'd'"}))
+
+  call assert_equal(-1, indexof([], {i, v -> v == 'a'}))
+  call assert_equal(-1, indexof([1, 2, 3], {_, v -> "v == 2"}))
+  call assert_equal(-1, indexof(v:_null_list, {i, v -> v == 'a'}))
+  call assert_equal(-1, indexof(l, v:_null_string))
+  " Nvim doesn't have null functions
+  " call assert_equal(-1, indexof(l, test_null_function()))
+
+  " failure cases
+  call assert_fails('let i = indexof(l, "v:val == ''cyan''")', 'E735:')
+  call assert_fails('let i = indexof(l, "color == ''cyan''")', 'E121:')
+  call assert_fails('let i = indexof(l, {})', 'E1256:')
+  call assert_fails('let i = indexof({}, "v:val == 2")', 'E1226:')
+  call assert_fails('let i = indexof([], "v:val == 2", [])', 'E1206:')
+
+  func TestIdx(k, v)
+    return a:v.n == 20
+  endfunc
+  call assert_equal(2, indexof(l, function("TestIdx")))
+  delfunc TestIdx
+  func TestIdx(k, v)
+    return {}
+  endfunc
+  call assert_fails('let i = indexof(l, function("TestIdx"))', 'E728:')
+  delfunc TestIdx
+  func TestIdx(k, v)
+    throw "IdxError"
+  endfunc
+  call assert_fails('let i = indexof(l, function("TestIdx"))', 'E605:')
+  delfunc TestIdx
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

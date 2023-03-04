@@ -1,15 +1,11 @@
-require('coxpcall')
-local busted = require('busted')
 local luv = require('luv')
 local lfs = require('lfs')
-local mpack = require('mpack')
 local global_helpers = require('test.helpers')
 
--- nvim client: Found in .deps/usr/share/lua/<version>/nvim/ if "bundled".
-local Session = require('nvim.session')
-local TcpStream = require('nvim.tcp_stream')
-local SocketStream = require('nvim.socket_stream')
-local ChildProcessStream = require('nvim.child_process_stream')
+local Session = require('test.client.session')
+local uv_stream = require('test.client.uv_stream')
+local SocketStream = uv_stream.SocketStream
+local ChildProcessStream = uv_stream.ChildProcessStream
 
 local check_cores = global_helpers.check_cores
 local check_logs = global_helpers.check_logs
@@ -24,7 +20,6 @@ local tbl_contains = global_helpers.tbl_contains
 local fail = global_helpers.fail
 
 local module = {
-  NIL = mpack.NIL,
   mkdir = lfs.mkdir,
 }
 
@@ -203,7 +198,7 @@ function module.expect_msg_seq(...)
 end
 
 local function call_and_stop_on_error(lsession, ...)
-  local status, result = copcall(...)  -- luacheck: ignore
+  local status, result = Session.safe_pcall(...)  -- luacheck: ignore
   if not status then
     lsession:stop()
     last_error = result
@@ -429,31 +424,9 @@ end
 -- Creates a new Session connected by domain socket (named pipe) or TCP.
 function module.connect(file_or_address)
   local addr, port = string.match(file_or_address, "(.*):(%d+)")
-  local stream = (addr and port) and TcpStream.open(addr, port) or
+  local stream = (addr and port) and SocketStream.connect(addr, port) or
     SocketStream.open(file_or_address)
   return Session.new(stream)
-end
-
--- Calls fn() until it succeeds, up to `max` times or until `max_ms`
--- milliseconds have passed.
-function module.retry(max, max_ms, fn)
-  assert(max == nil or max > 0)
-  assert(max_ms == nil or max_ms > 0)
-  local tries = 1
-  local timeout = (max_ms and max_ms or 10000)
-  local start_time = luv.now()
-  while true do
-    local status, result = pcall(fn)
-    if status then
-      return result
-    end
-    luv.update_time()  -- Update cached value of luv.now() (libuv: uv_now()).
-    if (max and tries >= max) or (luv.now() - start_time > timeout) then
-      busted.fail(string.format("retry() attempts: %d\n%s", tries, tostring(result)), 2)
-    end
-    tries = tries + 1
-    luv.sleep(20)  -- Avoid hot loop...
-  end
 end
 
 -- Starts a new global Nvim session.
