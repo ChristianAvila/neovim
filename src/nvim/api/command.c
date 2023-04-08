@@ -10,6 +10,7 @@
 #include "lauxlib.h"
 #include "nvim/api/command.h"
 #include "nvim/api/private/defs.h"
+#include "nvim/api/private/dispatch.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/private/validate.h"
 #include "nvim/ascii.h"
@@ -307,7 +308,7 @@ end:
 ///
 /// On execution error: fails with VimL error, updates v:errmsg.
 ///
-/// @see |nvim_exec()|
+/// @see |nvim_exec2()|
 /// @see |nvim_command()|
 ///
 /// @param cmd       Command to execute. Must be a Dictionary that can contain the same values as
@@ -697,8 +698,7 @@ String nvim_cmd(uint64_t channel_id, Dict(cmd) *cmd, Dict(cmd_opts) *opts, Error
     capture_ga = &capture_local;
   }
 
-  TRY_WRAP({
-    try_start();
+  TRY_WRAP(err, {
     if (output) {
       msg_silent++;
       msg_col = 0;  // prevent leading spaces
@@ -714,8 +714,6 @@ String nvim_cmd(uint64_t channel_id, Dict(cmd) *cmd, Dict(cmd_opts) *opts, Error
       // Put msg_col back where it was, since nothing should have been written.
       msg_col = save_msg_col;
     }
-
-    try_end(err);
   });
 
   if (ERROR_SET(err)) {
@@ -938,10 +936,11 @@ static void build_cmdline_str(char **cmdlinep, exarg_T *eap, CmdParseInfo *cmdin
 ///                   - force: (boolean, default true) Override any previous definition.
 ///                   - preview: (function) Preview callback for 'inccommand' |:command-preview|
 /// @param[out] err Error details, if any.
-void nvim_create_user_command(String name, Object command, Dict(user_command) *opts, Error *err)
+void nvim_create_user_command(uint64_t channel_id, String name, Object command,
+                              Dict(user_command) *opts, Error *err)
   FUNC_API_SINCE(9)
 {
-  create_user_command(name, command, opts, 0, err);
+  create_user_command(channel_id, name, command, opts, 0, err);
 }
 
 /// Delete a user-defined command.
@@ -959,7 +958,7 @@ void nvim_del_user_command(String name, Error *err)
 /// @param  buffer  Buffer handle, or 0 for current buffer.
 /// @param[out] err Error details, if any.
 /// @see nvim_create_user_command
-void nvim_buf_create_user_command(Buffer buffer, String name, Object command,
+void nvim_buf_create_user_command(uint64_t channel_id, Buffer buffer, String name, Object command,
                                   Dict(user_command) *opts, Error *err)
   FUNC_API_SINCE(9)
 {
@@ -970,7 +969,7 @@ void nvim_buf_create_user_command(Buffer buffer, String name, Object command,
 
   buf_T *save_curbuf = curbuf;
   curbuf = target_buf;
-  create_user_command(name, command, opts, UC_BUFFER, err);
+  create_user_command(channel_id, name, command, opts, UC_BUFFER, err);
   curbuf = save_curbuf;
 }
 
@@ -1011,13 +1010,13 @@ void nvim_buf_del_user_command(Buffer buffer, String name, Error *err)
   api_set_error(err, kErrorTypeException, "Invalid command (not found): %s", name.data);
 }
 
-void create_user_command(String name, Object command, Dict(user_command) *opts, int flags,
-                         Error *err)
+void create_user_command(uint64_t channel_id, String name, Object command, Dict(user_command) *opts,
+                         int flags, Error *err)
 {
   uint32_t argt = 0;
   int64_t def = -1;
   cmd_addr_T addr_type_arg = ADDR_NONE;
-  int compl = EXPAND_NOTHING;
+  int context = EXPAND_NOTHING;
   char *compl_arg = NULL;
   const char *rep = NULL;
   LuaRef luaref = LUA_NOREF;
@@ -1163,11 +1162,11 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
   }
 
   if (opts->complete.type == kObjectTypeLuaRef) {
-    compl = EXPAND_USER_LUA;
+    context = EXPAND_USER_LUA;
     compl_luaref = api_new_luaref(opts->complete.data.luaref);
   } else if (opts->complete.type == kObjectTypeString) {
     VALIDATE_S(OK == parse_compl_arg(opts->complete.data.string.data,
-                                     (int)opts->complete.data.string.size, &compl, &argt,
+                                     (int)opts->complete.data.string.size, &context, &argt,
                                      &compl_arg),
                "complete", opts->complete.data.string.data, {
       goto err;
@@ -1205,11 +1204,13 @@ void create_user_command(String name, Object command, Dict(user_command) *opts, 
     });
   }
 
-  if (uc_add_command(name.data, name.size, rep, argt, def, flags, compl, compl_arg, compl_luaref,
-                     preview_luaref, addr_type_arg, luaref, force) != OK) {
-    api_set_error(err, kErrorTypeException, "Failed to create user command");
-    // Do not goto err, since uc_add_command now owns luaref, compl_luaref, and compl_arg
-  }
+  WITH_SCRIPT_CONTEXT(channel_id, {
+    if (uc_add_command(name.data, name.size, rep, argt, def, flags, context, compl_arg,
+                       compl_luaref, preview_luaref, addr_type_arg, luaref, force) != OK) {
+      api_set_error(err, kErrorTypeException, "Failed to create user command");
+      // Do not goto err, since uc_add_command now owns luaref, compl_luaref, and compl_arg
+    }
+  });
 
   return;
 

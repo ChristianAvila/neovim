@@ -1,7 +1,12 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 
-#define EXTERN
+// Make sure extern symbols are exported on Windows
+#ifdef WIN32
+# define EXTERN __declspec(dllexport)
+#else
+# define EXTERN
+#endif
 #include <assert.h>
 #include <limits.h>
 #include <msgpack/pack.h>
@@ -184,8 +189,12 @@ void early_init(mparm_T *paramp)
   ovi.dwOSVersionInfoSize = sizeof(ovi);
   // Disable warning about GetVersionExA being deprecated. There doesn't seem to be a convenient
   // replacement that doesn't add a ton of extra code as of writing this.
-# pragma warning(suppress : 4996)
+# ifdef _MSC_VER
+#  pragma warning(suppress : 4996)
   GetVersionEx(&ovi);
+# else
+  GetVersionEx(&ovi);
+# endif
   snprintf(windowsVersion, sizeof(windowsVersion), "%d.%d",
            (int)ovi.dwMajorVersion, (int)ovi.dwMinorVersion);
 #endif
@@ -1933,7 +1942,7 @@ static void do_system_initialization(void)
         dir_len += 1;
       }
       memcpy(vimrc + dir_len, path_tail, sizeof(path_tail));
-      if (do_source(vimrc, false, DOSO_NONE) != FAIL) {
+      if (do_source(vimrc, false, DOSO_NONE, NULL) != FAIL) {
         xfree(vimrc);
         xfree(config_dirs);
         return;
@@ -1945,7 +1954,7 @@ static void do_system_initialization(void)
 
 #ifdef SYS_VIMRC_FILE
   // Get system wide defaults, if the file name is defined.
-  (void)do_source(SYS_VIMRC_FILE, false, DOSO_NONE);
+  (void)do_source(SYS_VIMRC_FILE, false, DOSO_NONE, NULL);
 #endif
 }
 
@@ -1974,7 +1983,7 @@ static bool do_user_initialization(void)
 
   // init.lua
   if (os_path_exists(init_lua_path)
-      && do_source(init_lua_path, true, DOSO_VIMRC)) {
+      && do_source(init_lua_path, true, DOSO_VIMRC, NULL)) {
     if (os_path_exists(user_vimrc)) {
       semsg(_("E5422: Conflicting configs: \"%s\" \"%s\""), init_lua_path,
             user_vimrc);
@@ -1988,7 +1997,7 @@ static bool do_user_initialization(void)
   xfree(init_lua_path);
 
   // init.vim
-  if (do_source(user_vimrc, true, DOSO_VIMRC) != FAIL) {
+  if (do_source(user_vimrc, true, DOSO_VIMRC, NULL) != FAIL) {
     do_exrc = p_exrc;
     if (do_exrc) {
       do_exrc = (path_full_compare(VIMRC_FILE, user_vimrc, false, true) != kEqualFiles);
@@ -2014,7 +2023,7 @@ static bool do_user_initialization(void)
       memmove(vimrc, dir, dir_len);
       vimrc[dir_len] = PATHSEP;
       memmove(vimrc + dir_len + 1, path_tail, sizeof(path_tail));
-      if (do_source(vimrc, true, DOSO_VIMRC) != FAIL) {
+      if (do_source(vimrc, true, DOSO_VIMRC, NULL) != FAIL) {
         do_exrc = p_exrc;
         if (do_exrc) {
           do_exrc = (path_full_compare(VIMRC_FILE, vimrc, false, true) != kEqualFiles);
@@ -2080,7 +2089,7 @@ static void source_startup_scripts(const mparm_T *const parmp)
         || strequal(parmp->use_vimrc, "NORC")) {
       // Do nothing.
     } else {
-      if (do_source(parmp->use_vimrc, false, DOSO_NONE) != OK) {
+      if (do_source(parmp->use_vimrc, false, DOSO_NONE, NULL) != OK) {
         semsg(_("E282: Cannot read from \"%s\""), parmp->use_vimrc);
       }
     }
@@ -2113,7 +2122,7 @@ static int execute_env(char *env)
   current_sctx.sc_sid = SID_ENV;
   current_sctx.sc_seq = 0;
   current_sctx.sc_lnum = 0;
-  do_cmdline_cmd((char *)initstr);
+  do_cmdline_cmd(initstr);
 
   estack_pop();
   current_sctx = save_current_sctx;
@@ -2144,7 +2153,7 @@ static void print_mainerr(const char *errstr, const char *str)
   os_errmsg(_(errstr));
   if (str != NULL) {
     os_errmsg(": \"");
-    os_errmsg((char *)str);
+    os_errmsg(str);
     os_errmsg("\"");
   }
   os_errmsg(_("\nMore info with \""));
