@@ -181,7 +181,7 @@ void msg_grid_validate(void)
     msg_grid.dirty_col = xcalloc((size_t)Rows, sizeof(*msg_grid.dirty_col));
 
     // Tricky: allow resize while pager or ex mode is active
-    int pos = MAX(max_rows - msg_scrolled, 0);
+    int pos = (State & MODE_ASKMORE) ? 0 : MAX(max_rows - msg_scrolled, 0);
     msg_grid.throttled = false;  // don't throttle in 'cmdheight' area
     msg_grid_set_pos(pos, msg_scrolled);
     ui_comp_put_grid(&msg_grid, pos, 0, msg_grid.rows, msg_grid.cols,
@@ -438,7 +438,7 @@ void trunc_string(const char *s, char *buf, int room_in, int buflen)
 
   // Last part: End of the string.
   half = i = (int)strlen(s);
-  for (;;) {
+  while (true) {
     do {
       half = half - utf_head_off(s, s + half - 1) - 1;
     } while (half > 0 && utf_iscomposing(utf_ptr2char(s + half)));
@@ -1069,7 +1069,7 @@ void ex_messages(void *const eap_p)
     for (; p != NULL; p = p->next) {
       if (kv_size(p->multiattr) || (p->msg && p->msg[0])) {
         Array entry = ARRAY_DICT_INIT;
-        ADD(entry, STRING_OBJ(cstr_to_string(p->kind)));
+        ADD(entry, CSTR_TO_OBJ(p->kind));
         Array content = ARRAY_DICT_INIT;
         if (kv_size(p->multiattr)) {
           for (uint32_t i = 0; i < kv_size(p->multiattr); i++) {
@@ -1082,7 +1082,7 @@ void ex_messages(void *const eap_p)
         } else if (p->msg && p->msg[0]) {
           Array content_entry = ARRAY_DICT_INIT;
           ADD(content_entry, INTEGER_OBJ(p->attr));
-          ADD(content_entry, STRING_OBJ(cstr_to_string(p->msg)));
+          ADD(content_entry, CSTR_TO_OBJ(p->msg));
           ADD(content, ARRAY_OBJ(content_entry));
         }
         ADD(entry, ARRAY_OBJ(content));
@@ -1250,6 +1250,7 @@ void wait_return(int redraw)
              || c == K_MOUSEDOWN || c == K_MOUSEUP
              || c == K_MOUSEMOVE);
     os_breakcheck();
+
     // Avoid that the mouse-up event causes visual mode to start.
     if (c == K_LEFTMOUSE || c == K_MIDDLEMOUSE || c == K_RIGHTMOUSE
         || c == K_X1MOUSE || c == K_X2MOUSE) {
@@ -2656,7 +2657,7 @@ static msgchunk_T *disp_sb_line(int row, msgchunk_T *smp)
 {
   msgchunk_T *mp = smp;
 
-  for (;;) {
+  while (true) {
     msg_row = row;
     msg_col = mp->sb_msg_col;
     char *p = mp->sb_text;
@@ -2801,7 +2802,7 @@ static int do_more_prompt(int typed_char)
   if (typed_char == NUL) {
     msg_moremsg(false);
   }
-  for (;;) {
+  while (true) {
     // Get a typed character directly from the user.
     if (used_typed_char != NUL) {
       c = used_typed_char;              // was typed at hit-enter prompt
@@ -3528,7 +3529,7 @@ int do_dialog(int type, char *title, char *message, char *buttons, int dfltbutto
   no_wait_return++;
   hotkeys = msg_show_console_dialog(message, buttons, dfltbutton);
 
-  for (;;) {
+  while (true) {
     // Get a typed character directly from the user.
     int c = get_keystroke(NULL);
     switch (c) {

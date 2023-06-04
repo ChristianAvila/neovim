@@ -634,6 +634,13 @@ export interface WorkspaceClientCapabilities {
 --- capabilities.
 function protocol.make_client_capabilities()
   return {
+    general = {
+      positionEncodings = {
+        'utf-8',
+        'utf-16',
+        'utf-32',
+      },
+    },
     textDocument = {
       semanticTokens = {
         dynamicRegistration = false,
@@ -697,7 +704,7 @@ function protocol.make_client_capabilities()
         didSave = true,
       },
       codeAction = {
-        dynamicRegistration = false,
+        dynamicRegistration = true,
 
         codeActionLiteralSupport = {
           codeActionKind = {
@@ -713,6 +720,12 @@ function protocol.make_client_capabilities()
         resolveSupport = {
           properties = { 'edit' },
         },
+      },
+      formatting = {
+        dynamicRegistration = true,
+      },
+      rangeFormatting = {
+        dynamicRegistration = true,
       },
       completion = {
         dynamicRegistration = false,
@@ -747,6 +760,7 @@ function protocol.make_client_capabilities()
       },
       definition = {
         linkSupport = true,
+        dynamicRegistration = true,
       },
       implementation = {
         linkSupport = true,
@@ -755,7 +769,7 @@ function protocol.make_client_capabilities()
         linkSupport = true,
       },
       hover = {
-        dynamicRegistration = false,
+        dynamicRegistration = true,
         contentFormat = { protocol.MarkupKind.Markdown, protocol.MarkupKind.PlainText },
       },
       signatureHelp = {
@@ -790,7 +804,7 @@ function protocol.make_client_capabilities()
         hierarchicalDocumentSymbolSupport = true,
       },
       rename = {
-        dynamicRegistration = false,
+        dynamicRegistration = true,
         prepareSupport = true,
       },
       publishDiagnostics = {
@@ -837,7 +851,7 @@ function protocol.make_client_capabilities()
         refreshSupport = true,
       },
       didChangeWatchedFiles = {
-        dynamicRegistration = false,
+        dynamicRegistration = true,
         relativePatternSupport = true,
       },
     },
@@ -894,4 +908,3 @@ function protocol.resolve_capabilities(server_capabilities)
 end
 
 return protocol
--- vim:sw=2 ts=2 et

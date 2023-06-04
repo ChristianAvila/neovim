@@ -389,7 +389,7 @@ size_t spell_check(win_T *wp, char *ptr, hlf_T *attrp, int *capcol, bool docount
       if (mi.mi_lp->lp_slang->sl_fidxs != NULL) {
         p = mi.mi_word;
         char *fp = mi.mi_fword;
-        for (;;) {
+        while (true) {
           MB_PTR_ADV(p);
           MB_PTR_ADV(fp);
           if (p >= mi.mi_end) {
@@ -482,7 +482,7 @@ static void find_word(matchinf_T *mip, int mode)
   // - there is a byte that doesn't match,
   // - we reach the end of the tree,
   // - or we reach the end of the line.
-  for (;;) {
+  while (true) {
     if (flen <= 0 && *mip->mi_fend != NUL) {
       flen = fold_more(mip);
     }
@@ -549,7 +549,7 @@ static void find_word(matchinf_T *mip, int mode)
     // One space in the good word may stand for several spaces in the
     // checked word.
     if (c == ' ') {
-      for (;;) {
+      while (true) {
         if (flen <= 0 && *mip->mi_fend != NUL) {
           flen = fold_more(mip);
         }
@@ -1081,7 +1081,7 @@ static void find_prefix(matchinf_T *mip, int mode)
   // - there is a byte that doesn't match,
   // - we reach the end of the tree,
   // - or we reach the end of the line.
-  for (;;) {
+  while (true) {
     if (flen == 0 && *mip->mi_fend != NUL) {
       flen = fold_more(mip);
     }
@@ -1189,11 +1189,19 @@ bool spell_valid_case(int wordflags, int treeflags)
                  || (wordflags & WF_ONECAP) != 0));
 }
 
-// Returns true if spell checking is not enabled.
+/// Return true if spell checking is enabled for "wp".
+bool spell_check_window(win_T *wp)
+{
+  return wp->w_p_spell
+         && *wp->w_s->b_p_spl != NUL
+         && wp->w_s->b_langp.ga_len > 0
+         && *(char **)(wp->w_s->b_langp.ga_data) != NULL;
+}
+
+/// Return true and give an error if spell checking is not enabled.
 bool no_spell_checking(win_T *wp)
 {
-  if (!wp->w_p_spell || *wp->w_s->b_p_spl == NUL
-      || GA_EMPTY(&wp->w_s->b_langp)) {
+  if (!wp->w_p_spell || *wp->w_s->b_p_spl == NUL || GA_EMPTY(&wp->w_s->b_langp)) {
     emsg(_(e_no_spell));
     return true;
   }
@@ -1206,8 +1214,8 @@ static void decor_spell_nav_start(win_T *wp)
   decor_redraw_reset(wp, &decor_state);
 }
 
-static bool decor_spell_nav_col(win_T *wp, linenr_T lnum, linenr_T *decor_lnum, int col,
-                                char **decor_error)
+static TriState decor_spell_nav_col(win_T *wp, linenr_T lnum, linenr_T *decor_lnum, int col,
+                                    char **decor_error)
 {
   if (*decor_lnum != lnum) {
     decor_providers_invoke_spell(wp, lnum - 1, col, lnum - 1, -1, decor_error);
@@ -1215,7 +1223,7 @@ static bool decor_spell_nav_col(win_T *wp, linenr_T lnum, linenr_T *decor_lnum, 
     *decor_lnum = lnum;
   }
   decor_redraw_col(wp, col, col, false, &decor_state);
-  return decor_state.spell == kTrue;
+  return decor_state.spell;
 }
 
 static inline bool can_syn_spell(win_T *wp, linenr_T lnum, int col)
@@ -1304,7 +1312,7 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
     } else if (curline && wp == curwin) {
       // For spellbadword(): check if first word needs a capital.
       col = (colnr_T)getwhitecols(line);
-      if (check_need_cap(lnum, col)) {
+      if (check_need_cap(curwin, lnum, col)) {
         capcol = col;
       }
 
@@ -1352,9 +1360,18 @@ size_t spell_move_to(win_T *wp, int dir, bool allwords, bool curline, hlf_T *att
                             : p - buf) > wp->w_cursor.col)) {
             col = (colnr_T)(p - buf);
 
-            bool can_spell = (!has_syntax && (wp->w_s->b_p_spo_flags & SPO_NPBUFFER) == 0)
-                             || decor_spell_nav_col(wp, lnum, &decor_lnum, col, &decor_error)
-                             || (has_syntax && can_syn_spell(wp, lnum, col));
+            bool no_plain_buffer = (wp->w_s->b_p_spo_flags & SPO_NPBUFFER) != 0;
+            bool can_spell = !no_plain_buffer;
+            switch (decor_spell_nav_col(wp, lnum, &decor_lnum, col, &decor_error)) {
+            case kTrue:
+              can_spell = true; break;
+            case kFalse:
+              can_spell = false; break;
+            case kNone:
+              if (has_syntax) {
+                can_spell = can_syn_spell(wp, lnum, col);
+              }
+            }
 
             if (!can_spell) {
               attr = HLF_COUNT;
@@ -1851,7 +1868,7 @@ static int count_syllables(slang_T *slang, const char *word)
 
 /// Parse 'spelllang' and set w_s->b_langp accordingly.
 /// @return  NULL if it's OK, an untranslated error message otherwise.
-char *did_set_spelllang(win_T *wp)
+char *parse_spelllang(win_T *wp)
 {
   garray_T ga;
   char *splp;
@@ -2309,7 +2326,7 @@ void spell_reload(void)
     // window for this buffer in which 'spell' is set.
     if (*wp->w_s->b_p_spl != NUL) {
       if (wp->w_p_spell) {
-        (void)did_set_spelllang(wp);
+        (void)parse_spelllang(wp);
         break;
       }
     }
@@ -2519,25 +2536,24 @@ int spell_casefold(const win_T *wp, char *str, int len, char *buf, int buflen)
 }
 
 // Check if the word at line "lnum" column "col" is required to start with a
-// capital.  This uses 'spellcapcheck' of the current buffer.
-bool check_need_cap(linenr_T lnum, colnr_T col)
+// capital.  This uses 'spellcapcheck' of the buffer in window "wp".
+bool check_need_cap(win_T *wp, linenr_T lnum, colnr_T col)
 {
-  bool need_cap = false;
-
-  if (curwin->w_s->b_cap_prog == NULL) {
+  if (wp->w_s->b_cap_prog == NULL) {
     return false;
   }
 
-  char *line = get_cursor_line_ptr();
+  bool need_cap = false;
+  char *line = col ? ml_get_buf(wp->w_buffer, lnum, false) : NULL;
   char *line_copy = NULL;
   colnr_T endcol = 0;
-  if (getwhitecols(line) >= (int)col) {
+  if (col == 0 || getwhitecols(line) >= col) {
     // At start of line, check if previous line is empty or sentence
     // ends there.
     if (lnum == 1) {
       need_cap = true;
     } else {
-      line = ml_get(lnum - 1);
+      line = ml_get_buf(wp->w_buffer, lnum - 1, false);
       if (*skipwhite(line) == NUL) {
         need_cap = true;
       } else {
@@ -2554,13 +2570,13 @@ bool check_need_cap(linenr_T lnum, colnr_T col)
   if (endcol > 0) {
     // Check if sentence ends before the bad word.
     regmatch_T regmatch = {
-      .regprog = curwin->w_s->b_cap_prog,
+      .regprog = wp->w_s->b_cap_prog,
       .rm_ic = false
     };
     char *p = line + endcol;
-    for (;;) {
+    while (true) {
       MB_PTR_BACK(line, p);
-      if (p == line || spell_iswordp_nmw(p, curwin)) {
+      if (p == line || spell_iswordp_nmw(p, wp)) {
         break;
       }
       if (vim_regexec(&regmatch, p, 0)
@@ -2569,7 +2585,7 @@ bool check_need_cap(linenr_T lnum, colnr_T col)
         break;
       }
     }
-    curwin->w_s->b_cap_prog = regmatch.regprog;
+    wp->w_s->b_cap_prog = regmatch.regprog;
   }
 
   xfree(line_copy);
@@ -2796,7 +2812,7 @@ static void spell_soundfold_sofo(slang_T *slang, char *inword, char *res)
       if (ip == NULL) {               // empty list, can't match
         c = NUL;
       } else {
-        for (;;) {                   // find "c" in the list
+        while (true) {                // find "c" in the list
           if (*ip == 0) {             // not found
             c = NUL;
             break;
@@ -3584,7 +3600,7 @@ static bool spell_expand_need_cap;
 
 void spell_expand_check_cap(colnr_T col)
 {
-  spell_expand_need_cap = check_need_cap(curwin->w_cursor.lnum, col);
+  spell_expand_need_cap = check_need_cap(curwin, curwin->w_cursor.lnum, col);
 }
 
 // Get list of spelling suggestions.
@@ -3612,7 +3628,7 @@ bool valid_spellfile(const char *val)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   for (const char *s = val; *s != NUL; s++) {
-    if (!vim_isfilec((uint8_t)(*s)) && *s != ',' && *s != ' ') {
+    if (!vim_is_fname_char((uint8_t)(*s))) {
       return false;
     }
   }
@@ -3637,7 +3653,7 @@ const char *did_set_spell_option(bool is_spellfile)
 
   FOR_ALL_WINDOWS_IN_TAB(wp, curtab) {
     if (wp->w_buffer == curbuf && wp->w_p_spell) {
-      errmsg = did_set_spelllang(wp);
+      errmsg = parse_spelllang(wp);
       break;
     }
   }

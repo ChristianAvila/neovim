@@ -59,6 +59,11 @@
 # include "search.c.generated.h"
 #endif
 
+static const char e_search_hit_top_without_match_for_str[]
+  = N_("E384: Search hit TOP without match for: %s");
+static const char e_search_hit_bottom_without_match_for_str[]
+  = N_("E385: Search hit BOTTOM without match for: %s");
+
 //  This file contains various searching-related routines. These fall into
 //  three groups:
 //  1. string searches (for /, ?, n, and N)
@@ -678,9 +683,9 @@ int searchit(win_T *win, buf_T *buf, pos_T *pos, pos_T *end_pos, Direction dir, 
             // otherwise "/$" will get stuck on end of line.
             while (matchpos.lnum == 0
                    && (((options & SEARCH_END) && first_match)
-                       ?  (nmatched == 1
-                           && (int)endpos.col - 1
-                           < (int)start_pos.col + extra_col)
+                       ? (nmatched == 1
+                          && (int)endpos.col - 1
+                          < (int)start_pos.col + extra_col)
                        : ((int)matchpos.col
                           - (ptr[matchpos.col] == NUL)
                           < (int)start_pos.col + extra_col))) {
@@ -747,7 +752,7 @@ int searchit(win_T *win, buf_T *buf, pos_T *pos, pos_T *end_pos, Direction dir, 
             // When putting the new cursor at the end, compare
             // relative to the end of the match.
             match_ok = false;
-            for (;;) {
+            while (true) {
               // Remember a position that is before the start
               // position, we use it if it's the last match in
               // the line.  Always accept a position after
@@ -908,19 +913,22 @@ int searchit(win_T *win, buf_T *buf, pos_T *pos, pos_T *end_pos, Direction dir, 
           || found || loop) {
         break;
       }
-      //
+
       // If 'wrapscan' is set we continue at the other end of the file.
-      // If 'shortmess' does not contain 's', we give a message.
+      // If 'shortmess' does not contain 's', we give a message, but
+      // only, if we won't show the search stat later anyhow,
+      // (so SEARCH_COUNT must be absent).
       // This message is also remembered in keep_msg for when the screen
       // is redrawn. The keep_msg is cleared whenever another message is
       // written.
-      //
       if (dir == BACKWARD) {        // start second loop at the other end
         lnum = buf->b_ml.ml_line_count;
       } else {
         lnum = 1;
       }
-      if (!shortmess(SHM_SEARCH) && (options & SEARCH_MSG)) {
+      if (!shortmess(SHM_SEARCH)
+          && shortmess(SHM_SEARCHCOUNT)
+          && (options & SEARCH_MSG)) {
         give_warning(_(dir == BACKWARD ? top_bot_msg : bot_top_msg), true);
       }
       if (extra_arg != NULL) {
@@ -943,11 +951,9 @@ int searchit(win_T *win, buf_T *buf, pos_T *pos, pos_T *end_pos, Direction dir, 
       if (p_ws) {
         semsg(_(e_patnotf2), mr_pattern);
       } else if (lnum == 0) {
-        semsg(_("E384: search hit TOP without match for: %s"),
-              mr_pattern);
+        semsg(_(e_search_hit_top_without_match_for_str), mr_pattern);
       } else {
-        semsg(_("E385: search hit BOTTOM without match for: %s"),
-              mr_pattern);
+        semsg(_(e_search_hit_bottom_without_match_for_str), mr_pattern);
       }
     }
     return FAIL;
@@ -1079,7 +1085,7 @@ int do_search(oparg_T *oap, int dirc, int search_delim, char *pat, long count, i
   }
 
   // Repeat the search when pattern followed by ';', e.g. "/foo/;?bar".
-  for (;;) {
+  while (true) {
     bool show_top_bot_msg = false;
 
     searchstr = pat;
@@ -1432,7 +1438,7 @@ int search_for_exact_line(buf_T *buf, pos_T *pos, Direction dir, char *pat)
   if (buf->b_ml.ml_line_count == 0) {
     return FAIL;
   }
-  for (;;) {
+  while (true) {
     pos->lnum += dir;
     if (pos->lnum < 1) {
       if (p_ws) {
@@ -1513,7 +1519,7 @@ int searchc(cmdarg_T *cap, int t_cmd)
       }
     }
   } else {            // repeat previous search
-    if (*lastc == NUL && lastc_bytelen == 1) {
+    if (*lastc == NUL && lastc_bytelen <= 1) {
       return FAIL;
     }
     if (dir) {        // repeat in opposite direction
@@ -1544,7 +1550,7 @@ int searchc(cmdarg_T *cap, int t_cmd)
   int len = (int)strlen(p);
 
   while (count--) {
-    for (;;) {
+    while (true) {
       if (dir > 0) {
         col += utfc_ptr2len(p + col);
         if (col >= len) {
@@ -1556,7 +1562,7 @@ int searchc(cmdarg_T *cap, int t_cmd)
         }
         col -= utf_head_off(p, p + col - 1) + 1;
       }
-      if (lastc_bytelen == 1) {
+      if (lastc_bytelen <= 1) {
         if (p[col] == c && stop) {
           break;
         }
@@ -1810,7 +1816,7 @@ pos_T *findmatchlimit(oparg_T *oap, int initc, int flags, int64_t maxtravel)
         if (linep[pos.col] == NUL && pos.col) {
           pos.col--;
         }
-        for (;;) {
+        while (true) {
           initc = utf_ptr2char(linep + pos.col);
           if (initc == NUL) {
             break;
@@ -2699,8 +2705,10 @@ static void update_search_stat(int dirc, pos_T *pos, pos_T *cursor_pos, searchst
     lbuf = curbuf;
   }
 
+  // when searching backwards and having jumped to the first occurrence,
+  // cur must remain greater than 1
   if (equalpos(lastpos, *cursor_pos) && !wraparound
-      && (dirc == 0 || dirc == '/' ? cur < cnt : cur > 0)) {
+      && (dirc == 0 || dirc == '/' ? cur < cnt : cur > 1)) {
     cur += dirc == 0 ? 0 : dirc == '/' ? 1 : -1;
   } else {
     proftime_T start;
@@ -2772,8 +2780,7 @@ void f_searchcount(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     dictitem_T *di;
     bool error = false;
 
-    if (argvars[0].v_type != VAR_DICT || argvars[0].vval.v_dict == NULL) {
-      emsg(_(e_dictreq));
+    if (tv_check_for_nonnull_dict_arg(argvars, 0) == FAIL) {
       return;
     }
     dict = argvars[0].vval.v_dict;
@@ -3046,6 +3053,10 @@ static int fuzzy_match_recursive(const char *fuzpat, const char *str, uint32_t s
         return 0;
       }
 
+      int recursiveScore = 0;
+      uint32_t recursiveMatches[MAX_FUZZY_MATCHES];
+      CLEAR_FIELD(recursiveMatches);
+
       // "Copy-on-Write" srcMatches into matches
       if (first_match && srcMatches != NULL) {
         memcpy(matches, srcMatches, (size_t)nextMatch * sizeof(srcMatches[0]));
@@ -3053,8 +3064,6 @@ static int fuzzy_match_recursive(const char *fuzpat, const char *str, uint32_t s
       }
 
       // Recursive call that "skips" this match
-      uint32_t recursiveMatches[MAX_FUZZY_MATCHES];
-      int recursiveScore = 0;
       const char *const next_char = str + utfc_ptr2len(str);
       if (fuzzy_match_recursive(fuzpat, next_char, strIdx + 1, &recursiveScore, strBegin, strLen,
                                 matches, recursiveMatches,
@@ -3348,8 +3357,7 @@ static void do_fuzzymatch(const typval_T *const argvars, typval_T *const rettv,
   bool matchseq = false;
   long max_matches = 0;
   if (argvars[2].v_type != VAR_UNKNOWN) {
-    if (argvars[2].v_type != VAR_DICT || argvars[2].vval.v_dict == NULL) {
-      emsg(_(e_dictreq));
+    if (tv_check_for_nonnull_dict_arg(argvars, 2) == FAIL) {
       return;
     }
 
@@ -3623,7 +3631,7 @@ void find_pattern_in_path(char *ptr, Direction dir, size_t len, bool whole, bool
   }
   line = get_line_and_copy(lnum, file_line);
 
-  for (;;) {
+  while (true) {
     if (incl_regmatch.regprog != NULL
         && vim_regexec(&incl_regmatch, line, (colnr_T)0)) {
       char *p_fname = (curr_fname == curbuf->b_fname)
@@ -4092,7 +4100,7 @@ exit_matched:
     }
     already = NULL;
   }
-  // End of big for (;;) loop.
+  // End of big while (true) loop.
 
   // Close any files that are still open.
   for (i = 0; i <= depth; i++) {
@@ -4145,7 +4153,7 @@ static void show_pat_in_path(char *line, int type, bool did_show, int action, FI
   if (got_int) {                // 'q' typed at "--more--" message
     return;
   }
-  for (;;) {
+  while (true) {
     char *p = line + strlen(line) - 1;
     if (fp != NULL) {
       // We used fgets(), so get rid of newline at end

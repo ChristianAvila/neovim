@@ -22,6 +22,7 @@
 #include "nvim/cmdexpand.h"
 #include "nvim/debugger.h"
 #include "nvim/eval.h"
+#include "nvim/eval/typval.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
@@ -43,6 +44,7 @@
 #include "nvim/os/stdpaths_defs.h"
 #include "nvim/path.h"
 #include "nvim/profile.h"
+#include "nvim/regexp.h"
 #include "nvim/runtime.h"
 #include "nvim/strings.h"
 #include "nvim/usercmd.h"
@@ -251,6 +253,7 @@ void ex_runtime(exarg_T *eap)
   int flags = eap->forceit ? DIP_ALL : 0;
   char *p = skiptowhite(arg);
   flags += get_runtime_cmd_flags(&arg, (size_t)(p - arg));
+  assert(arg != NULL);  // suppress clang false positive
   source_runtime(arg, flags);
 }
 
@@ -467,7 +470,8 @@ int do_in_cached_path(char *name, int flags, DoInRuntimepathCB callback, void *c
         }
 
         int ew_flags = ((flags & DIP_DIR) ? EW_DIR : EW_FILE)
-                       | (flags & DIP_DIRFILE) ? (EW_DIR|EW_FILE) : 0;
+                       | ((flags & DIP_DIRFILE) ? (EW_DIR|EW_FILE) : 0)
+                       | EW_NOBREAK;
 
         // Expand wildcards, invoke the callback for each match.
         char *(pat[]) = { buf };
@@ -508,7 +512,7 @@ Array runtime_inspect(void)
   for (size_t i = 0; i < kv_size(path); i++) {
     SearchPathItem *item = &kv_A(path, i);
     Array entry = ARRAY_DICT_INIT;
-    ADD(entry, STRING_OBJ(cstr_to_string(item->path)));
+    ADD(entry, CSTR_TO_OBJ(item->path));
     ADD(entry, BOOLEAN_OBJ(item->after));
     if (item->has_lua != kNone) {
       ADD(entry, BOOLEAN_OBJ(item->has_lua == kTrue));
@@ -564,7 +568,7 @@ ArrayOf(String) runtime_get_named_common(bool lua, Array pat, bool all,
                                        item->path, pat_item.data.string.data);
         if (size < buf_len) {
           if (os_file_is_readable(buf)) {
-            ADD(rv, STRING_OBJ(cstr_to_string(buf)));
+            ADD(rv, CSTR_TO_OBJ(buf));
             if (!all) {
               goto done;
             }
@@ -642,21 +646,20 @@ int do_in_path_and_pp(char *path, char *name, int flags, DoInRuntimepathCB callb
   return done;
 }
 
-static void push_path(RuntimeSearchPath *search_path, Map(String, handle_T) *rtp_used, char *entry,
+static void push_path(RuntimeSearchPath *search_path, Set(String) *rtp_used, char *entry,
                       bool after)
 {
-  handle_T h = map_get(String, handle_T)(rtp_used, cstr_as_string(entry));
-  if (h == 0) {
-    char *allocated = xstrdup(entry);
-    map_put(String, handle_T)(rtp_used, cstr_as_string(allocated), 1);
-    kv_push(*search_path, ((SearchPathItem){ allocated, after, kNone }));
+  String *key_alloc;
+  if (set_put_ref(String, rtp_used, cstr_as_string(entry), &key_alloc)) {
+    *key_alloc = cstr_to_string(entry);
+    kv_push(*search_path, ((SearchPathItem){ key_alloc->data, after, kNone }));
   }
 }
 
-static void expand_rtp_entry(RuntimeSearchPath *search_path, Map(String, handle_T) *rtp_used,
-                             char *entry, bool after)
+static void expand_rtp_entry(RuntimeSearchPath *search_path, Set(String) *rtp_used, char *entry,
+                             bool after)
 {
-  if (map_get(String, handle_T)(rtp_used, cstr_as_string(entry))) {
+  if (set_has(String, rtp_used, cstr_as_string(entry))) {
     return;
   }
 
@@ -667,7 +670,7 @@ static void expand_rtp_entry(RuntimeSearchPath *search_path, Map(String, handle_
   int num_files;
   char **files;
   char *(pat[]) = { entry };
-  if (gen_expand_wildcards(1, pat, &num_files, &files, EW_DIR) == OK) {
+  if (gen_expand_wildcards(1, pat, &num_files, &files, EW_DIR | EW_NOBREAK) == OK) {
     for (int i = 0; i < num_files; i++) {
       push_path(search_path, rtp_used, files[i], after);
     }
@@ -675,7 +678,7 @@ static void expand_rtp_entry(RuntimeSearchPath *search_path, Map(String, handle_
   }
 }
 
-static void expand_pack_entry(RuntimeSearchPath *search_path, Map(String, handle_T) *rtp_used,
+static void expand_pack_entry(RuntimeSearchPath *search_path, Set(String) *rtp_used,
                               CharVec *after_path, char *pack_entry, size_t pack_entry_len)
 {
   static char buf[MAXPATHL];
@@ -708,10 +711,8 @@ static bool path_is_after(char *buf, size_t buflen)
 RuntimeSearchPath runtime_search_path_build(void)
 {
   kvec_t(String) pack_entries = KV_INITIAL_VALUE;
-  // TODO(bfredl): these should just be sets, when Set(String) is do merge to
-  // master.
   Map(String, handle_T) pack_used = MAP_INIT;
-  Map(String, handle_T) rtp_used = MAP_INIT;
+  Set(String) rtp_used = SET_INIT;
   RuntimeSearchPath search_path = KV_INITIAL_VALUE;
   CharVec after_path = KV_INITIAL_VALUE;
 
@@ -740,7 +741,7 @@ RuntimeSearchPath runtime_search_path_build(void)
     // fact: &rtp entries can contain wild chars
     expand_rtp_entry(&search_path, &rtp_used, buf, false);
 
-    handle_T *h = map_ref(String, handle_T)(&pack_used, cstr_as_string(buf), false);
+    handle_T *h = map_ref(String, handle_T)(&pack_used, cstr_as_string(buf), NULL);
     if (h) {
       (*h)++;
       expand_pack_entry(&search_path, &rtp_used, &after_path, buf, buflen);
@@ -770,15 +771,16 @@ RuntimeSearchPath runtime_search_path_build(void)
   // strings are not owned
   kv_destroy(pack_entries);
   kv_destroy(after_path);
-  map_destroy(String, handle_T)(&pack_used);
-  map_destroy(String, handle_T)(&rtp_used);
+  map_destroy(String, &pack_used);
+  set_destroy(String, &rtp_used);
 
   return search_path;
 }
 
-void runtime_search_path_invalidate(void)
+const char *did_set_runtimepackpath(optset_T *args)
 {
   runtime_search_path_valid = false;
+  return NULL;
 }
 
 void runtime_search_path_free(RuntimeSearchPath path)
@@ -1542,7 +1544,7 @@ static inline char *add_dir(char *dest, const char *const dir, const size_t dir_
     xstrlcpy(IObuff, appname, appname_len + 1);
 #if defined(MSWIN)
     if (type == kXDGDataHome || type == kXDGStateHome) {
-      STRCAT(IObuff, "-data");
+      xstrlcat(IObuff, "-data", IOSIZE);
       appname_len += 5;
     }
 #endif
@@ -1924,8 +1926,8 @@ static void cmd_source_buffer(const exarg_T *const eap)
     .buf = ga.ga_data,
     .offset = 0,
   };
-  if (curbuf->b_fname
-      && path_with_extension(curbuf->b_fname, "lua")) {
+  if (strequal(curbuf->b_p_ft, "lua")
+      || (curbuf->b_fname && path_with_extension(curbuf->b_fname, "lua"))) {
     nlua_source_using_linegetter(get_str_line, (void *)&cookie, ":source (no file)");
   } else {
     source_using_linegetter((void *)&cookie, get_str_line, ":source (no file)");
@@ -2356,17 +2358,77 @@ linenr_T get_sourced_lnum(LineGetter fgetline, void *cookie)
         : SOURCING_LNUM;
 }
 
+/// Return a List of script-local functions defined in the script with id "sid".
+static list_T *get_script_local_funcs(scid_T sid)
+{
+  hashtab_T *const functbl = func_tbl_get();
+  list_T *l = tv_list_alloc((ptrdiff_t)functbl->ht_used);
+
+  // Iterate through all the functions in the global function hash table
+  // looking for functions with script ID "sid".
+  HASHTAB_ITER(functbl, hi, {
+    const ufunc_T *const fp = HI2UF(hi);
+    // Add functions with script id == "sid"
+    if (fp->uf_script_ctx.sc_sid == sid) {
+      const char *const name = fp->uf_name_exp != NULL ? fp->uf_name_exp : fp->uf_name;
+      tv_list_append_string(l, name, -1);
+    }
+  });
+
+  return l;
+}
+
 /// "getscriptinfo()" function
 void f_getscriptinfo(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   tv_list_alloc_ret(rettv, script_items.ga_len);
 
+  if (tv_check_for_opt_dict_arg(argvars, 0) == FAIL) {
+    return;
+  }
+
   list_T *l = rettv->vval.v_list;
 
-  for (int i = 1; i <= script_items.ga_len; i++) {
+  regmatch_T regmatch = {
+    .regprog = NULL,
+    .rm_ic = p_ic,
+  };
+  bool filterpat = false;
+  varnumber_T sid = -1;
+
+  char *pat = NULL;
+  if (argvars[0].v_type == VAR_DICT) {
+    dictitem_T *sid_di = tv_dict_find(argvars[0].vval.v_dict, S_LEN("sid"));
+    if (sid_di != NULL) {
+      bool error = false;
+      sid = tv_get_number_chk(&sid_di->di_tv, &error);
+      if (error) {
+        return;
+      }
+      if (sid <= 0) {
+        semsg(_(e_invargNval), "sid", tv_get_string(&sid_di->di_tv));
+        return;
+      }
+    } else {
+      pat = tv_dict_get_string(argvars[0].vval.v_dict, "name", true);
+      if (pat != NULL) {
+        regmatch.regprog = vim_regcomp(pat, RE_MAGIC + RE_STRING);
+      }
+      if (regmatch.regprog != NULL) {
+        filterpat = true;
+      }
+    }
+  }
+
+  for (varnumber_T i = sid > 0 ? sid : 1;
+       (i == sid || sid <= 0) && i <= script_items.ga_len; i++) {
     scriptitem_T *si = SCRIPT_ITEM(i);
 
     if (si->sn_name == NULL) {
+      continue;
+    }
+
+    if (filterpat && !vim_regexec(&regmatch, si->sn_name, (colnr_T)0)) {
       continue;
     }
 
@@ -2374,9 +2436,21 @@ void f_getscriptinfo(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
     tv_list_append_dict(l, d);
     tv_dict_add_str(d, S_LEN("name"), si->sn_name);
     tv_dict_add_nr(d, S_LEN("sid"), i);
+    tv_dict_add_nr(d, S_LEN("version"), 1);
     // Vim9 autoload script (:h vim9-autoload), not applicable to Nvim.
     tv_dict_add_bool(d, S_LEN("autoload"), false);
+
+    // When a script ID is specified, return information about only the
+    // specified script, and add the script-local variables and functions.
+    if (sid > 0) {
+      dict_T *var_dict = tv_dict_copy(NULL, &si->sn_vars->sv_dict, true, get_copyID());
+      tv_dict_add_dict(d, S_LEN("variables"), var_dict);
+      tv_dict_add_list(d, S_LEN("functions"), get_script_local_funcs((scid_T)sid));
+    }
   }
+
+  vim_regfree(regmatch.regprog);
+  xfree(pat);
 }
 
 /// Get one full line from a sourced file.
@@ -2482,7 +2556,7 @@ static char *get_one_sourceline(struct source_cookie *sp)
 
   // Loop until there is a finished line (or end-of-file).
   sp->sourcing_lnum++;
-  for (;;) {
+  while (true) {
     // make room to read at least 120 (more) characters
     ga_grow(&ga, 120);
     buf = ga.ga_data;

@@ -323,6 +323,10 @@ enum {
 };
 
 static const char *e_spell_trunc = N_("E758: Truncated spell file");
+static const char e_error_while_reading_sug_file_str[]
+  = N_("E782: Error while reading .sug file: %s");
+static const char e_duplicate_char_in_map_entry[]
+  = N_("E783: Duplicate char in MAP entry");
 static const char *e_illegal_character_in_word = N_("E1280: Illegal character in word");
 static const char *e_afftrailing = N_("Trailing text in %s line %d: %s");
 static const char *e_affname = N_("Affix name too long in %s line %d: %s");
@@ -660,7 +664,7 @@ slang_T *spell_load_file(char *fname, char *lang, slang_T *old_lp, bool silent)
 
   // <SECTIONS>: <section> ... <sectionend>
   // <section>: <sectionID> <sectionflags> <sectionlen> (section contents)
-  for (;;) {
+  while (true) {
     n = getc(fd);                           // <sectionID> or <sectionend>
     if (n == SN_END) {
       break;
@@ -956,7 +960,7 @@ void suggest_load_files(void)
       if (spell_read_tree(fd, &slang->sl_sbyts, NULL, &slang->sl_sidxs,
                           false, 0) != 0) {
 someerror:
-        semsg(_("E782: error while reading .sug file: %s"),
+        semsg(_(e_error_while_reading_sug_file_str),
               slang->sl_fname);
         slang_clear_sug(slang);
         goto nextone;
@@ -980,7 +984,7 @@ someerror:
       ga_init(&ga, 1, 100);
       for (wordnr = 0; wordnr < wcount; wordnr++) {
         ga.ga_len = 0;
-        for (;;) {
+        while (true) {
           c = getc(fd);                                     // <sugline>
           if (c < 0) {
             goto someerror;
@@ -1851,7 +1855,7 @@ static void spell_reload_one(char *fname, bool added_word)
   // When "zg" was used and the file wasn't loaded yet, should redo
   // 'spelllang' to load it now.
   if (added_word && !didit) {
-    did_set_spelllang(curwin);
+    parse_spelllang(curwin);
   }
 }
 
@@ -2973,7 +2977,7 @@ static bool flag_in_afflist(int flagtype, char *afflist, unsigned flag)
     for (p = afflist; *p != NUL;) {
       int digits = getdigits_int(&p, true, 0);
       assert(digits >= 0);
-      n = (unsigned int)digits;
+      n = (unsigned)digits;
       if (n == 0) {
         n = ZERO_FLAG;
       }
@@ -3127,7 +3131,7 @@ static int spell_read_dic(spellinfo_T *spin, char *fname, afffile_T *affile)
     // Remove CR, LF and white space from the end.  White space halfway through
     // the word is kept to allow multi-word terms like "et al.".
     l = (int)strlen(line);
-    while (l > 0 && line[l - 1] <= ' ') {
+    while (l > 0 && (uint8_t)line[l - 1] <= ' ') {
       l--;
     }
     if (l == 0) {
@@ -3597,7 +3601,7 @@ static int store_aff_word(spellinfo_T *spin, char *word, char *afflist, afffile_
               if (store_aff_word(spin, newword, ae->ae_flags,
                                  affile, &affile->af_suff, xht,
                                  use_condit & (xht == NULL
-                                               ? ~0 :  ~CONDIT_SUF),
+                                               ? ~0 : ~CONDIT_SUF),
                                  use_flags, use_pfxlist, pfxlen) == FAIL) {
                 retval = FAIL;
               }
@@ -4442,7 +4446,7 @@ static int write_vim_spell(spellinfo_T *spin, char *fname)
   // round 1: SN_REP section
   // round 2: SN_SAL section (unless SN_SOFO is used)
   // round 3: SN_REPSAL section
-  for (unsigned int round = 1; round <= 3; round++) {
+  for (unsigned round = 1; round <= 3; round++) {
     garray_T *gap;
     if (round == 1) {
       gap = &spin->si_rep;
@@ -4505,7 +4509,7 @@ static int write_vim_spell(spellinfo_T *spin, char *fname)
       // <rep> : <repfromlen> <repfrom> <reptolen> <repto>
       // <sal> : <salfromlen> <salfrom> <saltolen> <salto>
       fromto_T *ftp = &((fromto_T *)gap->ga_data)[i];
-      for (unsigned int rr = 1; rr <= 2; rr++) {
+      for (unsigned rr = 1; rr <= 2; rr++) {
         char *p = rr == 1 ? ftp->ft_from : ftp->ft_to;
         l = strlen(p);
         assert(l < INT_MAX);
@@ -4542,7 +4546,7 @@ static int write_vim_spell(spellinfo_T *spin, char *fname)
 
     // round 1: count the bytes
     // round 2: write the bytes
-    for (unsigned int round = 1; round <= 2; round++) {
+    for (unsigned round = 1; round <= 2; round++) {
       size_t todo;
       size_t len = 0;
       hashitem_T *hi;
@@ -4665,7 +4669,7 @@ static int write_vim_spell(spellinfo_T *spin, char *fname)
 
   // <LWORDTREE>  <KWORDTREE>  <PREFIXTREE>
   spin->si_memtot = 0;
-  for (unsigned int round = 1; round <= 3; round++) {
+  for (unsigned round = 1; round <= 3; round++) {
     wordnode_T *tree;
     if (round == 1) {
       tree = spin->si_foldroot->wn_sibling;
@@ -4971,9 +4975,12 @@ static int sug_filltree(spellinfo_T *spin, slang_T *slang)
   spin->si_sugtree = true;
 
   // Go through the whole case-folded tree, soundfold each word and put it
-  // in the trie.
+  // in the trie.  Bail out if the tree is empty.
   byts = slang->sl_fbyts;
   idxs = slang->sl_fidxs;
+  if (byts == NULL || idxs == NULL) {
+    return FAIL;
+  }
 
   arridx[0] = 0;
   curi[0] = 1;
@@ -5857,7 +5864,7 @@ static void set_map_str(slang_T *lp, char *map)
         } else {
           // This should have been checked when generating the .spl
           // file.
-          emsg(_("E783: duplicate char in MAP entry"));
+          emsg(_(e_duplicate_char_in_map_entry));
           xfree(b);
         }
       } else {

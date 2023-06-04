@@ -109,11 +109,16 @@ typedef enum luv_err_type {
   kThreadCallback,
 } luv_err_t;
 
+lua_State *get_global_lstate(void)
+{
+  return global_lstate;
+}
+
 /// Convert lua error into a Vim error message
 ///
 /// @param  lstate  Lua interpreter state.
 /// @param[in]  msg  Message base, must contain one `%s`.
-static void nlua_error(lua_State *const lstate, const char *const msg)
+void nlua_error(lua_State *const lstate, const char *const msg)
   FUNC_ATTR_NONNULL_ALL
 {
   size_t len;
@@ -150,7 +155,7 @@ static void nlua_error(lua_State *const lstate, const char *const msg)
 /// @param lstate Lua interpreter state
 /// @param[in] nargs Number of arguments expected by the function being called.
 /// @param[in] nresults Number of results the function returns.
-static int nlua_pcall(lua_State *lstate, int nargs, int nresults)
+int nlua_pcall(lua_State *lstate, int nargs, int nresults)
 {
   lua_getglobal(lstate, "debug");
   lua_getfield(lstate, -1, "traceback");
@@ -336,7 +341,7 @@ static int nlua_init_argv(lua_State *const L, char **argv, int argc, int lua_arg
     lua_pushstring(L, argv[lua_arg0 - 1]);
     lua_rawseti(L, -2, 0);  // _G.arg[0] = "foo.lua"
 
-    for (; lua_arg0 >= 0 && i + lua_arg0 < argc; i++) {
+    for (; i + lua_arg0 < argc; i++) {
       lua_pushstring(L, argv[i + lua_arg0]);
       lua_rawseti(L, -2, i + 1);  // _G.arg[i+1] = "--foo"
     }
@@ -377,7 +382,8 @@ static int nlua_schedule(lua_State *const lstate)
 
 // Dummy timer callback. Used by f_wait().
 static void dummy_timer_due_cb(TimeWatcher *tw, void *data)
-{}
+{
+}
 
 // Dummy timer close callback. Used by f_wait().
 static void dummy_timer_close_cb(TimeWatcher *tw, void *data)
@@ -559,7 +565,7 @@ static void nlua_common_vim_init(lua_State *lstate, bool is_thread, bool is_stan
   lua_setfield(lstate, LUA_REGISTRYINDEX, "mpack.empty_dict");
   lua_setfield(lstate, -2, "_empty_dict_mt");
 
-  // vim.loop
+  // vim.uv
   if (is_standalone) {
     // do nothing, use libluv like in a standalone interpreter
   } else if (is_thread) {
@@ -572,9 +578,9 @@ static void nlua_common_vim_init(lua_State *lstate, bool is_thread, bool is_stan
   }
   luaopen_luv(lstate);
   lua_pushvalue(lstate, -1);
-  lua_setfield(lstate, -3, "loop");
+  lua_setfield(lstate, -3, "uv");
 
-  // package.loaded.luv = vim.loop
+  // package.loaded.luv = vim.uv
   // otherwise luv will be reinitialized when require'luv'
   lua_getglobal(lstate, "package");
   lua_getfield(lstate, -1, "loaded");
@@ -835,7 +841,7 @@ void nlua_run_script(char **argv, int argc, int lua_arg0)
   exit(lua_ok ? 0 : 1);
 }
 
-lua_State *nlua_init_state(bool thread)
+static lua_State *nlua_init_state(bool thread)
 {
   // If it is called from the main thread, it will attempt to rebuild the cache.
   const uv_thread_t self = uv_thread_self();
@@ -909,12 +915,13 @@ static void nlua_common_free_all_mem(lua_State *lstate)
   if (nlua_track_refs) {
     // in case there are leaked luarefs, leak the associated memory
     // to get LeakSanitizer stacktraces on exit
-    pmap_destroy(handle_T)(&ref_state->ref_markers);
+    map_destroy(int, &ref_state->ref_markers);
   }
 #endif
 
   lua_close(lstate);
 }
+
 static void nlua_print_event(void **argv)
 {
   char *str = argv[0];
@@ -1093,7 +1100,7 @@ static int nlua_debug(lua_State *lstate)
       .v_type = VAR_UNKNOWN,
     },
   };
-  for (;;) {
+  while (true) {
     lua_settop(lstate, 0);
     typval_T input;
     get_user_input(input_args, &input, false, false);
@@ -1284,7 +1291,7 @@ LuaRef nlua_ref(lua_State *lstate, nlua_ref_state_t *ref_state, int index)
 #ifdef NLUA_TRACK_REFS
     if (nlua_track_refs) {
       // dummy allocation to make LeakSanitizer track our luarefs
-      pmap_put(handle_T)(&ref_state->ref_markers, ref, xmalloc(3));
+      pmap_put(int)(&ref_state->ref_markers, ref, xmalloc(3));
     }
 #endif
   }
@@ -1304,7 +1311,7 @@ void nlua_unref(lua_State *lstate, nlua_ref_state_t *ref_state, LuaRef ref)
 #ifdef NLUA_TRACK_REFS
     // NB: don't remove entry from map to track double-unref
     if (nlua_track_refs) {
-      xfree(pmap_get(handle_T)(&ref_state->ref_markers, ref));
+      xfree(pmap_get(int)(&ref_state->ref_markers, ref));
     }
 #endif
     luaL_unref(lstate, LUA_REGISTRYINDEX, ref);
@@ -1618,7 +1625,7 @@ void ex_lua(exarg_T *const eap)
 {
   size_t len;
   char *code = script_get(eap, &len);
-  if (eap->skip) {
+  if (eap->skip || code == NULL) {
     xfree(code);
     return;
   }
@@ -2273,81 +2280,4 @@ char *nlua_funcref_str(LuaRef ref)
 plain:
   kv_printf(str, "<Lua %d>", ref);
   return str.items;
-}
-
-char *nlua_read_secure(const char *path)
-{
-  lua_State *const lstate = global_lstate;
-  const int top = lua_gettop(lstate);
-
-  lua_getglobal(lstate, "vim");
-  lua_getfield(lstate, -1, "secure");
-  lua_getfield(lstate, -1, "read");
-  lua_pushstring(lstate, path);
-  if (nlua_pcall(lstate, 1, 1)) {
-    nlua_error(lstate, _("Error executing vim.secure.read: %.*s"));
-    lua_settop(lstate, top);
-    return NULL;
-  }
-
-  size_t len = 0;
-  const char *contents = lua_tolstring(lstate, -1, &len);
-  char *buf = NULL;
-  if (contents != NULL) {
-    // Add one to include trailing null byte
-    buf = xcalloc(len + 1, sizeof(char));
-    memcpy(buf, contents, len + 1);
-  }
-
-  lua_settop(lstate, top);
-  return buf;
-}
-
-bool nlua_trust(const char *action, const char *path)
-{
-  lua_State *const lstate = global_lstate;
-  const int top = lua_gettop(lstate);
-
-  lua_getglobal(lstate, "vim");
-  lua_getfield(lstate, -1, "secure");
-  lua_getfield(lstate, -1, "trust");
-
-  lua_newtable(lstate);
-  lua_pushstring(lstate, "action");
-  lua_pushstring(lstate, action);
-  lua_settable(lstate, -3);
-  if (path == NULL) {
-    lua_pushstring(lstate, "bufnr");
-    lua_pushnumber(lstate, 0);
-    lua_settable(lstate, -3);
-  } else {
-    lua_pushstring(lstate, "path");
-    lua_pushstring(lstate, path);
-    lua_settable(lstate, -3);
-  }
-
-  if (nlua_pcall(lstate, 1, 2)) {
-    nlua_error(lstate, _("Error executing vim.secure.trust: %.*s"));
-    lua_settop(lstate, top);
-    return false;
-  }
-
-  bool success = lua_toboolean(lstate, -2);
-  const char *msg = lua_tostring(lstate, -1);
-  if (msg != NULL) {
-    if (success) {
-      if (strcmp(action, "allow") == 0) {
-        smsg("Allowed \"%s\" in trust database.", msg);
-      } else if (strcmp(action, "deny") == 0) {
-        smsg("Denied \"%s\" in trust database.", msg);
-      } else if (strcmp(action, "remove") == 0) {
-        smsg("Removed \"%s\" from trust database.", msg);
-      }
-    } else {
-      semsg(e_trustfile, msg);
-    }
-  }
-
-  lua_settop(lstate, top);
-  return success;
 }

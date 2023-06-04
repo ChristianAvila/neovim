@@ -111,7 +111,7 @@ void remote_ui_disconnect(uint64_t channel_id)
   }
   UIData *data = ui->data;
   kv_destroy(data->call_buf);
-  pmap_del(uint64_t)(&connected_uis, channel_id);
+  pmap_del(uint64_t)(&connected_uis, channel_id, NULL);
   ui_detach_impl(ui, channel_id);
 
   // Destroy `ui`.
@@ -254,7 +254,8 @@ void nvim_ui_detach(uint64_t channel_id, Error *err)
 
 // TODO(bfredl): use me to detach a specific ui from the server
 void remote_ui_stop(UI *ui)
-{}
+{
+}
 
 void nvim_ui_try_resize(uint64_t channel_id, Integer width, Integer height, Error *err)
   FUNC_API_SINCE(1) FUNC_API_REMOTE_ONLY
@@ -794,7 +795,7 @@ void remote_ui_put(UI *ui, const char *cell)
   UIData *data = ui->data;
   data->client_col++;
   Array args = data->call_buf;
-  ADD_C(args, STRING_OBJ(cstr_as_string((char *)cell)));
+  ADD_C(args, CSTR_AS_OBJ((char *)cell));
   push_call(ui, "put", args);
 }
 

@@ -44,10 +44,12 @@
 
 garray_T ucmds = { 0, 0, sizeof(ucmd_T), 4, NULL };
 
-static const char e_complete_used_without_allowing_arguments[]
-  = N_("E1208: -complete used without allowing arguments");
+static const char e_argument_required_for_str[]
+  = N_("E179: Argument required for %s");
 static const char e_no_such_user_defined_command_str[]
   = N_("E184: No such user-defined command: %s");
+static const char e_complete_used_without_allowing_arguments[]
+  = N_("E1208: -complete used without allowing arguments");
 static const char e_no_such_user_defined_command_in_current_buffer_str[]
   = N_("E1237: No such user-defined command in current buffer: %s");
 
@@ -56,7 +58,6 @@ static const char e_no_such_user_defined_command_in_current_buffer_str[]
 static const char *command_complete[] = {
   [EXPAND_ARGLIST] = "arglist",
   [EXPAND_AUGROUP] = "augroup",
-  [EXPAND_BEHAVE] = "behave",
   [EXPAND_BUFFERS] = "buffer",
   [EXPAND_CHECKHEALTH] = "checkhealth",
   [EXPAND_COLORS] = "color",
@@ -140,7 +141,7 @@ char *find_ucmd(exarg_T *eap, char *p, int *full, expand_T *xp, int *complp)
 
   // Look for buffer-local user commands first, then global ones.
   gap = &prevwin_curwin()->w_buffer->b_ucmds;
-  for (;;) {
+  while (true) {
     for (j = 0; j < gap->ga_len; j++) {
       uc = USER_CMD_GA(gap, j);
       cp = eap->cmd;
@@ -446,7 +447,7 @@ static void uc_list(char *name, size_t name_len)
 
   // In cmdwin, the alternative buffer should be used.
   const garray_T *gap = &prevwin_curwin()->w_buffer->b_ucmds;
-  for (;;) {
+  while (true) {
     for (i = 0; i < gap->ga_len; i++) {
       cmd = USER_CMD_GA(gap, i);
       a = cmd->uc_argt;
@@ -470,7 +471,7 @@ static void uc_list(char *name, size_t name_len)
       }
 
       // Special cases
-      int len = 4;
+      size_t len = 4;
       if (a & EX_BANG) {
         msg_putchar('!');
         len--;
@@ -492,7 +493,7 @@ static void uc_list(char *name, size_t name_len)
       }
 
       msg_outtrans_attr(cmd->uc_name, HL_ATTR(HLF_D));
-      len = (int)strlen(cmd->uc_name) + 4;
+      len = strlen(cmd->uc_name) + 4;
 
       do {
         msg_putchar(' ');
@@ -501,7 +502,7 @@ static void uc_list(char *name, size_t name_len)
 
       // "over" is how much longer the name is than the column width for
       // the name, we'll try to align what comes after.
-      const int over = len - 22;
+      const int64_t over = (int64_t)len - 22;
       len = 0;
 
       // Arguments
@@ -525,20 +526,22 @@ static void uc_list(char *name, size_t name_len)
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 5 - over);
+      } while ((int64_t)len < 5 - over);
 
       // Address / Range
       if (a & (EX_RANGE | EX_COUNT)) {
         if (a & EX_COUNT) {
           // -count=N
-          snprintf(IObuff + len, IOSIZE, "%" PRId64 "c", cmd->uc_def);
-          len += (int)strlen(IObuff + len);
+          int rc = snprintf(IObuff + len, IOSIZE - len, "%" PRId64 "c", cmd->uc_def);
+          assert(rc > 0);
+          len += (size_t)rc;
         } else if (a & EX_DFLALL) {
           IObuff[len++] = '%';
         } else if (cmd->uc_def >= 0) {
           // -range=N
-          snprintf(IObuff + len, IOSIZE, "%" PRId64 "", cmd->uc_def);
-          len += (int)strlen(IObuff + len);
+          int rc = snprintf(IObuff + len, IOSIZE - len, "%" PRId64 "", cmd->uc_def);
+          assert(rc > 0);
+          len += (size_t)rc;
         } else {
           IObuff[len++] = '.';
         }
@@ -546,32 +549,34 @@ static void uc_list(char *name, size_t name_len)
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 8 - over);
+      } while ((int64_t)len < 8 - over);
 
       // Address Type
       for (j = 0; addr_type_complete[j].expand != ADDR_NONE; j++) {
         if (addr_type_complete[j].expand != ADDR_LINES
             && addr_type_complete[j].expand == cmd->uc_addr_type) {
-          STRCPY(IObuff + len, addr_type_complete[j].shortname);
-          len += (int)strlen(IObuff + len);
+          int rc = snprintf(IObuff + len, IOSIZE - len, "%s", addr_type_complete[j].shortname);
+          assert(rc > 0);
+          len += (size_t)rc;
           break;
         }
       }
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 13 - over);
+      } while ((int64_t)len < 13 - over);
 
       // Completion
       char *cmd_compl = get_command_complete(cmd->uc_compl);
       if (cmd_compl != NULL) {
-        STRCPY(IObuff + len, get_command_complete(cmd->uc_compl));
-        len += (int)strlen(IObuff + len);
+        int rc = snprintf(IObuff + len, IOSIZE - len, "%s", get_command_complete(cmd->uc_compl));
+        assert(rc > 0);
+        len += (size_t)rc;
       }
 
       do {
         IObuff[len++] = ' ';
-      } while (len < 25 - over);
+      } while ((int64_t)len < 25 - over);
 
       IObuff[len] = '\0';
       msg_outtrans(IObuff);
@@ -805,7 +810,7 @@ invalid_count:
       }
     } else if (STRNICMP(attr, "complete", attrlen) == 0) {
       if (val == NULL) {
-        emsg(_("E179: argument required for -complete"));
+        semsg(_(e_argument_required_for_str), "-complete");
         return FAIL;
       }
 
@@ -816,7 +821,7 @@ invalid_count:
     } else if (STRNICMP(attr, "addr", attrlen) == 0) {
       *argt |= EX_RANGE;
       if (val == NULL) {
-        emsg(_("E179: argument required for -addr"));
+        semsg(_(e_argument_required_for_str), "-addr");
         return FAIL;
       }
       if (parse_addr_type_arg(val, (int)vallen, addr_type_arg) == FAIL) {
@@ -1063,7 +1068,7 @@ void ex_delcommand(exarg_T *eap)
   }
 
   gap = &curbuf->b_ucmds;
-  for (;;) {
+  while (true) {
     for (i = 0; i < gap->ga_len; i++) {
       cmd = USER_CMD_GA(gap, i);
       res = strcmp(arg, cmd->uc_name);
@@ -1642,12 +1647,12 @@ int do_ucmd(exarg_T *eap, bool preview)
   // First round: "buf" is NULL, compute length, allocate "buf".
   // Second round: copy result into "buf".
   buf = NULL;
-  for (;;) {
+  while (true) {
     p = cmd->uc_rep;        // source
     q = buf;                // destination
     totlen = 0;
 
-    for (;;) {
+    while (true) {
       start = vim_strchr(p, '<');
       if (start != NULL) {
         end = vim_strchr(start + 1, '>');
@@ -1749,8 +1754,8 @@ Dictionary commands_array(buf_T *buf)
     Dictionary d = ARRAY_DICT_INIT;
     ucmd_T *cmd = USER_CMD_GA(gap, i);
 
-    PUT(d, "name", STRING_OBJ(cstr_to_string(cmd->uc_name)));
-    PUT(d, "definition", STRING_OBJ(cstr_to_string(cmd->uc_rep)));
+    PUT(d, "name", CSTR_TO_OBJ(cmd->uc_name));
+    PUT(d, "definition", CSTR_TO_OBJ(cmd->uc_rep));
     PUT(d, "script_id", INTEGER_OBJ(cmd->uc_script_ctx.sc_sid));
     PUT(d, "bang", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_BANG)));
     PUT(d, "bar", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_TRLBAR)));
@@ -1770,21 +1775,21 @@ Dictionary commands_array(buf_T *buf)
     case (EX_EXTRA | EX_NOSPC | EX_NEEDARG):
       arg[0] = '1'; break;
     }
-    PUT(d, "nargs", STRING_OBJ(cstr_to_string(arg)));
+    PUT(d, "nargs", CSTR_TO_OBJ(arg));
 
     char *cmd_compl = get_command_complete(cmd->uc_compl);
     PUT(d, "complete", (cmd_compl == NULL
-                        ? NIL : STRING_OBJ(cstr_to_string(cmd_compl))));
+                        ? NIL : CSTR_TO_OBJ(cmd_compl)));
     PUT(d, "complete_arg", cmd->uc_compl_arg == NULL
-        ? NIL : STRING_OBJ(cstr_to_string(cmd->uc_compl_arg)));
+        ? NIL : CSTR_TO_OBJ(cmd->uc_compl_arg));
 
     Object obj = NIL;
     if (cmd->uc_argt & EX_COUNT) {
       if (cmd->uc_def >= 0) {
         snprintf(str, sizeof(str), "%" PRId64, cmd->uc_def);
-        obj = STRING_OBJ(cstr_to_string(str));    // -count=N
+        obj = CSTR_TO_OBJ(str);    // -count=N
       } else {
-        obj = STRING_OBJ(cstr_to_string("0"));    // -count
+        obj = CSTR_TO_OBJ("0");    // -count
       }
     }
     PUT(d, "count", obj);
@@ -1792,12 +1797,12 @@ Dictionary commands_array(buf_T *buf)
     obj = NIL;
     if (cmd->uc_argt & EX_RANGE) {
       if (cmd->uc_argt & EX_DFLALL) {
-        obj = STRING_OBJ(cstr_to_string("%"));    // -range=%
+        obj = CSTR_TO_OBJ("%");    // -range=%
       } else if (cmd->uc_def >= 0) {
         snprintf(str, sizeof(str), "%" PRId64, cmd->uc_def);
-        obj = STRING_OBJ(cstr_to_string(str));    // -range=N
+        obj = CSTR_TO_OBJ(str);    // -range=N
       } else {
-        obj = STRING_OBJ(cstr_to_string("."));    // -range
+        obj = CSTR_TO_OBJ(".");    // -range
       }
     }
     PUT(d, "range", obj);
@@ -1806,7 +1811,7 @@ Dictionary commands_array(buf_T *buf)
     for (int j = 0; addr_type_complete[j].expand != ADDR_NONE; j++) {
       if (addr_type_complete[j].expand != ADDR_LINES
           && addr_type_complete[j].expand == cmd->uc_addr_type) {
-        obj = STRING_OBJ(cstr_to_string(addr_type_complete[j].name));
+        obj = CSTR_TO_OBJ(addr_type_complete[j].name);
         break;
       }
     }

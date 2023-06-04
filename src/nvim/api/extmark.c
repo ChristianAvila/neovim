@@ -33,12 +33,10 @@
 void api_extmark_free_all_mem(void)
 {
   String name;
-  handle_T id;
-  map_foreach(&namespace_ids, name, id, {
-    (void)id;
+  map_foreach_key(&namespace_ids, name, {
     xfree(name.data);
   })
-  map_destroy(String, handle_T)(&namespace_ids);
+  map_destroy(String, &namespace_ids);
 }
 
 /// Creates a new namespace or gets an existing one. \*namespace\*
@@ -77,7 +75,7 @@ Dictionary nvim_get_namespaces(void)
   String name;
   handle_T id;
 
-  map_foreach(&namespace_ids, name, id, {
+  map_foreach(handle_T, &namespace_ids, name, id, {
     PUT(retval, name.data, INTEGER_OBJ(id));
   })
 
@@ -88,7 +86,7 @@ const char *describe_ns(NS ns_id)
 {
   String name;
   handle_T id;
-  map_foreach(&namespace_ids, name, id, {
+  map_foreach(handle_T, &namespace_ids, name, id, {
     if ((NS)id == ns_id && name.size) {
       return name.data;
     }
@@ -108,7 +106,7 @@ bool ns_initialized(uint32_t ns)
 static Object hl_group_name(int hl_id, bool hl_name)
 {
   if (hl_name) {
-    return STRING_OBJ(cstr_to_string(syn_id2name(hl_id)));
+    return CSTR_TO_OBJ(syn_id2name(hl_id));
   } else {
     return INTEGER_OBJ(hl_id);
   }
@@ -142,7 +140,7 @@ static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict
       PUT(dict, "hl_eol", BOOLEAN_OBJ(decor->hl_eol));
     }
     if (decor->hl_mode) {
-      PUT(dict, "hl_mode", STRING_OBJ(cstr_to_string(hl_mode_str[decor->hl_mode])));
+      PUT(dict, "hl_mode", CSTR_TO_OBJ(hl_mode_str[decor->hl_mode]));
     }
 
     if (kv_size(decor->virt_text)) {
@@ -150,7 +148,7 @@ static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict
       for (size_t i = 0; i < decor->virt_text.size; i++) {
         Array chunk = ARRAY_DICT_INIT;
         VirtTextChunk *vtc = &decor->virt_text.items[i];
-        ADD(chunk, STRING_OBJ(cstr_to_string(vtc->text)));
+        ADD(chunk, CSTR_TO_OBJ(vtc->text));
         if (vtc->hl_id > 0) {
           ADD(chunk, hl_group_name(vtc->hl_id, hl_name));
         }
@@ -162,7 +160,7 @@ static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict
         PUT(dict, "virt_text_win_col", INTEGER_OBJ(decor->col));
       }
       PUT(dict, "virt_text_pos",
-          STRING_OBJ(cstr_to_string(virt_text_pos_str[decor->virt_text_pos])));
+          CSTR_TO_OBJ(virt_text_pos_str[decor->virt_text_pos]));
     }
 
     if (decor->ui_watched) {
@@ -179,7 +177,7 @@ static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict
         for (size_t j = 0; j < vt->size; j++) {
           Array chunk = ARRAY_DICT_INIT;
           VirtTextChunk *vtc = &vt->items[j];
-          ADD(chunk, STRING_OBJ(cstr_to_string(vtc->text)));
+          ADD(chunk, CSTR_TO_OBJ(vtc->text));
           if (vtc->hl_id > 0) {
             ADD(chunk, hl_group_name(vtc->hl_id, hl_name));
           }
@@ -193,7 +191,7 @@ static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict
     }
 
     if (decor->sign_text) {
-      PUT(dict, "sign_text", STRING_OBJ(cstr_to_string(decor->sign_text)));
+      PUT(dict, "sign_text", CSTR_TO_OBJ(decor->sign_text));
     }
 
     // uncrustify:off
@@ -208,7 +206,7 @@ static Array extmark_to_array(const ExtmarkInfo *extmark, bool id, bool add_dict
 
     // uncrustify:on
 
-    for (int j = 0; hls[j].name && hls[j].val; j++) {
+    for (int j = 0; hls[j].name; j++) {
       if (hls[j].val) {
         PUT(dict, hls[j].name, hl_group_name(hls[j].val, hl_name));
       }
@@ -479,12 +477,15 @@ Array nvim_buf_get_extmarks(Buffer buffer, Integer ns_id, Object start, Object e
 ///                 - "overlay": display over the specified column, without
 ///                              shifting the underlying text.
 ///                 - "right_align": display right aligned in the window.
+///                 - "inline": display at the specified column, and
+///                              shift the buffer text to the right as needed
 ///               - virt_text_win_col : position the virtual text at a fixed
 ///                                     window column (starting from the first
 ///                                     text column)
 ///               - virt_text_hide : hide the virtual text when the background
-///                                  text is selected or hidden due to
-///                                  horizontal scroll 'nowrap'
+///                                  text is selected or hidden because of
+///                                  scrolling with 'nowrap' or 'smoothscroll'.
+///                                  Currently only affects "overlay" virt_text.
 ///               - hl_mode : control how highlights are combined with the
 ///                           highlights of the text. Currently only affects
 ///                           virt_text highlights, but might affect `hl_group`
@@ -697,6 +698,8 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
       decor.virt_text_pos = kVTOverlay;
     } else if (strequal("right_align", str.data)) {
       decor.virt_text_pos = kVTRightAlign;
+    } else if (strequal("inline", str.data)) {
+      decor.virt_text_pos = kVTInline;
     } else {
       VALIDATE_S(false, "virt_text_pos", "", {
         goto error;
@@ -874,7 +877,10 @@ Integer nvim_buf_set_extmark(Buffer buffer, Integer ns_id, Integer line, Integer
 
     extmark_set(buf, (uint32_t)ns_id, &id, (int)line, (colnr_T)col, line2, col2,
                 has_decor ? &decor : NULL, right_gravity, end_right_gravity,
-                kExtmarkNoUndo);
+                kExtmarkNoUndo, err);
+    if (ERROR_SET(err)) {
+      goto error;
+    }
   }
 
   return (Integer)id;
@@ -902,6 +908,11 @@ Boolean nvim_buf_del_extmark(Buffer buffer, Integer ns_id, Integer id, Error *er
   VALIDATE_INT(ns_initialized((uint32_t)ns_id), "ns_id", ns_id, {
     return false;
   });
+
+  if (decor_state.running_on_lines) {
+    api_set_error(err, kErrorTypeValidation, "Cannot remove extmarks during on_line callbacks");
+    return false;
+  }
 
   return extmark_del(buf, (uint32_t)ns_id, (uint32_t)id);
 }
@@ -993,7 +1004,7 @@ Integer nvim_buf_add_highlight(Buffer buffer, Integer ns_id, String hl_group, In
   extmark_set(buf, ns, NULL,
               (int)line, (colnr_T)col_start,
               end_line, (colnr_T)col_end,
-              &decor, true, false, kExtmarkNoUndo);
+              &decor, true, false, kExtmarkNoUndo, NULL);
   return ns_id;
 }
 
@@ -1021,6 +1032,11 @@ void nvim_buf_clear_namespace(Buffer buffer, Integer ns_id, Integer line_start, 
   VALIDATE_RANGE((line_start >= 0 && line_start < MAXLNUM), "line number", {
     return;
   });
+
+  if (decor_state.running_on_lines) {
+    api_set_error(err, kErrorTypeValidation, "Cannot remove extmarks during on_line callbacks");
+    return;
+  }
 
   if (line_end < 0 || line_end > MAXLNUM) {
     line_end = MAXLNUM;
@@ -1051,10 +1067,12 @@ void nvim_buf_clear_namespace(Buffer buffer, Integer ns_id, Integer line_start, 
 /// for the extmarks set/modified inside the callback anyway.
 ///
 /// Note: doing anything other than setting extmarks is considered experimental.
-/// Doing things like changing options are not expliticly forbidden, but is
+/// Doing things like changing options are not explicitly forbidden, but is
 /// likely to have unexpected consequences (such as 100% CPU consumption).
 /// doing `vim.rpcnotify` should be OK, but `vim.rpcrequest` is quite dubious
 /// for the moment.
+///
+/// Note: It is not allowed to remove or update extmarks in 'on_line' callbacks.
 ///
 /// @param ns_id  Namespace id from |nvim_create_namespace()|
 /// @param opts  Table of callbacks:
@@ -1168,7 +1186,7 @@ static bool extmark_get_index_from_obj(buf_T *buf, Integer ns_id, Object obj, in
 
     Integer pos_row = pos.items[0].data.integer;
     Integer pos_col = pos.items[1].data.integer;
-    *row = (int)(pos_row >= 0 ? pos_row  : MAXLNUM);
+    *row = (int)(pos_row >= 0 ? pos_row : MAXLNUM);
     *col = (colnr_T)(pos_col >= 0 ? pos_col : MAXCOL);
     return true;
   } else {

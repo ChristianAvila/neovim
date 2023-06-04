@@ -1401,7 +1401,7 @@ describe('API/extmarks', function()
 
   it('in read-only buffer', function()
     command("view! runtime/doc/help.txt")
-    eq(true, curbufmeths.get_option('ro'))
+    eq(true, meths.get_option_value('ro', {}))
     local id = set_extmark(ns, 0, 0, 2)
     eq({{id, 0, 2}}, get_extmarks(ns,0, -1))
   end)
@@ -1474,7 +1474,7 @@ describe('API/extmarks', function()
   it('in prompt buffer', function()
     feed('dd')
     local id = set_extmark(ns, marks[1], 0, 0, {})
-    curbufmeths.set_option('buftype', 'prompt')
+    meths.set_option_value('buftype', 'prompt', {})
     feed('i<esc>')
     eq({{id, 0, 2}}, get_extmarks(ns, 0, -1))
   end)
@@ -1541,6 +1541,12 @@ describe('API/extmarks', function()
       virt_text_pos = "win_col",
       virt_text_win_col = 1,
     } }, get_extmark_by_id(ns, marks[2], { details = true }))
+    set_extmark(ns, marks[3], 0, 0, { cursorline_hl_group = "Statement" })
+    eq({0, 0, {
+      ns_id = 1,
+      cursorline_hl_group = "Statement",
+      right_gravity = true,
+    } }, get_extmark_by_id(ns, marks[3], { details = true }))
   end)
 
   it('can get marks from anonymous namespaces', function()

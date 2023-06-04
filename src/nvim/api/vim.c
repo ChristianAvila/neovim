@@ -531,7 +531,7 @@ static void find_runtime_cb(char *fname, void *cookie)
 {
   Array *rv = (Array *)cookie;
   if (fname != NULL) {
-    ADD(*rv, STRING_OBJ(cstr_to_string(fname)));
+    ADD(*rv, CSTR_TO_OBJ(fname));
   }
 }
 
@@ -1383,7 +1383,7 @@ Dictionary nvim_get_mode(void)
   get_mode(modestr);
   bool blocked = input_blocking();
 
-  PUT(rv, "mode", STRING_OBJ(cstr_to_string(modestr)));
+  PUT(rv, "mode", CSTR_TO_OBJ(modestr));
   PUT(rv, "blocking", BOOLEAN_OBJ(blocked));
 
   return rv;
@@ -1926,7 +1926,7 @@ Array nvim__inspect_cell(Integer grid, Integer row, Integer col, Arena *arena, E
   }
   ret = arena_array(arena, 3);
   size_t off = g->line_offset[(size_t)row] + (size_t)col;
-  ADD_C(ret, STRING_OBJ(cstr_as_string((char *)g->chars[off])));
+  ADD_C(ret, CSTR_AS_OBJ((char *)g->chars[off]));
   int attr = g->attrs[off];
   ADD_C(ret, DICTIONARY_OBJ(hl_get_attr_by_id(attr, true, arena, err)));
   // will not work first time
@@ -2035,7 +2035,7 @@ Array nvim_get_mark(String name, Dictionary opts, Error *err)
   ADD(rv, INTEGER_OBJ(row));
   ADD(rv, INTEGER_OBJ(col));
   ADD(rv, INTEGER_OBJ(bufnr));
-  ADD(rv, STRING_OBJ(cstr_to_string(filename)));
+  ADD(rv, CSTR_TO_OBJ(filename));
 
   if (allocated) {
     xfree(filename);
@@ -2173,13 +2173,14 @@ Dictionary nvim_eval_statusline(String str, Dict(eval_statusline) *opts, Error *
       linenr_T lnum = statuscol_lnum;
       int num_signs = buf_get_signattrs(wp->w_buffer, lnum, sattrs, &num, &line, &cul);
       decor_redraw_signs(wp->w_buffer, lnum - 1, &num_signs, sattrs, &num, &line, &cul);
+      wp->w_scwidth = win_signcol_count(wp);
 
       statuscol.sattrs = sattrs;
       statuscol.foldinfo = fold_info(wp, lnum);
       wp->w_cursorline = win_cursorline_standout(wp) ? wp->w_cursor.lnum : 0;
 
       if (wp->w_p_cul) {
-        if (statuscol.foldinfo.fi_level > 0 && statuscol.foldinfo.fi_lines > 0) {
+        if (statuscol.foldinfo.fi_level != 0 && statuscol.foldinfo.fi_lines > 0) {
           wp->w_cursorline = statuscol.foldinfo.fi_lnum;
         }
         statuscol.use_cul = lnum == wp->w_cursorline && (wp->w_p_culopt_flags & CULOPT_NBR);
@@ -2240,7 +2241,7 @@ Dictionary nvim_eval_statusline(String str, Dict(eval_statusline) *opts, Error *
   if (highlights) {
     Array hl_values = ARRAY_DICT_INIT;
     const char *grpname;
-    char user_group[6];
+    char user_group[15];  // strlen("User") + strlen("2147483647") + NUL
 
     // If first character doesn't have a defined highlight,
     // add the default highlight at the beginning of the highlight list
