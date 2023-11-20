@@ -1,5 +1,4 @@
-#ifndef NVIM_MARK_H
-#define NVIM_MARK_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -33,10 +32,6 @@
     free_fmark(*fmarkp___); \
     SET_FMARK(fmarkp___, mark_, fnum_, view_); \
   } while (0)
-
-/// Clear given fmark
-#define CLEAR_FMARK(fmarkp_) \
-  RESET_FMARK(fmarkp_, ((pos_T) { 0, 0, 0 }), 0, ((fmarkv_T)INIT_FMARKV))
 
 /// Set given extended mark (regular mark + file name)
 #define SET_XFMARK(xfmarkp_, mark_, fnum_, view_, fname_) \
@@ -125,4 +120,3 @@ static inline void clearpos(pos_T *a)
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "mark.h.generated.h"
 #endif
-#endif  // NVIM_MARK_H

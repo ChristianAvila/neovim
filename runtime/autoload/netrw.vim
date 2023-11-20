@@ -211,10 +211,8 @@ let g:netrw_localmovecmdopt    = ""
 
 " ---------------------------------------------------------------------
 " Default values for netrw's global protocol variables {{{2
-if (v:version > 802 || (v:version == 802 && has("patch486"))) && has("balloon_eval") && !exists("s:initbeval") && !exists("g:netrw_nobeval") && has("syntax") && exists("g:syntax_on") && has("mouse")
-  call s:NetrwInit("g:netrw_use_errorwindow",2)
-else
-  call s:NetrwInit("g:netrw_use_errorwindow",1)
+if !exists("g:netrw_use_errorwindow")
+  let g:netrw_use_errorwindow = 0
 endif
 
 if !exists("g:netrw_dav_cmd")
@@ -1136,7 +1134,6 @@ fun! netrw#Explore(indx,dosplit,style,...)
    2match none
    if exists("s:explore_match")  | unlet s:explore_match  | endif
    if exists("s:explore_prvdir") | unlet s:explore_prvdir | endif
-   echo " "
 "   call Decho("cleared explore match list",'~'.expand("<slnum>"))
   endif
 
@@ -1916,7 +1913,7 @@ endfun
 "                        Doing this means that netrw will not come up as having changed a
 "                        setting last when it really didn't actually change it.
 "
-"                        Used by s:NetrwOptionsRestore() to restore each netrw-senstive setting
+"                        Used by s:NetrwOptionsRestore() to restore each netrw-sensitive setting
 "                        keepvars are set up by s:NetrwOptionsSave
 fun! s:NetrwRestoreSetting(keepvar,setting)
 """  call Dfunc("s:NetrwRestoreSetting(a:keepvar<".a:keepvar."> a:setting<".a:setting.">)")
@@ -2953,7 +2950,7 @@ fun! s:NetrwGetFile(readcmd, tfile, method)
    " to process this detection correctly.
 "   call Decho("detect filetype of local version of remote file<".rfile.">",'~'.expand("<slnum>"))
 "   call Decho("..did_filetype()=".did_filetype())
-   setl ft=
+"   setl ft=
 "   call Decho("..initial filetype<".&ft."> for buf#".bufnr()."<".bufname().">")
    let iskkeep= &isk
    setl isk-=/
@@ -3471,6 +3468,11 @@ fun! s:NetrwBookHistHandler(chg,curdir)
     echo "bookmarked the current directory"
    endif
 
+   try
+    call s:NetrwBookHistSave()
+   catch
+   endtry
+
   elseif a:chg == 1
    " change to the bookmarked directory
 "   call Decho("(user: <".v:count."gb>) change to the bookmarked directory",'~'.expand("<slnum>"))
@@ -3615,6 +3617,11 @@ fun! s:NetrwBookHistHandler(chg,curdir)
 "    call Decho("g:netrw_bookmarklist=".string(g:netrw_bookmarklist),'~'.expand("<slnum>"))
    endif
 "   call Decho("resulting g:netrw_bookmarklist=".string(g:netrw_bookmarklist),'~'.expand("<slnum>"))
+
+   try
+    call s:NetrwBookHistSave()
+   catch
+   endtry
   endif
   call s:NetrwBookmarkMenu()
   call s:NetrwTgtMenu()
@@ -5507,7 +5514,7 @@ fun! netrw#BrowseX(fname,remote)
   " cleanup: remove temporary file,
   "          delete current buffer if success with handler,
   "          return to prior buffer (directory listing)
-  "          Feb 12, 2008: had to de-activiate removal of
+  "          Feb 12, 2008: had to de-activate removal of
   "          temporary file because it wasn't getting seen.
 "  if remote == 1 && fname != a:fname
 ""   call Decho("deleting temporary file<".fname.">",'~'.expand("<slnum>"))
@@ -5680,8 +5687,6 @@ fun! s:NetrwClearExplore()
   if exists("w:netrw_explore_list")   |unlet w:netrw_explore_list   |endif
   if exists("w:netrw_explore_bufnr")  |unlet w:netrw_explore_bufnr  |endif
 "   redraw!
-  echo " "
-  echo " "
 "  call Dret("s:NetrwClearExplore")
 endfun
 
@@ -7324,8 +7329,7 @@ fun! s:NetrwMarkFileDiff(islocal)
      exe "NetrwKeepj e ".fnameescape(fname)
      diffthis
     elseif cnt == 2 || cnt == 3
-     vsplit
-     wincmd l
+     below vsplit
 "     call Decho("diffthis: ".fname,'~'.expand("<slnum>"))
      exe "NetrwKeepj e ".fnameescape(fname)
      diffthis
@@ -11936,9 +11940,9 @@ fun! s:NetrwBufRemover(bufid)
 "  call Decho("buf#".a:bufid." has name <".bufname(a:bufid).">","~".expand("<slnum>"))
 "  call Decho("buf#".a:bufid." has winid#".bufwinid(a:bufid),"~".expand("<slnum>"))
 
-  if a:bufid > 1 && !buflisted(a:bufid) && bufname(a:bufid) == "" && bufwinid(a:bufid) == -1
+  if a:bufid > 1 && !buflisted(a:bufid) && bufloaded(a:bufid) && bufname(a:bufid) == "" && bufwinid(a:bufid) == -1
 "   call Decho("(s:NetrwBufRemover) removing buffer#".a:bufid,"~".expand("<slnum>"))
-   exe "bd! ".a:bufid
+   exe "sil! bd! ".a:bufid
   endif
 
 "  call Dret("s:NetrwBufRemover")

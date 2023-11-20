@@ -1,5 +1,4 @@
-#ifndef NVIM_BUFFER_H
-#define NVIM_BUFFER_H
+#pragma once
 
 #include <assert.h>
 #include <stdbool.h>
@@ -10,7 +9,7 @@
 #include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/func_attr.h"
-#include "nvim/grid_defs.h"  // for StlClickRecord
+#include "nvim/grid_defs.h"
 #include "nvim/macros.h"
 #include "nvim/memline.h"
 #include "nvim/memline_defs.h"
@@ -69,8 +68,8 @@ enum bfa_values {
   BFA_IGNORE_ABORT = 8,  // do not abort for aborting()
 };
 
-EXTERN char *msg_loclist INIT(= N_("[Location List]"));
-EXTERN char *msg_qflist INIT(= N_("[Quickfix List]"));
+EXTERN char *msg_loclist INIT( = N_("[Location List]"));
+EXTERN char *msg_qflist INIT( = N_("[Quickfix List]"));
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "buffer.h.generated.h"
@@ -138,7 +137,5 @@ static inline void buf_inc_changedtick(buf_T *const buf)
 static inline bool buf_is_empty(buf_T *buf)
 {
   return buf->b_ml.ml_line_count == 1
-         && *ml_get_buf(buf, (linenr_T)1, false) == '\0';
+         && *ml_get_buf(buf, 1) == '\0';
 }
-
-#endif  // NVIM_BUFFER_H

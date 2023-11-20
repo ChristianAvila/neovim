@@ -125,7 +125,7 @@
 #  define REAL_FATTR_NONNULL_ALL __attribute__((nonnull))
 #  define REAL_FATTR_NONNULL_ARG(...) __attribute__((nonnull(__VA_ARGS__)))
 #  define REAL_FATTR_NORETURN __attribute__((noreturn))
-#  define REAL_FATTR_PRINTF(x, y) __attribute__((format (printf, x, y)))
+#  define REAL_FATTR_PRINTF(x, y) __attribute__((format(printf, x, y)))
 
 #  if NVIM_HAS_ATTRIBUTE(returns_nonnull)
 #   define REAL_FATTR_NONNULL_RET __attribute__((returns_nonnull))
@@ -222,12 +222,14 @@
 # define FUNC_API_FAST
 /// Internal C function not exposed in the RPC API.
 # define FUNC_API_NOEXPORT
-/// API function not exposed in VimL/eval.
+/// API function not exposed in Vimscript/eval.
 # define FUNC_API_REMOTE_ONLY
-/// API function not exposed in VimL/remote.
+/// API function not exposed in Vimscript/remote.
 # define FUNC_API_LUA_ONLY
-/// API function checked textlock.
-# define FUNC_API_CHECK_TEXTLOCK
+/// API function fails during textlock.
+# define FUNC_API_TEXTLOCK
+/// API function fails during textlock, but allows cmdwin.
+# define FUNC_API_TEXTLOCK_ALLOW_CMDWIN
 /// API function introduced at the given API level.
 # define FUNC_API_SINCE(X)
 /// API function deprecated since the given API level.

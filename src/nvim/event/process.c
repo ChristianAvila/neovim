@@ -1,10 +1,6 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <inttypes.h>
 #include <signal.h>
-#include <stdlib.h>
 #include <uv.h>
 
 #include "klib/klist.h"
@@ -13,7 +9,6 @@
 #include "nvim/event/process.h"
 #include "nvim/globals.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/os/process.h"
 #include "nvim/os/pty_process.h"
@@ -78,8 +73,6 @@ int process_spawn(Process *proc, bool in, bool out, bool err)
   case kProcessTypePty:
     status = pty_process_spawn((PtyProcess *)proc);
     break;
-  default:
-    abort();
   }
 
   if (status) {
@@ -104,24 +97,21 @@ int process_spawn(Process *proc, bool in, bool out, bool err)
   }
 
   if (in) {
-    stream_init(NULL, &proc->in, -1,
-                STRUCT_CAST(uv_stream_t, &proc->in.uv.pipe));
+    stream_init(NULL, &proc->in, -1, (uv_stream_t *)&proc->in.uv.pipe);
     proc->in.internal_data = proc;
     proc->in.internal_close_cb = on_process_stream_close;
     proc->refcount++;
   }
 
   if (out) {
-    stream_init(NULL, &proc->out, -1,
-                STRUCT_CAST(uv_stream_t, &proc->out.uv.pipe));
+    stream_init(NULL, &proc->out, -1, (uv_stream_t *)&proc->out.uv.pipe);
     proc->out.internal_data = proc;
     proc->out.internal_close_cb = on_process_stream_close;
     proc->refcount++;
   }
 
   if (err) {
-    stream_init(NULL, &proc->err, -1,
-                STRUCT_CAST(uv_stream_t, &proc->err.uv.pipe));
+    stream_init(NULL, &proc->err, -1, (uv_stream_t *)&proc->err.uv.pipe);
     proc->err.internal_data = proc;
     proc->err.internal_close_cb = on_process_stream_close;
     proc->refcount++;
@@ -131,7 +121,7 @@ int process_spawn(Process *proc, bool in, bool out, bool err)
   proc->internal_close_cb = decref;
   proc->refcount++;
   kl_push(WatcherPtr, proc->loop->children, proc);
-  DLOG("new: pid=%d argv=[%s]", proc->pid, proc->argv[0]);
+  DLOG("new: pid=%d exepath=[%s]", proc->pid, process_get_exepath(proc));
   return 0;
 }
 
@@ -239,8 +229,6 @@ void process_stop(Process *proc) FUNC_ATTR_NONNULL_ALL
     process_close_streams(proc);
     pty_process_close_master((PtyProcess *)proc);
     break;
-  default:
-    abort();
   }
 
   // (Re)start timer to verify that stopped process(es) died.
@@ -340,8 +328,6 @@ static void process_close(Process *proc)
   case kProcessTypePty:
     pty_process_close((PtyProcess *)proc);
     break;
-  default:
-    abort();
   }
 }
 
@@ -382,7 +368,7 @@ static void flush_stream(Process *proc, Stream *stream)
     }
 
     // Stream can be closed if it is empty.
-    if (num_bytes == stream->num_bytes) {  // -V547
+    if (num_bytes == stream->num_bytes) {
       if (stream->read_cb && !stream->did_eof) {
         // Stream callback could miss EOF handling if a child keeps the stream
         // open. But only send EOF if we haven't already.
@@ -423,6 +409,7 @@ static void exit_event(void **argv)
 
   if (!exiting) {
     if (ui_client_channel_id) {
+      ui_client_exit_status = status;
       os_exit(status);
     } else {
       assert(status == 0);  // Called from rpc_close(), which passes 0 as status.

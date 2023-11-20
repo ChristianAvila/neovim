@@ -1,10 +1,10 @@
-#ifndef NVIM_KEYCODES_H
-#define NVIM_KEYCODES_H
+#pragma once
 
 #include <stddef.h>
 
 #include "nvim/ascii.h"
 #include "nvim/option_defs.h"
+#include "nvim/option_vars.h"
 #include "nvim/strings.h"
 
 // Keycode definitions for special keys.
@@ -500,4 +500,3 @@ enum {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "keycodes.h.generated.h"
 #endif
-#endif  // NVIM_KEYCODES_H

@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// @file arabic.c
 ///
 /// Functions for Arabic language.
@@ -22,14 +19,11 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 
 #include "nvim/arabic.h"
 #include "nvim/ascii.h"
 #include "nvim/macros.h"
-#include "nvim/mbyte.h"
-#include "nvim/option_defs.h"
-#include "nvim/vim.h"
+#include "nvim/option_vars.h"
 
 // Unicode values for Arabic characters.
 enum {
@@ -297,13 +291,12 @@ static int A_is_valid(int c)
 }
 
 // Do Arabic shaping on character "c".  Returns the shaped character.
-// out:    "ccp" points to the first byte of the character to be shaped.
 // in/out: "c1p" points to the first composing char for "c".
 // in:     "prev_c"  is the previous character (not shaped)
 // in:     "prev_c1" is the first composing char for the previous char
 //          (not shaped)
 // in:     "next_c"  is the next character (not shaped).
-int arabic_shape(int c, int *ccp, int *c1p, int prev_c, int prev_c1, int next_c)
+int arabic_shape(int c, int *c1p, int prev_c, int prev_c1, int next_c)
 {
   // Deal only with Arabic character, pass back all others
   if (!A_is_ok(c)) {
@@ -345,14 +338,6 @@ int arabic_shape(int c, int *ccp, int *c1p, int prev_c, int prev_c1, int next_c)
   // Character missing from the table means using original character.
   if (curr_c == NUL) {
     curr_c = c;
-  }
-
-  if ((curr_c != c) && (ccp != NULL)) {
-    char buf[MB_MAXBYTES + 1];
-
-    // Update the first byte of the character
-    utf_char2bytes(curr_c, buf);
-    *ccp = (uint8_t)buf[0];
   }
 
   // Return the shaped character

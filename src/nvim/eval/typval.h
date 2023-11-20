@@ -1,5 +1,4 @@
-#ifndef NVIM_EVAL_TYPVAL_H
-#define NVIM_EVAL_TYPVAL_H
+#pragma once
 
 #include <assert.h>
 #include <stdbool.h>
@@ -235,7 +234,7 @@ static inline long tv_dict_len(const dict_T *d)
 static inline long tv_dict_len(const dict_T *const d)
 {
   if (d == NULL) {
-    return 0L;
+    return 0;
   }
   return (long)d->dv_hashtab.ht_used;
 }
@@ -312,7 +311,7 @@ static inline void tv_blob_set(blob_T *const blob, int idx, uint8_t c)
   ((uint8_t *)blob->bv_ga.ga_data)[idx] = c;
 }
 
-/// Initialize VimL object
+/// Initialize Vimscript object
 ///
 /// Initializes to unlocked VAR_UNKNOWN object.
 ///
@@ -340,7 +339,7 @@ extern bool tv_in_free_unref_items;
 /// @param[in]  l  List to iterate over.
 /// @param  li  Name of the variable with current listitem_T entry.
 /// @param  code  Cycle body.
-#define _TV_LIST_ITER_MOD(modifier, l, li, code) \
+#define TV_LIST_ITER_MOD(modifier, l, li, code) \
   do { \
     modifier list_T *const l_ = (l); \
     if (l_ != NULL) { \
@@ -360,7 +359,7 @@ extern bool tv_in_free_unref_items;
 /// @param  li  Name of the variable with current listitem_T entry.
 /// @param  code  Cycle body.
 #define TV_LIST_ITER(l, li, code) \
-  _TV_LIST_ITER_MOD( , l, li, code)  // NOLINT(whitespace/parens)
+  TV_LIST_ITER_MOD( , l, li, code)  // NOLINT(whitespace/parens)
 
 /// Iterate over a list
 ///
@@ -371,7 +370,7 @@ extern bool tv_in_free_unref_items;
 /// @param  li  Name of the variable with current listitem_T entry.
 /// @param  code  Cycle body.
 #define TV_LIST_ITER_CONST(l, li, code) \
-  _TV_LIST_ITER_MOD(const, l, li, code)
+  TV_LIST_ITER_MOD(const, l, li, code)
 
 // Below macros are macros to avoid duplicating code for functionally identical
 // const and non-const function variants.
@@ -424,7 +423,7 @@ static inline bool tv_get_float_chk(const typval_T *tv, float_T *ret_f)
 ///
 /// Raises an error if object is not number or floating-point.
 ///
-/// @param[in]  tv  VimL object to get value from.
+/// @param[in]  tv  Vimscript object to get value from.
 /// @param[out]  ret_f  Location where resulting float is stored.
 ///
 /// @return true in case of success, false if tv is not a number or float.
@@ -485,12 +484,10 @@ static inline bool tv_is_func(const typval_T tv)
 
 #ifdef UNIT_TESTING
 // Do not use enum constants, see commit message.
-EXTERN const size_t kTVCstring INIT(= TV_CSTRING);
-EXTERN const size_t kTVTranslate INIT(= TV_TRANSLATE);
+EXTERN const size_t kTVCstring INIT( = TV_CSTRING);
+EXTERN const size_t kTVTranslate INIT( = TV_TRANSLATE);
 #endif
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "eval/typval.h.generated.h"
 #endif
-
-#endif  // NVIM_EVAL_TYPVAL_H

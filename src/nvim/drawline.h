@@ -1,5 +1,4 @@
-#ifndef NVIM_DRAWLINE_H
-#define NVIM_DRAWLINE_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,6 +7,7 @@
 #include "nvim/decoration_provider.h"
 #include "nvim/fold.h"
 #include "nvim/macros.h"
+#include "nvim/pos.h"
 #include "nvim/types.h"
 
 // Maximum columns for terminal highlight attributes
@@ -19,9 +19,9 @@ typedef struct {
   int win_row;
   int win_col;
 } WinExtmark;
-EXTERN kvec_t(WinExtmark) win_extmark_arr INIT(= KV_INITIAL_VALUE);
+EXTERN kvec_t(WinExtmark) win_extmark_arr INIT( = KV_INITIAL_VALUE);
 
-EXTERN bool conceal_cursor_used INIT(= false);
+EXTERN bool conceal_cursor_used INIT( = false);
 
 // Spell checking variables passed from win_update() to win_line().
 typedef struct {
@@ -37,4 +37,3 @@ typedef struct {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "drawline.h.generated.h"
 #endif
-#endif  // NVIM_DRAWLINE_H

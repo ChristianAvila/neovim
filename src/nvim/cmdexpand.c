@@ -1,17 +1,12 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // cmdexpand.c: functions for command-line completion
 
 #include <assert.h>
-#include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "auto/config.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/arglist.h"
@@ -49,11 +44,11 @@
 #include "nvim/menu.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/lang.h"
 #include "nvim/os/os.h"
 #include "nvim/path.h"
 #include "nvim/popupmenu.h"
-#include "nvim/pos.h"
 #include "nvim/profile.h"
 #include "nvim/regexp.h"
 #include "nvim/runtime.h"
@@ -68,9 +63,6 @@
 #include "nvim/usercmd.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
-
-/// Type used by ExpandGeneric()
-typedef char *(*CompleteListItemGetter)(expand_T *, int);
 
 /// Type used by call_user_expand_func
 typedef void *(*user_expand_func_T)(const char *, int, typval_T *);
@@ -107,6 +99,8 @@ static bool cmdline_fuzzy_completion_supported(const expand_T *const xp)
          && xp->xp_context != EXPAND_HELP
          && xp->xp_context != EXPAND_LUA
          && xp->xp_context != EXPAND_OLD_SETTING
+         && xp->xp_context != EXPAND_STRING_SETTING
+         && xp->xp_context != EXPAND_SETTING_SUBTRACT
          && xp->xp_context != EXPAND_OWNSYNTAX
          && xp->xp_context != EXPAND_PACKADD
          && xp->xp_context != EXPAND_RUNTIME
@@ -157,8 +151,9 @@ static void wildescape(expand_T *xp, const char *str, int numfiles, char **files
     // and wildmatch characters, except '~'.
     for (int i = 0; i < numfiles; i++) {
       // for ":set path=" we need to escape spaces twice
-      if (xp->xp_backslash == XP_BS_THREE) {
-        p = vim_strsave_escaped(files[i], " ");
+      if (xp->xp_backslash & XP_BS_THREE) {
+        char *pat = (xp->xp_backslash & XP_BS_COMMA) ? " ," : " ";
+        p = vim_strsave_escaped(files[i], pat);
         xfree(files[i]);
         files[i] = p;
 #if defined(BACKSLASH_IN_FILENAME)
@@ -166,6 +161,12 @@ static void wildescape(expand_T *xp, const char *str, int numfiles, char **files
         xfree(files[i]);
         files[i] = p;
 #endif
+      } else if (xp->xp_backslash & XP_BS_COMMA) {
+        if (vim_strchr(files[i], ',') != NULL) {
+          p = vim_strsave_escaped(files[i], ",");
+          xfree(files[i]);
+          files[i] = p;
+        }
       }
 #ifdef BACKSLASH_IN_FILENAME
       p = vim_strsave_fnameescape(files[i], vse_what);
@@ -222,7 +223,6 @@ static void ExpandEscape(expand_T *xp, char *str, int numfiles, char **files, in
 int nextwild(expand_T *xp, int type, int options, bool escape)
 {
   CmdlineInfo *const ccline = get_cmdline_info();
-  int i;
   char *p2;
 
   if (xp->xp_numfiles == -1) {
@@ -246,7 +246,7 @@ int nextwild(expand_T *xp, int type, int options, bool escape)
     ui_flush();
   }
 
-  i = (int)(xp->xp_pattern - ccline->cmdbuff);
+  int i = (int)(xp->xp_pattern - ccline->cmdbuff);
   assert(ccline->cmdpos >= i);
   xp->xp_pattern_len = (size_t)ccline->cmdpos - (size_t)i;
 
@@ -259,7 +259,7 @@ int nextwild(expand_T *xp, int type, int options, bool escape)
     char *p1;
     if (cmdline_fuzzy_completion_supported(xp)) {
       // If fuzzy matching, don't modify the search string
-      p1 = xstrdup(xp->xp_pattern);
+      p1 = xstrnsave(xp->xp_pattern, xp->xp_pattern_len);
     } else {
       p1 = addstar(xp->xp_pattern, xp->xp_pattern_len, xp->xp_context);
     }
@@ -441,11 +441,8 @@ static int wildmenu_match_len(expand_T *xp, char *s)
 /// @param matches  list of matches
 static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int match, int showtail)
 {
-  int row;
-  char *buf;
   int len;
   int clen;                     // length in screen cells
-  int fillchar;
   int attr;
   int i;
   bool highlight = true;
@@ -460,7 +457,7 @@ static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int m
     return;
   }
 
-  buf = xmalloc((size_t)Columns * MB_MAXBYTES + 1);
+  char *buf = xmalloc((size_t)Columns * MB_MAXBYTES + 1);
 
   if (match == -1) {    // don't show match but original text
     match = 0;
@@ -483,13 +480,13 @@ static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int m
       clen += 2;
     }
     // jumping right, put match at the left
-    if ((long)clen > Columns) {
+    if (clen > Columns) {
       first_match = match;
       // if showing the last match, we can add some on the left
       clen = 2;
       for (i = match; i < num_matches; i++) {
         clen += wildmenu_match_len(xp, SHOW_MATCH(i)) + 2;
-        if ((long)clen >= Columns) {
+        if (clen >= Columns) {
           break;
         }
       }
@@ -501,14 +498,14 @@ static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int m
   if (add_left) {
     while (first_match > 0) {
       clen += wildmenu_match_len(xp, SHOW_MATCH(first_match - 1)) + 2;
-      if ((long)clen >= Columns) {
+      if (clen >= Columns) {
         break;
       }
       first_match--;
     }
   }
 
-  fillchar = fillchar_status(&attr, curwin);
+  int fillchar = fillchar_status(&attr, curwin);
 
   if (first_match == 0) {
     *buf = NUL;
@@ -567,7 +564,7 @@ static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int m
 
   buf[len] = NUL;
 
-  row = cmdline_row - 1;
+  int row = cmdline_row - 1;
   if (row >= 0) {
     if (wild_menu_showing == 0 || wild_menu_showing == WM_LIST) {
       if (msg_scrolled > 0) {
@@ -598,17 +595,17 @@ static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int m
 
     // Tricky: wildmenu can be drawn either over a status line, or at empty
     // scrolled space in the message output
-    ScreenGrid *grid = (wild_menu_showing == WM_SCROLLED)
-                        ? &msg_grid_adj : &default_grid;
+    grid_line_start((wild_menu_showing == WM_SCROLLED) ? &msg_grid_adj : &default_grid, row);
 
-    grid_puts(grid, buf, row, 0, attr);
+    grid_line_puts(0, buf, -1, attr);
     if (selstart != NULL && highlight) {
       *selend = NUL;
-      grid_puts(grid, selstart, row, selstart_col, HL_ATTR(HLF_WM));
+      grid_line_puts(selstart_col, selstart, -1, HL_ATTR(HLF_WM));
     }
 
-    grid_fill(grid, row, row + 1, clen, Columns,
-              fillchar, fillchar, attr);
+    grid_line_fill(clen, Columns, fillchar, attr);
+
+    grid_line_flush();
   }
 
   win_redraw_last_status(topframe);
@@ -616,14 +613,14 @@ static void redraw_wildmenu(expand_T *xp, int num_matches, char **matches, int m
 }
 
 /// Get the next or prev cmdline completion match. The index of the match is set
-/// in "p_findex"
-static char *get_next_or_prev_match(int mode, expand_T *xp, int *p_findex, char *orig_save)
+/// in "xp->xp_selected"
+static char *get_next_or_prev_match(int mode, expand_T *xp)
 {
   if (xp->xp_numfiles <= 0) {
     return NULL;
   }
 
-  int findex = *p_findex;
+  int findex = xp->xp_selected;
 
   if (mode == WILD_PREV) {
     if (findex == -1) {
@@ -677,14 +674,14 @@ static char *get_next_or_prev_match(int mode, expand_T *xp, int *p_findex, char 
 
   // When wrapping around, return the original string, set findex to -1.
   if (findex < 0) {
-    if (orig_save == NULL) {
+    if (xp->xp_orig == NULL) {
       findex = xp->xp_numfiles - 1;
     } else {
       findex = -1;
     }
   }
   if (findex >= xp->xp_numfiles) {
-    if (orig_save == NULL) {
+    if (xp->xp_orig == NULL) {
       findex = 0;
     } else {
       findex = -1;
@@ -696,9 +693,9 @@ static char *get_next_or_prev_match(int mode, expand_T *xp, int *p_findex, char 
   } else if (p_wmnu) {
     redraw_wildmenu(xp, xp->xp_numfiles, xp->xp_files, findex, cmd_showtail);
   }
-  *p_findex = findex;
+  xp->xp_selected = findex;
 
-  return xstrdup(findex == -1 ? orig_save : xp->xp_files[findex]);
+  return xstrdup(findex == -1 ? xp->xp_orig : xp->xp_files[findex]);
 }
 
 /// Start the command-line expansion and get the matches.
@@ -796,7 +793,7 @@ static char *find_longest_match(expand_T *xp, int options)
     }
   }
 
-  return xstrndup(xp->xp_files[0], len);
+  return xmemdupz(xp->xp_files[0], len);
 }
 
 /// Do wildcard expansion on the string "str".
@@ -805,8 +802,8 @@ static char *find_longest_match(expand_T *xp, int options)
 /// Return NULL for failure.
 ///
 /// "orig" is the originally expanded string, copied to allocated memory.  It
-/// should either be kept in orig_save or freed.  When "mode" is WILD_NEXT or
-/// WILD_PREV "orig" should be NULL.
+/// should either be kept in "xp->xp_orig" or freed.  When "mode" is WILD_NEXT
+/// or WILD_PREV "orig" should be NULL.
 ///
 /// Results are cached in xp->xp_files and xp->xp_numfiles, except when "mode"
 /// is WILD_EXPAND_FREE or WILD_ALL.
@@ -841,45 +838,43 @@ static char *find_longest_match(expand_T *xp, int options)
 char *ExpandOne(expand_T *xp, char *str, char *orig, int options, int mode)
 {
   char *ss = NULL;
-  static int findex;
-  static char *orig_save = NULL;      // kept value of orig
   int orig_saved = false;
 
   // first handle the case of using an old match
   if (mode == WILD_NEXT || mode == WILD_PREV
       || mode == WILD_PAGEUP || mode == WILD_PAGEDOWN
       || mode == WILD_PUM_WANT) {
-    return get_next_or_prev_match(mode, xp, &findex, orig_save);
+    return get_next_or_prev_match(mode, xp);
   }
 
   if (mode == WILD_CANCEL) {
-    ss = xstrdup(orig_save ? orig_save : "");
+    ss = xstrdup(xp->xp_orig ? xp->xp_orig : "");
   } else if (mode == WILD_APPLY) {
-    ss = xstrdup(findex == -1
-                 ? (orig_save ? orig_save : "")
-                 : xp->xp_files[findex]);
+    ss = xstrdup(xp->xp_selected == -1
+                 ? (xp->xp_orig ? xp->xp_orig : "")
+                 : xp->xp_files[xp->xp_selected]);
   }
 
   // free old names
   if (xp->xp_numfiles != -1 && mode != WILD_ALL && mode != WILD_LONGEST) {
     FreeWild(xp->xp_numfiles, xp->xp_files);
     xp->xp_numfiles = -1;
-    XFREE_CLEAR(orig_save);
+    XFREE_CLEAR(xp->xp_orig);
 
     // The entries from xp_files may be used in the PUM, remove it.
     if (compl_match_array != NULL) {
       cmdline_pum_remove();
     }
   }
-  findex = 0;
+  xp->xp_selected = 0;
 
   if (mode == WILD_FREE) {      // only release file name
     return NULL;
   }
 
   if (xp->xp_numfiles == -1 && mode != WILD_APPLY && mode != WILD_CANCEL) {
-    xfree(orig_save);
-    orig_save = orig;
+    xfree(xp->xp_orig);
+    xp->xp_orig = orig;
     orig_saved = true;
 
     ss = ExpandOne_start(mode, xp, str, options);
@@ -888,12 +883,11 @@ char *ExpandOne(expand_T *xp, char *str, char *orig, int options, int mode)
   // Find longest common part
   if (mode == WILD_LONGEST && xp->xp_numfiles > 0) {
     ss = find_longest_match(xp, options);
-    findex = -1;  // next p_wc gets first one
+    xp->xp_selected = -1;  // next p_wc gets first one
   }
 
   // Concatenate all matching names.  Unless interrupted, this can be slow
   // and the result probably won't be used.
-  // TODO(philix): use xstpcpy instead of strcat in a loop (ExpandOne)
   if (mode == WILD_ALL && xp->xp_numfiles > 0 && !got_int) {
     size_t len = 0;
     for (int i = 0; i < xp->xp_numfiles; i++) {
@@ -908,18 +902,19 @@ char *ExpandOne(expand_T *xp, char *str, char *orig, int options, int mode)
     }
     ss = xmalloc(len);
     *ss = NUL;
+    char *ssp = ss;
     for (int i = 0; i < xp->xp_numfiles; i++) {
       if (i > 0) {
         if (xp->xp_prefix == XP_PREFIX_NO) {
-          STRCAT(ss, "no");
+          ssp = xstpcpy(ssp, "no");
         } else if (xp->xp_prefix == XP_PREFIX_INV) {
-          STRCAT(ss, "inv");
+          ssp = xstpcpy(ssp, "inv");
         }
       }
-      STRCAT(ss, xp->xp_files[i]);
+      ssp = xstpcpy(ssp, xp->xp_files[i]);
 
       if (i != xp->xp_numfiles - 1) {
-        STRCAT(ss, (options & WILD_USE_NL) ? "\n" : " ");
+        ssp = xstpcpy(ssp, (options & WILD_USE_NL) ? "\n" : " ");
       }
     }
   }
@@ -928,7 +923,7 @@ char *ExpandOne(expand_T *xp, char *str, char *orig, int options, int mode)
     ExpandCleanup(xp);
   }
 
-  // Free "orig" if it wasn't stored in "orig_save".
+  // Free "orig" if it wasn't stored in "xp->xp_orig".
   if (!orig_saved) {
     xfree(orig);
   }
@@ -953,6 +948,7 @@ void ExpandCleanup(expand_T *xp)
     FreeWild(xp->xp_numfiles, xp->xp_files);
     xp->xp_numfiles = -1;
   }
+  XFREE_CLEAR(xp->xp_orig);
 }
 
 /// Display one line of completion matches. Multiple matches are displayed in
@@ -972,12 +968,12 @@ static void showmatches_oneline(expand_T *xp, char **matches, int numMatches, in
   int lastlen = 999;
   for (int j = linenr; j < numMatches; j += lines) {
     if (xp->xp_context == EXPAND_TAGS_LISTFILES) {
-      msg_outtrans_attr(matches[j], HL_ATTR(HLF_D));
+      msg_outtrans(matches[j], HL_ATTR(HLF_D));
       p = matches[j] + strlen(matches[j]) + 1;
       msg_advance(maxlen + 1);
       msg_puts(p);
       msg_advance(maxlen + 3);
-      msg_outtrans_long_attr(p + 2, HL_ATTR(HLF_D));
+      msg_outtrans_long(p + 2, HL_ATTR(HLF_D));
       break;
     }
     for (int i = maxlen - lastlen; --i >= 0;) {
@@ -1014,7 +1010,7 @@ static void showmatches_oneline(expand_T *xp, char **matches, int numMatches, in
       isdir = false;
       p = SHOW_MATCH(j);
     }
-    lastlen = msg_outtrans_attr(p, isdir ? dir_attr : 0);
+    lastlen = msg_outtrans(p, isdir ? dir_attr : 0);
   }
   if (msg_col > 0) {  // when not wrapped around
     msg_clr_eos();
@@ -1030,7 +1026,7 @@ int showmatches(expand_T *xp, int wildmenu)
   CmdlineInfo *const ccline = get_cmdline_info();
   int numMatches;
   char **matches;
-  int i, j;
+  int j;
   int maxlen;
   int lines;
   int columns;
@@ -1039,8 +1035,8 @@ int showmatches(expand_T *xp, int wildmenu)
 
   if (xp->xp_numfiles == -1) {
     set_expand_context(xp);
-    i = expand_cmdline(xp, ccline->cmdbuff, ccline->cmdpos,
-                       &numMatches, &matches);
+    int i = expand_cmdline(xp, ccline->cmdbuff, ccline->cmdpos,
+                           &numMatches, &matches);
     showtail = expand_showtail(xp);
     if (i != EXPAND_OK) {
       return i;
@@ -1078,7 +1074,7 @@ int showmatches(expand_T *xp, int wildmenu)
   } else {
     // find the length of the longest file name
     maxlen = 0;
-    for (i = 0; i < numMatches; i++) {
+    for (int i = 0; i < numMatches; i++) {
       if (!showtail && (xp->xp_context == EXPAND_FILES
                         || xp->xp_context == EXPAND_SHELLCMD
                         || xp->xp_context == EXPAND_BUFFERS)) {
@@ -1114,7 +1110,7 @@ int showmatches(expand_T *xp, int wildmenu)
     }
 
     // list the files line by line
-    for (i = 0; i < lines; i++) {
+    for (int i = 0; i < lines; i++) {
       showmatches_oneline(xp, matches, numMatches, lines, i, maxlen, showtail, attr);
       if (got_int) {
         got_int = false;
@@ -1138,11 +1134,10 @@ int showmatches(expand_T *xp, int wildmenu)
 /// Return the tail of file name path "s", ignoring a trailing "/".
 static char *showmatches_gettail(char *s, bool eager)
 {
-  char *p;
   char *t = s;
   bool had_sep = false;
 
-  for (p = s; *p != NUL;) {
+  for (char *p = s; *p != NUL;) {
     if (vim_ispathsep(*p)
 #ifdef BACKSLASH_IN_FILENAME
         && !rem_backslash(p)
@@ -1167,9 +1162,6 @@ static char *showmatches_gettail(char *s, bool eager)
 /// returned.
 static bool expand_showtail(expand_T *xp)
 {
-  char *s;
-  char *end;
-
   // When not completing file names a "/" may mean something different.
   if (xp->xp_context != EXPAND_FILES
       && xp->xp_context != EXPAND_SHELLCMD
@@ -1177,12 +1169,12 @@ static bool expand_showtail(expand_T *xp)
     return false;
   }
 
-  end = path_tail(xp->xp_pattern);
+  char *end = path_tail(xp->xp_pattern);
   if (end == xp->xp_pattern) {          // there is no path separator
     return false;
   }
 
-  for (s = xp->xp_pattern; s < end; s++) {
+  for (char *s = xp->xp_pattern; s < end; s++) {
     // Skip escaped wildcards.  Only when the backslash is not a path
     // separator, on DOS the '*' "path\*\file" must not be skipped.
     if (rem_backslash(s)) {
@@ -1206,10 +1198,6 @@ char *addstar(char *fname, size_t len, int context)
   FUNC_ATTR_NONNULL_RET
 {
   char *retval;
-  size_t i, j;
-  size_t new_len;
-  char *tail;
-  int ends_in_star;
 
   if (context != EXPAND_FILES
       && context != EXPAND_FILES_IN_PATH
@@ -1234,8 +1222,8 @@ char *addstar(char *fname, size_t len, int context)
         || context == EXPAND_LUA) {
       retval = xstrnsave(fname, len);
     } else {
-      new_len = len + 2;                // +2 for '^' at start, NUL at end
-      for (i = 0; i < len; i++) {
+      size_t new_len = len + 2;                // +2 for '^' at start, NUL at end
+      for (size_t i = 0; i < len; i++) {
         if (fname[i] == '*' || fname[i] == '~') {
           new_len++;                    // '*' needs to be replaced by ".*"
                                         // '~' needs to be replaced by "\~"
@@ -1254,8 +1242,8 @@ char *addstar(char *fname, size_t len, int context)
       retval = xmalloc(new_len);
       {
         retval[0] = '^';
-        j = 1;
-        for (i = 0; i < len; i++, j++) {
+        size_t j = 1;
+        for (size_t i = 0; i < len; i++, j++) {
           // Skip backslash.  But why?  At least keep it for custom
           // expansion.
           if (context != EXPAND_USER_DEFINED
@@ -1302,8 +1290,8 @@ char *addstar(char *fname, size_t len, int context)
     // $ could be anywhere in the tail.
     // ` could be anywhere in the file name.
     // When the name ends in '$' don't add a star, remove the '$'.
-    tail = path_tail(retval);
-    ends_in_star = (len > 0 && retval[len - 1] == '*');
+    char *tail = path_tail(retval);
+    int ends_in_star = (len > 0 && retval[len - 1] == '*');
 #ifndef BACKSLASH_IN_FILENAME
     for (ssize_t k = (ssize_t)len - 2; k >= 0; k--) {
       if (retval[k] != '\\') {
@@ -1558,6 +1546,20 @@ static void set_context_for_wildcard_arg(exarg_T *eap, const char *arg, bool use
       xp->xp_pattern++;
     }
   }
+}
+
+/// Set the completion context for the "++opt=arg" argument.  Always returns NULL.
+static const char *set_context_in_argopt(expand_T *xp, const char *arg)
+{
+  char *p = vim_strchr(arg, '=');
+  if (p == NULL) {
+    xp->xp_pattern = (char *)arg;
+  } else {
+    xp->xp_pattern = p + 1;
+  }
+
+  xp->xp_context = EXPAND_ARGOPT;
+  return NULL;
 }
 
 /// Set the completion context for the :filter command. Returns a pointer to the
@@ -2109,10 +2111,9 @@ static const char *set_context_by_cmdname(const char *cmd, cmdidx_T cmdidx, expa
     set_context_in_runtime_cmd(xp, arg);
     break;
 
-#ifdef HAVE_WORKING_LIBINTL
   case CMD_language:
     return set_context_in_lang_cmd(xp, arg);
-#endif
+
   case CMD_profile:
     set_context_in_profile_cmd(xp, arg);
     break;
@@ -2231,13 +2232,23 @@ static const char *set_one_cmd_context(expand_T *xp, const char *buff)
 
   const char *arg = skipwhite(p);
 
-  // Skip over ++argopt argument
-  if ((ea.argt & EX_ARGOPT) && *arg != NUL && strncmp(arg, "++", 2) == 0) {
-    p = arg;
-    while (*p && !ascii_isspace(*p)) {
-      MB_PTR_ADV(p);
+  // Does command allow "++argopt" argument?
+  if (ea.argt & EX_ARGOPT) {
+    while (*arg != NUL && strncmp(arg, "++", 2) == 0) {
+      p = arg + 2;
+      while (*p && !ascii_isspace(*p)) {
+        MB_PTR_ADV(p);
+      }
+
+      // Still touching the command after "++"?
+      if (*p == NUL) {
+        if (ea.argt & EX_ARGOPT) {
+          return set_context_in_argopt(xp, arg + 2);
+        }
+      }
+
+      arg = skipwhite(p);
     }
-    arg = skipwhite(p);
   }
 
   if (ea.cmdidx == CMD_write || ea.cmdidx == CMD_update) {
@@ -2442,15 +2453,23 @@ static int expand_files_and_dirs(expand_T *xp, char *pat, char ***matches, int *
     pat = xstrdup(pat);
     for (int i = 0; pat[i]; i++) {
       if (pat[i] == '\\') {
-        if (xp->xp_backslash == XP_BS_THREE
+        if (xp->xp_backslash & XP_BS_THREE
             && pat[i + 1] == '\\'
             && pat[i + 2] == '\\'
             && pat[i + 3] == ' ') {
           STRMOVE(pat + i, pat + i + 3);
-        }
-        if (xp->xp_backslash == XP_BS_ONE
-            && pat[i + 1] == ' ') {
+        } else if (xp->xp_backslash & XP_BS_ONE
+                   && pat[i + 1] == ' ') {
           STRMOVE(pat + i, pat + i + 1);
+        } else if ((xp->xp_backslash & XP_BS_COMMA)
+                   && pat[i + 1] == '\\'
+                   && pat[i + 2] == ',') {
+          STRMOVE(pat + i, pat + i + 2);
+#ifdef BACKSLASH_IN_FILENAME
+        } else if ((xp->xp_backslash & XP_BS_COMMA)
+                   && pat[i + 1] == ',') {
+          STRMOVE(pat + i, pat + i + 1);
+#endif
         }
       }
     }
@@ -2600,15 +2619,13 @@ static int ExpandOther(char *pat, expand_T *xp, regmatch_T *rmp, char ***matches
     { EXPAND_MENUNAMES, get_menu_names, false, true },
     { EXPAND_SYNTAX, get_syntax_name, true, true },
     { EXPAND_SYNTIME, get_syntime_arg, true, true },
-    { EXPAND_HIGHLIGHT, (ExpandFunc)get_highlight_name, true, false },
+    { EXPAND_HIGHLIGHT, get_highlight_name, true, false },
     { EXPAND_EVENTS, expand_get_event_name, true, false },
     { EXPAND_AUGROUP, expand_get_augroup_name, true, false },
     { EXPAND_SIGN, get_sign_name, true, true },
     { EXPAND_PROFILE, get_profile_name, true, true },
-#ifdef HAVE_WORKING_LIBINTL
     { EXPAND_LANGUAGE, get_lang_arg, true, false },
     { EXPAND_LOCALES, get_locales, true, false },
-#endif
     { EXPAND_ENV_VARS, get_env_name, true, true },
     { EXPAND_USER, get_users, true, false },
     { EXPAND_ARGLIST, get_arglist_name, true, false },
@@ -2695,8 +2712,7 @@ static int ExpandFromContext(expand_T *xp, char *pat, char ***matches, int *numM
     return OK;
   }
   if (xp->xp_context == EXPAND_OLD_SETTING) {
-    ExpandOldSetting(numMatches, matches);
-    return OK;
+    return ExpandOldSetting(numMatches, matches);
   }
   if (xp->xp_context == EXPAND_BUFFERS) {
     return ExpandBufnames(pat, numMatches, matches, options);
@@ -2766,8 +2782,14 @@ static int ExpandFromContext(expand_T *xp, char *pat, char ***matches, int *numM
   if (xp->xp_context == EXPAND_SETTINGS
       || xp->xp_context == EXPAND_BOOL_SETTINGS) {
     ret = ExpandSettings(xp, &regmatch, pat, numMatches, matches, fuzzy);
+  } else if (xp->xp_context == EXPAND_STRING_SETTING) {
+    ret = ExpandStringSetting(xp, &regmatch, numMatches, matches);
+  } else if (xp->xp_context == EXPAND_SETTING_SUBTRACT) {
+    ret = ExpandSettingSubtract(xp, &regmatch, numMatches, matches);
   } else if (xp->xp_context == EXPAND_MAPPINGS) {
     ret = ExpandMappings(pat, &regmatch, numMatches, matches);
+  } else if (xp->xp_context == EXPAND_ARGOPT) {
+    ret = expand_argopt(pat, xp, &regmatch, matches, numMatches);
   } else if (xp->xp_context == EXPAND_USER_DEFINED) {
     ret = ExpandUserDefined(pat, xp, &regmatch, matches, numMatches);
   } else {
@@ -2789,9 +2811,8 @@ static int ExpandFromContext(expand_T *xp, char *pat, char ***matches, int *numM
 /// program.  Matching strings are copied into an array, which is returned.
 ///
 /// @param func  returns a string from the list
-static void ExpandGeneric(const char *const pat, expand_T *xp, regmatch_T *regmatch,
-                          char ***matches, int *numMatches, CompleteListItemGetter func,
-                          int escaped)
+void ExpandGeneric(const char *const pat, expand_T *xp, regmatch_T *regmatch, char ***matches,
+                   int *numMatches, CompleteListItemGetter func, bool escaped)
 {
   const bool fuzzy = cmdline_fuzzy_complete(pat);
   *matches = NULL;
@@ -2817,7 +2838,7 @@ static void ExpandGeneric(const char *const pat, expand_T *xp, regmatch_T *regma
     int score = 0;
     if (xp->xp_pattern[0] != NUL) {
       if (!fuzzy) {
-        match = vim_regexec(regmatch, str, (colnr_T)0);
+        match = vim_regexec(regmatch, str, 0);
       } else {
         score = fuzzy_match_str(str, pat);
         match = (score != 0);
@@ -2864,8 +2885,10 @@ static void ExpandGeneric(const char *const pat, expand_T *xp, regmatch_T *regma
   // in the specified order.
   const bool sort_matches = !fuzzy
                             && xp->xp_context != EXPAND_MENUNAMES
+                            && xp->xp_context != EXPAND_STRING_SETTING
                             && xp->xp_context != EXPAND_MENUS
-                            && xp->xp_context != EXPAND_SCRIPTNAMES;
+                            && xp->xp_context != EXPAND_SCRIPTNAMES
+                            && xp->xp_context != EXPAND_ARGOPT;
 
   // <SNR> functions should be sorted to the end.
   const bool funcsort = xp->xp_context == EXPAND_EXPRESSION
@@ -2944,18 +2967,16 @@ static void expand_shellcmd_onedir(char *buf, char *s, size_t l, char *pat, char
 static void expand_shellcmd(char *filepat, char ***matches, int *numMatches, int flagsarg)
   FUNC_ATTR_NONNULL_ALL
 {
-  char *pat;
-  int i;
   char *path = NULL;
   garray_T ga;
   char *buf = xmalloc(MAXPATHL);
-  char *s, *e;
+  char *e;
   int flags = flagsarg;
   bool did_curdir = false;
 
   // for ":set path=" and ":set tags=" halve backslashes for escaped space
-  pat = xstrdup(filepat);
-  for (i = 0; pat[i]; i++) {
+  char *pat = xstrdup(filepat);
+  for (int i = 0; pat[i]; i++) {
     if (pat[i] == '\\' && pat[i + 1] == ' ') {
       STRMOVE(pat + i, pat + i + 1);
     }
@@ -2985,7 +3006,7 @@ static void expand_shellcmd(char *filepat, char ***matches, int *numMatches, int
   ga_init(&ga, (int)sizeof(char *), 10);
   hashtab_T found_ht;
   hash_init(&found_ht);
-  for (s = path;; s = e) {
+  for (char *s = path;; s = e) {
     e = vim_strchr(s, ENV_SEPCHAR);
     if (e == NULL) {
       e = s + strlen(s);
@@ -3034,7 +3055,6 @@ static void *call_user_expand_func(user_expand_func_T user_expand_func, expand_T
   CmdlineInfo *const ccline = get_cmdline_info();
   char keep = 0;
   typval_T args[4];
-  char *pat = NULL;
   const sctx_T save_current_sctx = current_sctx;
 
   if (xp->xp_arg == NULL || xp->xp_arg[0] == '\0' || xp->xp_line == NULL) {
@@ -3046,7 +3066,7 @@ static void *call_user_expand_func(user_expand_func_T user_expand_func, expand_T
     ccline->cmdbuff[ccline->cmdlen] = 0;
   }
 
-  pat = xstrnsave(xp->xp_pattern, xp->xp_pattern_len);
+  char *pat = xstrnsave(xp->xp_pattern, xp->xp_pattern_len);
   args[0].v_type = VAR_STRING;
   args[1].v_type = VAR_STRING;
   args[2].v_type = VAR_NUMBER;
@@ -3077,7 +3097,7 @@ static int ExpandUserDefined(const char *const pat, expand_T *xp, regmatch_T *re
   *matches = NULL;
   *numMatches = 0;
 
-  char *const retstr = call_user_expand_func((user_expand_func_T)call_func_retstr, xp);
+  char *const retstr = call_user_expand_func(call_func_retstr, xp);
   if (retstr == NULL) {
     return FAIL;
   }
@@ -3101,7 +3121,7 @@ static int ExpandUserDefined(const char *const pat, expand_T *xp, regmatch_T *re
     int score = 0;
     if (xp->xp_pattern[0] != NUL) {
       if (!fuzzy) {
-        match = vim_regexec(regmatch, s, (colnr_T)0);
+        match = vim_regexec(regmatch, s, 0);
       } else {
         score = fuzzy_match_str(s, pat);
         match = (score != 0);
@@ -3114,11 +3134,11 @@ static int ExpandUserDefined(const char *const pat, expand_T *xp, regmatch_T *re
 
     if (match) {
       if (!fuzzy) {
-        GA_APPEND(char *, &ga, xstrnsave(s, (size_t)(e - s)));
+        GA_APPEND(char *, &ga, xmemdupz(s, (size_t)(e - s)));
       } else {
         GA_APPEND(fuzmatch_str_T, &ga, ((fuzmatch_str_T){
           .idx = ga.ga_len,
-          .str = xstrnsave(s, (size_t)(e - s)),
+          .str = xmemdupz(s, (size_t)(e - s)),
           .score = score,
         }));
       }
@@ -3149,7 +3169,7 @@ static int ExpandUserList(expand_T *xp, char ***matches, int *numMatches)
 {
   *matches = NULL;
   *numMatches = 0;
-  list_T *const retlist = call_user_expand_func((user_expand_func_T)call_func_retlist, xp);
+  list_T *const retlist = call_user_expand_func(call_func_retlist, xp);
   if (retlist == NULL) {
     return FAIL;
   }
@@ -3222,8 +3242,7 @@ void globpath(char *path, char *file, garray_T *ga, int expand_options, bool dir
 
       char **p;
       int num_p = 0;
-      (void)ExpandFromContext(&xpc, buf, &p, &num_p,
-                              WILD_SILENT | expand_options);
+      (void)ExpandFromContext(&xpc, buf, &p, &num_p, WILD_SILENT | expand_options);
       if (num_p > 0) {
         ExpandEscape(&xpc, buf, num_p, p, WILD_SILENT | expand_options);
 
@@ -3476,7 +3495,6 @@ void wildmenu_cleanup(CmdlineInfo *cclp)
 /// "getcompletion()" function
 void f_getcompletion(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
-  char *pat;
   expand_T xpc;
   bool filtered = false;
   int options = WILD_SILENT | WILD_USE_NL | WILD_ADD_SLASH
@@ -3507,19 +3525,42 @@ void f_getcompletion(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   const char *pattern = tv_get_string(&argvars[0]);
 
   if (strcmp(type, "cmdline") == 0) {
-    set_one_cmd_context(&xpc, pattern);
+    const int cmdline_len = (int)strlen(pattern);
+    set_cmd_context(&xpc, (char *)pattern, cmdline_len, cmdline_len, false);
     xpc.xp_pattern_len = strlen(xpc.xp_pattern);
-    xpc.xp_col = (int)strlen(pattern);
+    xpc.xp_col = cmdline_len;
     goto theend;
   }
 
   ExpandInit(&xpc);
   xpc.xp_pattern = (char *)pattern;
   xpc.xp_pattern_len = strlen(xpc.xp_pattern);
+  xpc.xp_line = (char *)pattern;
+
   xpc.xp_context = cmdcomplete_str_to_type(type);
   if (xpc.xp_context == EXPAND_NOTHING) {
     semsg(_(e_invarg2), type);
     return;
+  }
+
+  if (xpc.xp_context == EXPAND_USER_DEFINED) {
+    // Must be "custom,funcname" pattern
+    if (strncmp(type, "custom,", 7) != 0) {
+      semsg(_(e_invarg2), type);
+      return;
+    }
+
+    xpc.xp_arg = (char *)(type + 7);
+  }
+
+  if (xpc.xp_context == EXPAND_USER_LIST) {
+    // Must be "customlist,funcname" pattern
+    if (strncmp(type, "customlist,", 11) != 0) {
+      semsg(_(e_invarg2), type);
+      return;
+    }
+
+    xpc.xp_arg = (char *)(type + 11);
   }
 
   if (xpc.xp_context == EXPAND_MENUS) {
@@ -3536,6 +3577,8 @@ void f_getcompletion(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
   }
 
 theend:
+  ;
+  char *pat;
   if (cmdline_fuzzy_completion_supported(&xpc)) {
     // when fuzzy matching, don't modify the search string
     pat = xstrdup(xpc.xp_pattern);

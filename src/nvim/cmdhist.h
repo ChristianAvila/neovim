@@ -1,6 +1,6 @@
-#ifndef NVIM_CMDHIST_H
-#define NVIM_CMDHIST_H
+#pragma once
 
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/os/time.h"
@@ -30,4 +30,3 @@ typedef struct hist_entry {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "cmdhist.h.generated.h"
 #endif
-#endif  // NVIM_CMDHIST_H

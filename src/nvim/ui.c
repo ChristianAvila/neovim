@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -30,6 +27,7 @@
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/time.h"
 #include "nvim/strings.h"
 #include "nvim/ui.h"
@@ -37,6 +35,7 @@
 #include "nvim/ui_compositor.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
+#include "nvim/winfloat.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "ui.c.generated.h"
@@ -127,7 +126,7 @@ void ui_free_all_mem(void)
   kv_destroy(call_buf);
 
   UIEventCallback *event_cb;
-  pmap_foreach_value(&ui_event_cbs, event_cb, {
+  map_foreach_value(&ui_event_cbs, event_cb, {
     free_ui_event_callback(event_cb);
   })
   map_destroy(uint32_t, &ui_event_cbs);
@@ -229,7 +228,7 @@ void ui_refresh(void)
   p_lz = save_p_lz;
 
   if (ext_widgets[kUIMessages]) {
-    set_option_value("cmdheight", 0L, NULL, 0);
+    set_option_value("cmdheight", NUMBER_OPTVAL(0), 0);
     command_height();
   }
   ui_mode_info_set();
@@ -332,7 +331,17 @@ void vim_beep(unsigned val)
   // comes from.
   if (vim_strchr(p_debug, 'e') != NULL) {
     msg_source(HL_ATTR(HLF_W));
-    msg_attr(_("Beep!"), HL_ATTR(HLF_W));
+    msg(_("Beep!"), HL_ATTR(HLF_W));
+  }
+}
+
+/// Trigger UIEnter for all attached UIs.
+/// Used on startup after VimEnter.
+void do_autocmd_uienter_all(void)
+{
+  for (size_t i = 0; i < ui_count; i++) {
+    UIData *data = uis[i]->data;
+    do_autocmd_uienter(data->channel_id, true);
   }
 }
 
@@ -439,7 +448,7 @@ void ui_line(ScreenGrid *grid, int row, int startcol, int endcol, int clearcol, 
     ui_call_grid_cursor_goto(grid->handle, row,
                              MIN(clearcol, (int)grid->cols - 1));
     ui_call_flush();
-    uint64_t wd = (uint64_t)labs(p_wd);
+    uint64_t wd = (uint64_t)llabs(p_wd);
     os_sleep(wd);
     pending_cursor_update = true;  // restore the cursor later
   }
@@ -522,7 +531,7 @@ void ui_flush(void)
   ui_call_flush();
 
   if (p_wd && (rdb_flags & RDB_FLUSH)) {
-    os_sleep((uint64_t)labs(p_wd));
+    os_sleep((uint64_t)llabs(p_wd));
   }
 }
 
@@ -615,7 +624,10 @@ Array ui_array(void)
 
     // TUI fields. (`stdin_fd` is intentionally omitted.)
     PUT(info, "term_name", CSTR_TO_OBJ(ui->term_name));
-    PUT(info, "term_background", CSTR_TO_OBJ(ui->term_background));
+
+    // term_background is deprecated. Populate with an empty string
+    PUT(info, "term_background", CSTR_TO_OBJ(""));
+
     PUT(info, "term_colors", INTEGER_OBJ(ui->term_colors));
     PUT(info, "stdin_tty", BOOLEAN_OBJ(ui->stdin_tty));
     PUT(info, "stdout_tty", BOOLEAN_OBJ(ui->stdout_tty));
@@ -661,7 +673,7 @@ void ui_call_event(char *name, Array args)
 {
   UIEventCallback *event_cb;
   bool handled = false;
-  pmap_foreach_value(&ui_event_cbs, event_cb, {
+  map_foreach_value(&ui_event_cbs, event_cb, {
     Error err = ERROR_INIT;
     Object res = nlua_call_ref(event_cb->cb, name, args, false, &err);
     if (res.type == kObjectTypeBoolean && res.data.boolean == true) {
@@ -687,7 +699,7 @@ void ui_cb_update_ext(void)
   for (size_t i = 0; i < kUIGlobalCount; i++) {
     UIEventCallback *event_cb;
 
-    pmap_foreach_value(&ui_event_cbs, event_cb, {
+    map_foreach_value(&ui_event_cbs, event_cb, {
       if (event_cb->ext_widgets[i]) {
         ui_cb_ext[i] = true;
         break;
@@ -723,7 +735,7 @@ void ui_add_cb(uint32_t ns_id, LuaRef cb, bool *ext_widgets)
 
 void ui_remove_cb(uint32_t ns_id)
 {
-  if (pmap_has(uint32_t)(&ui_event_cbs, ns_id)) {
+  if (map_has(uint32_t, &ui_event_cbs, ns_id)) {
     UIEventCallback *item = pmap_del(uint32_t)(&ui_event_cbs, ns_id, NULL);
     free_ui_event_callback(item);
   }

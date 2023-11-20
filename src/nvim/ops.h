@@ -1,5 +1,4 @@
-#ifndef NVIM_OPS_H
-#define NVIM_OPS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -11,6 +10,7 @@
 #include "nvim/extmark.h"
 #include "nvim/macros.h"
 #include "nvim/normal.h"
+#include "nvim/option_defs.h"
 #include "nvim/os/time.h"
 #include "nvim/pos.h"
 #include "nvim/types.h"
@@ -136,6 +136,4 @@ static inline bool is_literal_register(const int regname)
 # include "ops.h.generated.h"
 #endif
 
-EXTERN LuaRef repeat_luaref INIT(= LUA_NOREF);  ///< LuaRef for "."
-
-#endif  // NVIM_OPS_H
+EXTERN LuaRef repeat_luaref INIT( = LUA_NOREF);  ///< LuaRef for "."

@@ -1,6 +1,6 @@
 local options_file = arg[1]
 
-local opt_fd = io.open(options_file, 'w')
+local opt_fd = assert(io.open(options_file, 'w'))
 
 local w = function(s)
   if s:match('^    %.') then
@@ -10,6 +10,7 @@ local w = function(s)
   end
 end
 
+--- @module 'nvim.options'
 local options = require('options')
 
 local cstr = options.cstr
@@ -34,11 +35,16 @@ local redraw_flags={
 local list_flags={
   comma='P_COMMA',
   onecomma='P_ONECOMMA',
+  commacolon='P_COMMA|P_COLON',
+  onecommacolon='P_ONECOMMA|P_COLON',
   flags='P_FLAGLIST',
   flagscomma='P_COMMA|P_FLAGLIST',
 }
 
-local get_flags = function(o)
+--- @param o vim.option_meta
+--- @return string
+local function get_flags(o)
+  --- @type string[]
   local ret = {type_flags[o.type]}
   local add_flag = function(f)
     ret[1] = ret[1] .. '|' .. f
@@ -81,8 +87,10 @@ local get_flags = function(o)
   return ret[1]
 end
 
-local get_cond
-get_cond = function(c, base_string)
+--- @param c string|string[]
+--- @param base_string? string
+--- @return string
+local function get_cond(c, base_string)
   local cond_string = base_string or '#if '
   if type(c) == 'table' then
     cond_string = cond_string .. get_cond(c[1], '')
@@ -104,11 +112,11 @@ local value_dumpers = {
   string=cstr,
   boolean=function(v) return v and 'true' or 'false' end,
   number=function(v) return ('%iL'):format(v) end,
-  ['nil']=function(_) return '0L' end,
+  ['nil']=function(_) return '0' end,
 }
 
 local get_value = function(v)
-  return '(char *) ' .. value_dumpers[type(v)](v)
+  return '(void *) ' .. value_dumpers[type(v)](v)
 end
 
 local get_defaults = function(d,n)
@@ -118,9 +126,12 @@ local get_defaults = function(d,n)
   return get_value(d)
 end
 
+--- @type {[1]:string,[2]:string}[]
 local defines = {}
 
-local dump_option = function(i, o)
+--- @param i integer
+--- @param o vim.option_meta
+local function dump_option(i, o)
   w('  [' .. ('%u'):format(i - 1) .. ']={')
   w('    .fullname=' .. cstr(o.full_name))
   if o.abbreviation then
@@ -131,7 +142,7 @@ local dump_option = function(i, o)
     w(get_cond(o.enable_if))
   end
   if o.varname then
-    w('    .var=(char *)&' .. o.varname)
+    w('    .var=&' .. o.varname)
   elseif #o.scope == 1 and o.scope[1] == 'window' then
     w('    .var=VAR_WIN')
   end
@@ -157,6 +168,9 @@ local dump_option = function(i, o)
   if o.cb then
     w('    .opt_did_set_cb=' .. o.cb)
   end
+  if o.expand_cb then
+    w('    .opt_expand_cb=' .. o.expand_cb)
+  end
   if o.enable_if then
     w('#else')
     w('    .var=NULL')
@@ -179,7 +193,19 @@ local dump_option = function(i, o)
   w('  },')
 end
 
-w('static vimoption_T options[] = {')
+w([[
+#include "nvim/ex_getln.h"
+#include "nvim/insexpand.h"
+#include "nvim/mapping.h"
+#include "nvim/ops.h"
+#include "nvim/option.h"
+#include "nvim/optionstr.h"
+#include "nvim/quickfix.h"
+#include "nvim/runtime.h"
+#include "nvim/tag.h"
+#include "nvim/window.h"
+
+static vimoption_T options[] = {]])
 for i, o in ipairs(options.options) do
   dump_option(i, o)
 end

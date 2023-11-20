@@ -1,5 +1,4 @@
-#ifndef NVIM_CHANNEL_H
-#define NVIM_CHANNEL_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -108,9 +107,9 @@ struct Channel {
   bool callback_scheduled;
 };
 
-EXTERN PMap(uint64_t) channels INIT(= MAP_INIT);
+EXTERN PMap(uint64_t) channels INIT( = MAP_INIT);
 
-EXTERN Callback on_print INIT(= CALLBACK_INIT);
+EXTERN Callback on_print INIT( = CALLBACK_INIT);
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "channel.h.generated.h"
@@ -161,5 +160,3 @@ static inline Stream *channel_outstream(Channel *chan)
   }
   abort();
 }
-
-#endif  // NVIM_CHANNEL_H

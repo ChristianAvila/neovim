@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // highlight_group.c: code for managing highlight groups
 
 #include <ctype.h>
@@ -10,25 +7,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "klib/kvec.h"
+#include "nvim/api/keysets.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/private/validate.h"
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
-#include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/cursor_shape.h"
 #include "nvim/decoration_provider.h"
 #include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/vars.h"
-#include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/garray.h"
 #include "nvim/gettext.h"
 #include "nvim/globals.h"
-#include "nvim/grid_defs.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_group.h"
 #include "nvim/lua/executor.h"
@@ -37,6 +34,7 @@
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/time.h"
 #include "nvim/runtime.h"
 #include "nvim/strings.h"
@@ -162,6 +160,7 @@ static const char *highlight_init_both[] = {
   "default link QuickFixLine Search",
   "default link CursorLineSign SignColumn",
   "default link CursorLineFold FoldColumn",
+  "default link CurSearch Search",
   "default link PmenuKind Pmenu",
   "default link PmenuKindSel PmenuSel",
   "default link PmenuExtra Pmenu",
@@ -172,6 +171,7 @@ static const char *highlight_init_both[] = {
   "default link NormalFloat Pmenu",
   "default link FloatBorder WinSeparator",
   "default link FloatTitle Title",
+  "default link FloatFooter Title",
   "default FloatShadow blend=80 guibg=Black",
   "default FloatShadowThrough blend=100 guibg=Black",
   "RedrawDebugNormal cterm=reverse gui=reverse",
@@ -231,6 +231,8 @@ static const char *highlight_init_both[] = {
   "default link DiagnosticSignOk DiagnosticOk",
   "default DiagnosticDeprecated cterm=strikethrough gui=strikethrough guisp=Red",
   "default link DiagnosticUnnecessary Comment",
+  "default link LspInlayHint NonText",
+  "default link SnippetTabstop Visual",
 
   // Text
   "default link @text.literal Comment",
@@ -696,20 +698,8 @@ int load_colors(char *name)
   size_t buflen = strlen(name) + 12;
   char *buf = xmalloc(buflen);
   apply_autocmds(EVENT_COLORSCHEMEPRE, name, curbuf->b_fname, false, curbuf);
-  snprintf(buf, buflen, "colors/%s.vim", name);
-  int retval = source_runtime(buf, 0);
-  if (retval == FAIL) {
-    snprintf(buf, buflen, "colors/%s.lua", name);
-    retval = source_runtime(buf, 0);
-  }
-  if (retval == FAIL) {
-    snprintf(buf, buflen, "colors/%s.vim", name);
-    retval = source_runtime(buf, DIP_NORTP + DIP_START + DIP_OPT);
-  }
-  if (retval == FAIL) {
-    snprintf(buf, buflen, "colors/%s.lua", name);
-    retval = source_runtime(buf, DIP_NORTP + DIP_START + DIP_OPT);
-  }
+  snprintf(buf, buflen, "colors/%s.*", name);
+  int retval = source_runtime_vim_lua(buf, DIP_START + DIP_OPT);
   xfree(buf);
   if (retval == OK) {
     apply_autocmds(EVENT_COLORSCHEME, name, curbuf->b_fname, false, curbuf);
@@ -808,11 +798,10 @@ int lookup_color(const int idx, const bool foreground, TriState *const boldp)
 void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
 {
   int idx = id - 1;  // Index is ID minus one.
-
   bool is_default = attrs.rgb_ae_attr & HL_DEFAULT;
 
   // Return if "default" was used and the group already has settings
-  if (is_default && hl_has_settings(idx, true)) {
+  if (is_default && hl_has_settings(idx, true) && !dict->force) {
     return;
   }
 
@@ -833,7 +822,7 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
     g->sg_link = 0;
   }
 
-  g->sg_gui = attrs.rgb_ae_attr;
+  g->sg_gui = attrs.rgb_ae_attr &~HL_DEFAULT;
 
   g->sg_rgb_fg = attrs.rgb_fg_color;
   g->sg_rgb_bg = attrs.rgb_bg_color;
@@ -842,9 +831,11 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
   struct {
     int *dest; RgbValue val; Object name;
   } cattrs[] = {
-    { &g->sg_rgb_fg_idx, g->sg_rgb_fg, HAS_KEY(dict->fg) ? dict->fg : dict->foreground },
-    { &g->sg_rgb_bg_idx, g->sg_rgb_bg, HAS_KEY(dict->bg) ? dict->bg : dict->background },
-    { &g->sg_rgb_sp_idx, g->sg_rgb_sp, HAS_KEY(dict->sp) ? dict->sp : dict->special },
+    { &g->sg_rgb_fg_idx, g->sg_rgb_fg,
+      HAS_KEY(dict, highlight, fg) ? dict->fg : dict->foreground },
+    { &g->sg_rgb_bg_idx, g->sg_rgb_bg,
+      HAS_KEY(dict, highlight, bg) ? dict->bg : dict->background },
+    { &g->sg_rgb_sp_idx, g->sg_rgb_sp, HAS_KEY(dict, highlight, sp) ? dict->sp : dict->special },
     { NULL, -1, NIL },
   };
 
@@ -858,7 +849,7 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
     }
   }
 
-  g->sg_cterm = attrs.cterm_ae_attr;
+  g->sg_cterm = attrs.cterm_ae_attr &~HL_DEFAULT;
   g->sg_cterm_bg = attrs.cterm_bg_color;
   g->sg_cterm_fg = attrs.cterm_fg_color;
   g->sg_cterm_bold = g->sg_cterm & HL_BOLD;
@@ -873,9 +864,17 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
   if (strcmp(g->sg_name_u, "NORMAL") == 0) {
     cterm_normal_fg_color = g->sg_cterm_fg;
     cterm_normal_bg_color = g->sg_cterm_bg;
+    bool did_changed = false;
+    if (normal_bg != g->sg_rgb_bg || normal_fg != g->sg_rgb_fg || normal_sp != g->sg_rgb_sp) {
+      did_changed = true;
+    }
     normal_fg = g->sg_rgb_fg;
     normal_bg = g->sg_rgb_bg;
     normal_sp = g->sg_rgb_sp;
+
+    if (did_changed) {
+      highlight_attr_set_all();
+    }
     ui_default_colors_set();
   } else {
     // a cursor style uses this syn_id, make sure its attribute is updated.
@@ -958,7 +957,7 @@ void do_highlight(const char *line, const bool forceit, const bool init)
 
     from_end = skiptowhite(from_start);
     to_start = skipwhite(from_end);
-    to_end   = skiptowhite(to_start);
+    to_end = skiptowhite(to_start);
 
     if (ends_excmd((uint8_t)(*from_start))
         || ends_excmd((uint8_t)(*to_start))) {
@@ -1280,7 +1279,7 @@ void do_highlight(const char *line, const bool forceit, const bool init)
                   if (dark != -1
                       && dark != (*p_bg == 'd')
                       && !option_was_set("bg")) {
-                    set_option_value_give_err("bg", 0L, (dark ? "dark" : "light"), 0);
+                    set_option_value_give_err("bg", CSTR_AS_OPTVAL(dark ? "dark" : "light"), 0);
                     reset_option_was_set("bg");
                   }
                 }
@@ -1448,7 +1447,7 @@ void restore_cterm_colors(void)
 /// @param check_link  if true also check for an existing link.
 ///
 /// @return true if highlight group "idx" has any settings.
-static int hl_has_settings(int idx, bool check_link)
+static bool hl_has_settings(int idx, bool check_link)
 {
   return hl_table[idx].sg_cleared == 0
          && (hl_table[idx].sg_attr != 0
@@ -1531,7 +1530,7 @@ static void highlight_list_one(const int id)
     didh = true;
     msg_puts_attr("links to", HL_ATTR(HLF_D));
     msg_putchar(' ');
-    msg_outtrans(hl_table[hl_table[id - 1].sg_link - 1].sg_name);
+    msg_outtrans(hl_table[hl_table[id - 1].sg_link - 1].sg_name, 0);
   }
 
   if (!didh) {
@@ -1573,19 +1572,18 @@ static bool hlgroup2dict(Dictionary *hl, NS ns_id, int hl_id, Arena *arena)
 
 Dictionary ns_get_hl_defs(NS ns_id, Dict(get_highlight) *opts, Arena *arena, Error *err)
 {
-  Boolean link = api_object_to_bool(opts->link, "link", true, err);
+  Boolean link = GET_BOOL_OR_TRUE(opts, get_highlight, link);
   int id = -1;
-  if (opts->name.type != kObjectTypeNil) {
-    VALIDATE_T("highlight name", kObjectTypeString, opts->name.type, {
-      goto cleanup;
-    });
-    String name = opts->name.data.string;
-    id = syn_check_group(name.data, name.size);
-  } else if (opts->id.type != kObjectTypeNil) {
-    VALIDATE_T("highlight id", kObjectTypeInteger, opts->id.type, {
-      goto cleanup;
-    });
-    id = (int)opts->id.data.integer;
+  if (HAS_KEY(opts, get_highlight, name)) {
+    Boolean create = GET_BOOL_OR_TRUE(opts, get_highlight, create);
+    id = create ? syn_check_group(opts->name.data, opts->name.size)
+                : syn_name2id_len(opts->name.data, opts->name.size);
+    if (id == 0 && !create) {
+      Dictionary attrs = ARRAY_DICT_INIT;
+      return attrs;
+    }
+  } else if (HAS_KEY(opts, get_highlight, id)) {
+    id = (int)opts->id;
   }
 
   if (id != -1) {
@@ -1665,7 +1663,7 @@ static bool highlight_list_arg(const int id, bool didh, const int type, int iarg
       msg_puts_attr(name, HL_ATTR(HLF_D));
       msg_puts_attr("=", HL_ATTR(HLF_D));
     }
-    msg_outtrans(ts);
+    msg_outtrans(ts, 0);
   }
   return didh;
 }
@@ -1795,7 +1793,7 @@ bool syn_list_header(const bool did_header, const int outlen, const int id, bool
     if (got_int) {
       return true;
     }
-    msg_outtrans(hl_table[id - 1].sg_name);
+    msg_outtrans(hl_table[id - 1].sg_name, 0);
     name_col = msg_col;
     endcol = 15;
   } else if ((ui_has(kUIMessages) || msg_silent) && !force_newline) {
@@ -1951,13 +1949,13 @@ int syn_check_group(const char *name, size_t len)
 /// @see syn_check_group
 static int syn_add_group(const char *name, size_t len)
 {
-  // Check that the name is ASCII letters, digits and underscore.
+  // Check that the name is valid (ASCII letters, digits, '_', '.', '@', '-').
   for (size_t i = 0; i < len; i++) {
     int c = (uint8_t)name[i];
     if (!vim_isprintc(c)) {
       emsg(_("E669: Unprintable character in group name"));
       return 0;
-    } else if (!ASCII_ISALNUM(c) && c != '_' && c != '.' && c != '@') {
+    } else if (!ASCII_ISALNUM(c) && c != '_' && c != '.' && c != '@' && c != '-') {
       // '.' and '@' are allowed characters for use with treesitter capture names.
       msg_source(HL_ATTR(HLF_W));
       emsg(_(e_highlight_group_name_invalid_char));
@@ -2174,8 +2172,7 @@ void highlight_changed(void)
       id_S = final_id;
     }
 
-    highlight_attr[hlf] = hl_get_ui_attr(ns_id, hlf, final_id,
-                                         (hlf == HLF_INACTIVE || hlf == HLF_LC));
+    highlight_attr[hlf] = hl_get_ui_attr(ns_id, hlf, final_id, hlf == HLF_INACTIVE);
 
     if (highlight_attr[hlf] != highlight_attr_last[hlf]) {
       if (hlf == HLF_MSG) {
@@ -2288,14 +2285,14 @@ static void highlight_list_two(int cnt, int attr)
   msg_puts_attr(&("N \bI \b!  \b"[cnt / 11]), attr);
   msg_clr_eos();
   ui_flush();
-  os_delay(cnt == 99 ? 40L : (uint64_t)cnt * 50L, false);
+  os_delay(cnt == 99 ? 40 : (uint64_t)cnt * 50, false);
 }
 
 /// Function given to ExpandGeneric() to obtain the list of group names.
-const char *get_highlight_name(expand_T *const xp, int idx)
+char *get_highlight_name(expand_T *const xp, int idx)
   FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  return get_highlight_name_ext(xp, idx, true);
+  return (char *)get_highlight_name_ext(xp, idx, true);
 }
 
 /// Obtain a highlight group name.

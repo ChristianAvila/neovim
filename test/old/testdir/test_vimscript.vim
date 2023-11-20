@@ -3109,7 +3109,7 @@ endfunc
 "	    should be given.
 "
 "	    This test reuses the function MESSAGES() from the previous test.
-"	    This functions checks the messages in g:msgfile.
+"	    This function checks the messages in g:msgfile.
 "-------------------------------------------------------------------------------
 
 func Test_nested_while_error()
@@ -3236,7 +3236,7 @@ endfunc
 "	    error messages should be given.
 "
 "	    This test reuses the function MESSAGES() from the previous test.
-"	    This functions checks the messages in g:msgfile.
+"	    This function checks the messages in g:msgfile.
 "-------------------------------------------------------------------------------
 
 func Test_nested_cont_break_error()
@@ -3344,7 +3344,7 @@ endfunc
 "	    should be given.
 "
 "	    This test reuses the function MESSAGES() from the previous test.
-"	    This functions checks the messages in g:msgfile.
+"	    This function check the messages in g:msgfile.
 "-------------------------------------------------------------------------------
 
 func Test_nested_endtry_error()
@@ -3641,7 +3641,7 @@ endfunc
 "	    exceptions.
 "-------------------------------------------------------------------------------
 
-func Test_execption_info_for_error()
+func Test_exception_info_for_error()
   CheckEnglish
 
   let test =<< trim [CODE]
@@ -6997,7 +6997,7 @@ func Test_compound_assignment_operators()
     call assert_equal(6, &scrolljump)
     let &scrolljump %= 5
     call assert_equal(1, &scrolljump)
-    call assert_fails('let &scrolljump .= "j"', 'E734:')
+    call assert_fails('let &scrolljump .= "j"', ['E734:', 'E734:'])
     set scrolljump&vim
 
     let &foldlevelstart = 2
@@ -7249,30 +7249,30 @@ func Test_deep_nest()
 
   " Deep nesting of if ... endif
   call term_sendkeys(buf, ":call Test1()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E579:', term_getline(buf, 5))})
 
   " Deep nesting of for ... endfor
   call term_sendkeys(buf, ":call Test2()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E585:', term_getline(buf, 5))})
 
   " Deep nesting of while ... endwhile
   call term_sendkeys(buf, ":call Test3()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E585:', term_getline(buf, 5))})
 
   " Deep nesting of try ... endtry
   call term_sendkeys(buf, ":call Test4()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E601:', term_getline(buf, 5))})
 
   " Deep nesting of function ... endfunction
   call term_sendkeys(buf, ":call Test5()\n")
-  call term_wait(buf)
+  call TermWait(buf)
   call WaitForAssert({-> assert_match('^E1058:', term_getline(buf, 4))})
   call term_sendkeys(buf, "\<C-C>\n")
-  call term_wait(buf)
+  call TermWait(buf)
 
   "let l = ''
   "for i in range(1, 6)

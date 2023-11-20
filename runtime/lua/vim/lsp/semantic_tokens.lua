@@ -1,6 +1,7 @@
 local api = vim.api
 local bit = require('bit')
 local handlers = require('vim.lsp.handlers')
+local ms = require('vim.lsp.protocol').Methods
 local util = require('vim.lsp.util')
 local uv = vim.uv
 
@@ -13,11 +14,11 @@ local uv = vim.uv
 --- @field marked boolean whether this token has had extmarks applied
 ---
 --- @class STCurrentResult
---- @field version integer document version associated with this result
---- @field result_id string resultId from the server; used with delta requests
---- @field highlights STTokenRange[] cache of highlight ranges for this document version
---- @field tokens integer[] raw token array as received by the server. used for calculating delta responses
---- @field namespace_cleared boolean whether the namespace was cleared for this result yet
+--- @field version? integer document version associated with this result
+--- @field result_id? string resultId from the server; used with delta requests
+--- @field highlights? STTokenRange[] cache of highlight ranges for this document version
+--- @field tokens? integer[] raw token array as received by the server. used for calculating delta responses
+--- @field namespace_cleared? boolean whether the namespace was cleared for this result yet
 ---
 --- @class STActiveRequest
 --- @field request_id integer the LSP request ID of the most recent request sent to the server
@@ -41,8 +42,6 @@ local STHighlighter = { active = {} }
 ---
 --- Return the index i in range such that tokens[j].line < line for all j < i, and
 --- tokens[j].line >= line for all j >= i, or return hi if no such index is found.
----
----@private
 local function lower_bound(tokens, line, lo, hi)
   while lo < hi do
     local mid = bit.rshift(lo + hi, 1) -- Equivalent to floor((lo + hi) / 2).
@@ -59,8 +58,6 @@ end
 ---
 --- Return the index i in range such that tokens[j].line <= line for all j < i, and
 --- tokens[j].line > line for all j >= i, or return hi if no such index is found.
----
----@private
 local function upper_bound(tokens, line, lo, hi)
   while lo < hi do
     local mid = bit.rshift(lo + hi, 1) -- Equivalent to floor((lo + hi) / 2).
@@ -75,7 +72,6 @@ end
 
 --- Extracts modifier strings from the encoded number in the token array
 ---
----@private
 ---@return table<string, boolean>
 local function modifiers_from_number(x, modifiers_table)
   local modifiers = {}
@@ -93,7 +89,6 @@ end
 
 --- Converts a raw token list to a list of highlight ranges used by the on_win callback
 ---
----@private
 ---@return STTokenRange[]
 local function tokens_to_ranges(data, bufnr, client, request)
   local legend = client.server_capabilities.semanticTokensProvider.legend
@@ -137,7 +132,6 @@ local function tokens_to_ranges(data, bufnr, client, request)
     local token_type = token_types[data[i + 3] + 1]
     local modifiers = modifiers_from_number(data[i + 4], token_modifiers)
 
-    ---@private
     local function _get_byte_pos(col)
       if col > 0 then
         local buf_line = lines[line + 1] or ''
@@ -299,7 +293,7 @@ function STHighlighter:send_request()
       local hasEditProvider = type(spec) == 'table' and spec.delta
 
       local params = { textDocument = util.make_text_document_params(self.bufnr) }
-      local method = 'textDocument/semanticTokens/full'
+      local method = ms.textDocument_semanticTokens_full
 
       if hasEditProvider and current_result.result_id then
         method = method .. '/delta'
@@ -561,9 +555,10 @@ local M = {}
 --- delete the semanticTokensProvider table from the {server_capabilities} of
 --- your client in your |LspAttach| callback or your configuration's
 --- `on_attach` callback:
---- <pre>lua
----   client.server_capabilities.semanticTokensProvider = nil
---- </pre>
+---
+--- ```lua
+--- client.server_capabilities.semanticTokensProvider = nil
+--- ```
 ---
 ---@param bufnr integer
 ---@param client_id integer
@@ -723,8 +718,7 @@ end
 --- mark will be deleted by the semantic token engine when appropriate; for
 --- example, when the LSP sends updated tokens. This function is intended for
 --- use inside |LspTokenUpdate| callbacks.
----@param token (table) a semantic token, found as `args.data.token` in
----       |LspTokenUpdate|.
+---@param token (table) a semantic token, found as `args.data.token` in |LspTokenUpdate|.
 ---@param bufnr (integer) the buffer to highlight
 ---@param client_id (integer) The ID of the |vim.lsp.client|
 ---@param hl_group (string) Highlight group name
@@ -762,7 +756,7 @@ end
 --- the BufWinEnter event should take care of it next time it's displayed.
 ---
 ---@see https://microsoft.github.io/language-server-protocol/specifications/specification-current/#semanticTokens_refreshRequest
-handlers['workspace/semanticTokens/refresh'] = function(err, _, ctx)
+handlers[ms.workspace_semanticTokens_refresh] = function(err, _, ctx)
   if err then
     return vim.NIL
   end

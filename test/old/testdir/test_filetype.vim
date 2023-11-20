@@ -40,9 +40,35 @@ func Test_other_type()
   filetype off
 endfunc
 
+" If $XDG_CONFIG_HOME is set return "fname" expanded in a list.
+" Otherwise return an empty list.
+func s:WhenConfigHome(fname)
+  if exists('$XDG_CONFIG_HOME')
+    return [expand(a:fname)]
+  endif
+  return []
+endfunc
+
+" Return the name used for the $XDG_CONFIG_HOME directory.
+func s:GetConfigHome()
+  return getcwd() .. '/Xdg_config_home'
+endfunc
+
+" saved value of $XDG_CONFIG_HOME
+let s:saveConfigHome = ''
+
+func s:SetupConfigHome()
+  " Nvim on Windows may use $XDG_CONFIG_HOME, and runnvim.sh sets it.
+  " if empty(windowsversion())
+    let s:saveConfigHome = $XDG_CONFIG_HOME
+    call setenv("XDG_CONFIG_HOME", s:GetConfigHome())
+  " endif
+endfunc
+
 " Filetypes detected just from matching the file name.
 " First one is checking that these files have no filetype.
-let s:filename_checks = {
+func s:GetFilenameChecks() abort
+  return {
     \ 'none': ['bsd', 'some-bsd'],
     \ '8th': ['file.8th'],
     \ 'a2ps': ['/etc/a2ps.cfg', '/etc/a2ps/file.cfg', 'a2psrc', '.a2psrc', 'any/etc/a2ps.cfg', 'any/etc/a2ps/file.cfg'],
@@ -71,6 +97,7 @@ let s:filename_checks = {
     \ 'asterisk': ['asterisk/file.conf', 'asterisk/file.conf-file', 'some-asterisk/file.conf', 'some-asterisk/file.conf-file'],
     \ 'astro': ['file.astro'],
     \ 'atlas': ['file.atl', 'file.as'],
+    \ 'authzed': ['file.zed'],
     \ 'autohotkey': ['file.ahk'],
     \ 'autoit': ['file.au3'],
     \ 'automake': ['GNUmakefile.am', 'makefile.am', 'Makefile.am'],
@@ -83,9 +110,10 @@ let s:filename_checks = {
     \ 'bdf': ['file.bdf'],
     \ 'beancount': ['file.beancount'],
     \ 'bib': ['file.bib'],
-    \ 'bicep': ['file.bicep'],
+    \ 'bicep': ['file.bicep', 'file.bicepparam'],
     \ 'bindzone': ['named.root', '/bind/db.file', '/named/db.file', 'any/bind/db.file', 'any/named/db.file'],
     \ 'bitbake': ['file.bb', 'file.bbappend', 'file.bbclass', 'build/conf/local.conf', 'meta/conf/layer.conf', 'build/conf/bbappend.conf', 'meta-layer/conf/distro/foo.conf'],
+    \ 'blade': ['file.blade.php'],
     \ 'blank': ['file.bl'],
     \ 'blueprint': ['file.blp'],
     \ 'bsdl': ['file.bsd', 'file.bsdl'],
@@ -94,7 +122,7 @@ let s:filename_checks = {
     \ 'bzr': ['bzr_log.any', 'bzr_log.file'],
     \ 'c': ['enlightenment/file.cfg', 'file.qc', 'file.c', 'some-enlightenment/file.cfg'],
     \ 'cabal': ['file.cabal'],
-    \ 'cabalconfig': ['cabal.config'],
+    \ 'cabalconfig': ['cabal.config', expand("$HOME/.config/cabal/config")] + s:WhenConfigHome('$XDG_CONFIG_HOME/cabal/config'),
     \ 'cabalproject': ['cabal.project', 'cabal.project.local'],
     \ 'cairo': ['file.cairo'],
     \ 'calendar': ['calendar', '/.calendar/file', '/share/calendar/any/calendar.file', '/share/calendar/calendar.file', 'any/share/calendar/any/calendar.file', 'any/share/calendar/calendar.file'],
@@ -148,6 +176,7 @@ let s:filename_checks = {
     \ 'cvs': ['cvs123'],
     \ 'cvsrc': ['.cvsrc'],
     \ 'cynpp': ['file.cyn'],
+    \ 'cypher': ['file.cypher'],
     \ 'd': ['file.d'],
     \ 'dart': ['file.dart', 'file.drt'],
     \ 'datascript': ['file.ds'],
@@ -156,6 +185,7 @@ let s:filename_checks = {
     \ 'debcontrol': ['/debian/control', 'any/debian/control'],
     \ 'debcopyright': ['/debian/copyright', 'any/debian/copyright'],
     \ 'debsources': ['/etc/apt/sources.list', '/etc/apt/sources.list.d/file.list', 'any/etc/apt/sources.list', 'any/etc/apt/sources.list.d/file.list'],
+    \ 'deb822sources': ['/etc/apt/sources.list.d/file.sources', 'any/etc/apt/sources.list.d/file.sources'],
     \ 'def': ['file.def'],
     \ 'denyhosts': ['denyhosts.conf'],
     \ 'desc': ['file.desc'],
@@ -168,7 +198,7 @@ let s:filename_checks = {
     \ 'dnsmasq': ['/etc/dnsmasq.conf', '/etc/dnsmasq.d/file', 'any/etc/dnsmasq.conf', 'any/etc/dnsmasq.d/file'],
     \ 'dockerfile': ['Containerfile', 'Dockerfile', 'dockerfile', 'file.Dockerfile', 'file.dockerfile', 'Dockerfile.debian', 'Containerfile.something'],
     \ 'dosbatch': ['file.bat'],
-    \ 'dosini': ['/etc/yum.conf', 'file.ini', 'npmrc', '.npmrc', 'php.ini', 'php.ini-5', 'php.ini-file', '/etc/yum.repos.d/file', 'any/etc/yum.conf', 'any/etc/yum.repos.d/file', 'file.wrap'],
+    \ 'dosini': ['/etc/yum.conf', 'file.ini', 'npmrc', '.npmrc', 'php.ini', 'php.ini-5', 'php.ini-file', '/etc/yum.repos.d/file', 'any/etc/yum.conf', 'any/etc/yum.repos.d/file', 'file.wrap', 'file.vbp', 'ja2.ini', 'JA2.INI'],
     \ 'dot': ['file.dot', 'file.gv'],
     \ 'dracula': ['file.drac', 'file.drc', 'filelvs', 'filelpe', 'drac.file', 'lpe', 'lvs', 'some-lpe', 'some-lvs'],
     \ 'dtd': ['file.dtd'],
@@ -209,7 +239,7 @@ let s:filename_checks = {
     \ 'fish': ['file.fish'],
     \ 'focexec': ['file.fex', 'file.focexec'],
     \ 'form': ['file.frm'],
-    \ 'forth': ['file.ft', 'file.fth'],
+    \ 'forth': ['file.ft', 'file.fth', 'file.4th'],
     \ 'fortran': ['file.f', 'file.for', 'file.fortran', 'file.fpp', 'file.ftn', 'file.f77', 'file.f90', 'file.f95', 'file.f03', 'file.f08'],
     \ 'fpcmake': ['file.fpc'],
     \ 'framescript': ['file.fsl'],
@@ -228,16 +258,17 @@ let s:filename_checks = {
     \ 'gedcom': ['file.ged', 'lltxxxxx.txt', '/tmp/lltmp', '/tmp/lltmp-file', 'any/tmp/lltmp', 'any/tmp/lltmp-file'],
     \ 'gemtext': ['file.gmi', 'file.gemini'],
     \ 'gift': ['file.gift'],
-    \ 'gitattributes': ['file.git/info/attributes', '.gitattributes', '/.config/git/attributes', '/etc/gitattributes', '/usr/local/etc/gitattributes', 'some.git/info/attributes'],
+    \ 'gitattributes': ['file.git/info/attributes', '.gitattributes', '/.config/git/attributes', '/etc/gitattributes', '/usr/local/etc/gitattributes', 'some.git/info/attributes'] + s:WhenConfigHome('$XDG_CONFIG_HOME/git/attributes'),
     \ 'gitcommit': ['COMMIT_EDITMSG', 'MERGE_MSG', 'TAG_EDITMSG', 'NOTES_EDITMSG', 'EDIT_DESCRIPTION'],
-    \ 'gitconfig': ['file.git/config', 'file.git/config.worktree', 'file.git/worktrees/x/config.worktree', '.gitconfig', '.gitmodules', 'file.git/modules//config', '/.config/git/config', '/etc/gitconfig', '/usr/local/etc/gitconfig', '/etc/gitconfig.d/file', 'any/etc/gitconfig.d/file', '/.gitconfig.d/file', 'any/.config/git/config', 'any/.gitconfig.d/file', 'some.git/config', 'some.git/modules/any/config'],
-    \ 'gitignore': ['file.git/info/exclude', '.gitignore', '/.config/git/ignore', 'some.git/info/exclude'],
+    \ 'gitconfig': ['file.git/config', 'file.git/config.worktree', 'file.git/worktrees/x/config.worktree', '.gitconfig', '.gitmodules', 'file.git/modules//config', '/.config/git/config', '/etc/gitconfig', '/usr/local/etc/gitconfig', '/etc/gitconfig.d/file', 'any/etc/gitconfig.d/file', '/.gitconfig.d/file', 'any/.config/git/config', 'any/.gitconfig.d/file', 'some.git/config', 'some.git/modules/any/config'] + s:WhenConfigHome('$XDG_CONFIG_HOME/git/config'),
+    \ 'gitignore': ['file.git/info/exclude', '.gitignore', '/.config/git/ignore', 'some.git/info/exclude'] + s:WhenConfigHome('$XDG_CONFIG_HOME/git/ignore'),
     \ 'gitolite': ['gitolite.conf', '/gitolite-admin/conf/file', 'any/gitolite-admin/conf/file'],
     \ 'gitrebase': ['git-rebase-todo'],
     \ 'gitsendemail': ['.gitsendemail.msg.xxxxxx'],
     \ 'gkrellmrc': ['gkrellmrc', 'gkrellmrc_x'],
     \ 'gleam': ['file.gleam'],
     \ 'glsl': ['file.glsl'],
+    \ 'gn': ['file.gn', 'file.gni'],
     \ 'gnash': ['gnashrc', '.gnashrc', 'gnashpluginrc', '.gnashpluginrc'],
     \ 'gnuplot': ['file.gpi', '.gnuplot'],
     \ 'go': ['file.go'],
@@ -261,6 +292,7 @@ let s:filename_checks = {
     \ 'handlebars': ['file.hbs'],
     \ 'hare': ['file.ha'],
     \ 'haskell': ['file.hs', 'file.hsc', 'file.hs-boot', 'file.hsig'],
+    \ 'haskellpersistent': ['file.persistentmodels'],
     \ 'haste': ['file.ht'],
     \ 'hastepreproc': ['file.htpp'],
     \ 'hb': ['file.hb'],
@@ -279,6 +311,7 @@ let s:filename_checks = {
     \ 'html': ['file.html', 'file.htm', 'file.cshtml'],
     \ 'htmlm4': ['file.html.m4'],
     \ 'httest': ['file.htt', 'file.htb'],
+    \ 'hurl': ['file.hurl'],
     \ 'i3config': ['/home/user/.i3/config', '/home/user/.config/i3/config', '/etc/i3/config', '/etc/xdg/i3/config'],
     \ 'ibasic': ['file.iba', 'file.ibi'],
     \ 'icemenu': ['/.icewm/menu', 'any/.icewm/menu'],
@@ -293,6 +326,7 @@ let s:filename_checks = {
     \ 'j': ['file.ijs'],
     \ 'jal': ['file.jal', 'file.JAL'],
     \ 'jam': ['file.jpl', 'file.jpr', 'JAM-file.file', 'JAM.file', 'Prl-file.file', 'Prl.file'],
+    \ 'janet': ['file.janet'],
     \ 'java': ['file.java', 'file.jav'],
     \ 'javacc': ['file.jj', 'file.jjt'],
     \ 'javascript': ['file.js', 'file.jsm', 'file.javascript', 'file.es', 'file.mjs', 'file.cjs'],
@@ -303,13 +337,14 @@ let s:filename_checks = {
     \ 'jq': ['file.jq'],
     \ 'jovial': ['file.jov', 'file.j73', 'file.jovial'],
     \ 'jproperties': ['file.properties', 'file.properties_xx', 'file.properties_xx_xx', 'some.properties_xx_xx_file', 'org.eclipse.xyz.prefs'],
-    \ 'json': ['file.json', 'file.jsonp', 'file.json-patch', 'file.webmanifest', 'Pipfile.lock', 'file.ipynb', '.prettierrc', '.firebaserc', '.stylelintrc', 'file.slnf'],
+    \ 'json': ['file.json', 'file.jsonp', 'file.json-patch', 'file.geojson', 'file.webmanifest', 'Pipfile.lock', 'file.ipynb', '.prettierrc', '.firebaserc', '.stylelintrc', 'file.slnf'],
     \ 'json5': ['file.json5'],
     \ 'jsonc': ['file.jsonc', '.babelrc', '.eslintrc', '.jsfmtrc', '.jshintrc', '.hintrc', '.swrc', 'jsconfig.json', 'tsconfig.json', 'tsconfig.test.json', 'tsconfig-test.json'],
     \ 'jsonl': ['file.jsonl'],
     \ 'jsonnet': ['file.jsonnet', 'file.libsonnet'],
     \ 'jsp': ['file.jsp'],
     \ 'julia': ['file.jl'],
+    \ 'just': ['justfile', 'Justfile', '.justfile', 'config.just'],
     \ 'kconfig': ['Kconfig', 'Kconfig.debug', 'Kconfig.file'],
     \ 'kdl': ['file.kdl'],
     \ 'kivy': ['file.kv'],
@@ -333,6 +368,7 @@ let s:filename_checks = {
     \ 'lilo': ['lilo.conf', 'lilo.conf-file'],
     \ 'lilypond': ['file.ly', 'file.ily'],
     \ 'limits': ['/etc/limits', '/etc/anylimits.conf', '/etc/anylimits.d/file.conf', '/etc/limits.conf', '/etc/limits.d/file.conf', '/etc/some-limits.conf', '/etc/some-limits.d/file.conf', 'any/etc/limits', 'any/etc/limits.conf', 'any/etc/limits.d/file.conf', 'any/etc/some-limits.conf', 'any/etc/some-limits.d/file.conf'],
+    \ 'liquidsoap': ['file.liq'],
     \ 'liquid': ['file.liquid'],
     \ 'lisp': ['file.lsp', 'file.lisp', 'file.asd', 'file.el', 'file.cl', '.emacs', '.sawfishrc', 'sbclrc', '.sbclrc'],
     \ 'lite': ['file.lite', 'file.lt'],
@@ -398,6 +434,7 @@ let s:filename_checks = {
     \ 'mrxvtrc': ['mrxvtrc', '.mrxvtrc'],
     \ 'msidl': ['file.odl', 'file.mof'],
     \ 'msql': ['file.msql'],
+    \ 'mojo': ['file.mojo', 'file.🔥'],
     \ 'mupad': ['file.mu'],
     \ 'mush': ['file.mush'],
     \ 'muttrc': ['Muttngrc', 'Muttrc', '.muttngrc', '.muttngrc-file', '.muttrc', '.muttrc-file', '/.mutt/muttngrc', '/.mutt/muttngrc-file', '/.mutt/muttrc', '/.mutt/muttrc-file', '/.muttng/muttngrc', '/.muttng/muttngrc-file', '/.muttng/muttrc', '/.muttng/muttrc-file', '/etc/Muttrc.d/file', '/etc/Muttrc.d/file.rc', 'Muttngrc-file', 'Muttrc-file', 'any/.mutt/muttngrc', 'any/.mutt/muttngrc-file', 'any/.mutt/muttrc', 'any/.mutt/muttrc-file', 'any/.muttng/muttngrc', 'any/.muttng/muttngrc-file', 'any/.muttng/muttrc', 'any/.muttng/muttrc-file', 'any/etc/Muttrc.d/file', 'muttngrc', 'muttngrc-file', 'muttrc', 'muttrc-file'],
@@ -413,11 +450,13 @@ let s:filename_checks = {
     \ 'nim': ['file.nim', 'file.nims', 'file.nimble'],
     \ 'ninja': ['file.ninja'],
     \ 'nix': ['file.nix'],
+    \ 'norg': ['file.norg'],
     \ 'nqc': ['file.nqc'],
     \ 'nroff': ['file.tr', 'file.nr', 'file.roff', 'file.tmac', 'file.mom', 'tmac.file'],
     \ 'nsis': ['file.nsi', 'file.nsh'],
     \ 'nu': ['env.nu', 'config.nu'],
     \ 'obj': ['file.obj'],
+    \ 'objdump': ['file.objdump', 'file.cppobjdump'],
     \ 'obse': ['file.obl', 'file.obse', 'file.oblivion', 'file.obscript'],
     \ 'ocaml': ['file.ml', 'file.mli', 'file.mll', 'file.mly', '.ocamlinit', 'file.mlt', 'file.mlp', 'file.mlip', 'file.mli.cppo', 'file.ml.cppo'],
     \ 'occam': ['file.occ'],
@@ -440,6 +479,7 @@ let s:filename_checks = {
     \ 'pccts': ['file.g'],
     \ 'pcmk': ['file.pcmk'],
     \ 'pdf': ['file.pdf'],
+    \ 'pem': ['file.pem', 'file.cer', 'file.crt', 'file.csr'],
     \ 'perl': ['file.plx', 'file.al', 'file.psgi', 'gitolite.rc', '.gitolite.rc', 'example.gitolite.rc', '.latexmkrc', 'latexmkrc'],
     \ 'pf': ['pf.conf'],
     \ 'pfmain': ['main.cf', 'main.cf.proto'],
@@ -476,10 +516,12 @@ let s:filename_checks = {
     \ 'psl': ['file.psl'],
     \ 'pug': ['file.pug'],
     \ 'puppet': ['file.pp'],
+    \ 'pymanifest': ['MANIFEST.in'],
     \ 'pyret': ['file.arr'],
     \ 'pyrex': ['file.pyx', 'file.pxd'],
     \ 'python': ['file.py', 'file.pyw', '.pythonstartup', '.pythonrc', 'file.ptl', 'file.pyi', 'SConstruct'],
     \ 'ql': ['file.ql', 'file.qll'],
+    \ 'qml': ['file.qml', 'file.qbs'],
     \ 'qmldir': ['qmldir'],
     \ 'quake': ['anybaseq2/file.cfg', 'anyid1/file.cfg', 'quake3/file.cfg', 'baseq2/file.cfg', 'id1/file.cfg', 'quake1/file.cfg', 'some-baseq2/file.cfg', 'some-id1/file.cfg', 'some-quake1/file.cfg'],
     \ 'quarto': ['file.qmd'],
@@ -495,6 +537,7 @@ let s:filename_checks = {
     \ 'readline': ['.inputrc', 'inputrc'],
     \ 'rego': ['file.rego'],
     \ 'remind': ['.reminders', 'file.remind', 'file.rem', '.reminders-file'],
+    \ 'requirements': ['file.pip', 'requirements.txt'],
     \ 'rescript': ['file.res', 'file.resi'],
     \ 'resolv': ['resolv.conf'],
     \ 'reva': ['file.frt'],
@@ -535,7 +578,7 @@ let s:filename_checks = {
     \ 'services': ['/etc/services', 'any/etc/services'],
     \ 'setserial': ['/etc/serial.conf', 'any/etc/serial.conf'],
     \ 'sexplib': ['file.sexp'],
-    \ 'sh': ['.bashrc', 'file.bash', '/usr/share/doc/bash-completion/filter.sh','/etc/udev/cdsymlinks.conf', 'any/etc/udev/cdsymlinks.conf'],
+    \ 'sh': ['.bashrc', '.bash_profile', '.bash-profile', '.bash_logout', '.bash-logout', '.bash_aliases', '.bash-aliases', '/tmp/bash-fc-3Ozjlw', '/tmp/bash-fc.3Ozjlw', 'PKGBUILD', 'APKBUILD', 'file.bash', '/usr/share/doc/bash-completion/filter.sh', '/etc/udev/cdsymlinks.conf', 'any/etc/udev/cdsymlinks.conf'],
     \ 'sieve': ['file.siv', 'file.sieve'],
     \ 'sil': ['file.sil'],
     \ 'simula': ['file.sim'],
@@ -593,6 +636,7 @@ let s:filename_checks = {
     \ 'sysctl': ['/etc/sysctl.conf', '/etc/sysctl.d/file.conf', 'any/etc/sysctl.conf', 'any/etc/sysctl.d/file.conf'],
     \ 'systemd': ['any/systemd/file.automount', 'any/systemd/file.dnssd', 'any/systemd/file.link', 'any/systemd/file.mount', 'any/systemd/file.netdev', 'any/systemd/file.network', 'any/systemd/file.nspawn', 'any/systemd/file.path', 'any/systemd/file.service', 'any/systemd/file.slice', 'any/systemd/file.socket', 'any/systemd/file.swap', 'any/systemd/file.target', 'any/systemd/file.timer', '/etc/systemd/some.conf.d/file.conf', '/etc/systemd/system/some.d/file.conf', '/etc/systemd/system/some.d/.#file', '/etc/systemd/system/.#otherfile', '/home/user/.config/systemd/user/some.d/mine.conf', '/home/user/.config/systemd/user/some.d/.#file', '/home/user/.config/systemd/user/.#otherfile', '/.config/systemd/user/.#', '/.config/systemd/user/.#-file', '/.config/systemd/user/file.d/.#', '/.config/systemd/user/file.d/.#-file', '/.config/systemd/user/file.d/file.conf', '/etc/systemd/file.conf.d/file.conf', '/etc/systemd/system/.#', '/etc/systemd/system/.#-file', '/etc/systemd/system/file.d/.#', '/etc/systemd/system/file.d/.#-file', '/etc/systemd/system/file.d/file.conf', '/systemd/file.automount', '/systemd/file.dnssd', '/systemd/file.link', '/systemd/file.mount', '/systemd/file.netdev', '/systemd/file.network', '/systemd/file.nspawn', '/systemd/file.path', '/systemd/file.service', '/systemd/file.slice', '/systemd/file.socket', '/systemd/file.swap', '/systemd/file.target', '/systemd/file.timer', 'any/.config/systemd/user/.#', 'any/.config/systemd/user/.#-file', 'any/.config/systemd/user/file.d/.#', 'any/.config/systemd/user/file.d/.#-file', 'any/.config/systemd/user/file.d/file.conf', 'any/etc/systemd/file.conf.d/file.conf', 'any/etc/systemd/system/.#', 'any/etc/systemd/system/.#-file', 'any/etc/systemd/system/file.d/.#', 'any/etc/systemd/system/file.d/.#-file', 'any/etc/systemd/system/file.d/file.conf'],
     \ 'systemverilog': ['file.sv', 'file.svh'],
+    \ 'trace32': ['file.cmm', 'file.t32'],
     \ 'tags': ['tags'],
     \ 'tak': ['file.tak'],
     \ 'tal': ['file.tal'],
@@ -635,16 +679,19 @@ let s:filename_checks = {
     \ 'udevperm': ['/etc/udev/permissions.d/file.permissions', 'any/etc/udev/permissions.d/file.permissions'],
     \ 'udevrules': ['/etc/udev/rules.d/file.rules', '/usr/lib/udev/rules.d/file.rules', '/lib/udev/rules.d/file.rules'],
     \ 'uil': ['file.uit', 'file.uil'],
+    \ 'unison': ['file.u', 'file.uu'],
     \ 'updatedb': ['/etc/updatedb.conf', 'any/etc/updatedb.conf'],
     \ 'upstart': ['/usr/share/upstart/file.conf', '/usr/share/upstart/file.override', '/etc/init/file.conf', '/etc/init/file.override', '/.init/file.conf', '/.init/file.override', '/.config/upstart/file.conf', '/.config/upstart/file.override', 'any/.config/upstart/file.conf', 'any/.config/upstart/file.override', 'any/.init/file.conf', 'any/.init/file.override', 'any/etc/init/file.conf', 'any/etc/init/file.override', 'any/usr/share/upstart/file.conf', 'any/usr/share/upstart/file.override'],
     \ 'upstreamdat': ['upstream.dat', 'UPSTREAM.DAT', 'upstream.file.dat', 'UPSTREAM.FILE.DAT', 'file.upstream.dat', 'FILE.UPSTREAM.DAT'],
     \ 'upstreaminstalllog': ['upstreaminstall.log', 'UPSTREAMINSTALL.LOG', 'upstreaminstall.file.log', 'UPSTREAMINSTALL.FILE.LOG', 'file.upstreaminstall.log', 'FILE.UPSTREAMINSTALL.LOG'],
     \ 'upstreamlog': ['fdrupstream.log', 'upstream.log', 'UPSTREAM.LOG', 'upstream.file.log', 'UPSTREAM.FILE.LOG', 'file.upstream.log', 'FILE.UPSTREAM.LOG', 'UPSTREAM-file.log', 'UPSTREAM-FILE.LOG'],
+    \ 'urlshortcut': ['file.url'],
     \ 'usd': ['file.usda', 'file.usd'],
     \ 'usserverlog': ['usserver.log', 'USSERVER.LOG', 'usserver.file.log', 'USSERVER.FILE.LOG', 'file.usserver.log', 'FILE.USSERVER.LOG'],
     \ 'usw2kagtlog': ['usw2kagt.log', 'USW2KAGT.LOG', 'usw2kagt.file.log', 'USW2KAGT.FILE.LOG', 'file.usw2kagt.log', 'FILE.USW2KAGT.LOG'],
+    \ 'v': ['file.vsh', 'file.vv'],
     \ 'vala': ['file.vala'],
-    \ 'vb': ['file.sba', 'file.vb', 'file.vbs', 'file.dsm', 'file.ctl'],
+    \ 'vb': ['file.sba', 'file.vb', 'file.vbs', 'file.dsm', 'file.ctl', 'file.dob', 'file.dsr'],
     \ 'vdf': ['file.vdf'],
     \ 'vdmpp': ['file.vpp', 'file.vdmpp'],
     \ 'vdmrt': ['file.vdmrt'],
@@ -654,29 +701,31 @@ let s:filename_checks = {
     \ 'vgrindefs': ['vgrindefs'],
     \ 'vhdl': ['file.hdl', 'file.vhd', 'file.vhdl', 'file.vbe', 'file.vst', 'file.vhdl_123', 'file.vho', 'some.vhdl_1', 'some.vhdl_1-file'],
     \ 'vhs': ['file.tape'],
-    \ 'vim': ['file.vim', 'file.vba', '.exrc', '_exrc', 'some-vimrc', 'some-vimrc-file', 'vimrc', 'vimrc-file'],
+    \ 'vim': ['file.vim', '.exrc', '_exrc', 'some-vimrc', 'some-vimrc-file', 'vimrc', 'vimrc-file'],
     \ 'viminfo': ['.viminfo', '_viminfo'],
     \ 'vmasm': ['file.mar'],
     \ 'voscm': ['file.cm'],
     \ 'vrml': ['file.wrl'],
     \ 'vroom': ['file.vroom'],
     \ 'vue': ['file.vue'],
-    \ 'wat': ['file.wat'],
-    \ 'wast': ['file.wast'],
+    \ 'wat': ['file.wat', 'file.wast'],
     \ 'wdl': ['file.wdl'],
     \ 'webmacro': ['file.wm'],
     \ 'wget': ['.wgetrc', 'wgetrc'],
     \ 'wget2': ['.wget2rc', 'wget2rc'],
+    \ 'wgsl': ['file.wgsl'],
     \ 'winbatch': ['file.wbt'],
     \ 'wit': ['file.wit'],
     \ 'wml': ['file.wml'],
     \ 'wsh': ['file.wsf', 'file.wsc'],
     \ 'wsml': ['file.wsml'],
     \ 'wvdial': ['wvdial.conf', '.wvdialrc'],
+    \ 'xcompose': ['.XCompose', 'Compose'],
     \ 'xdefaults': ['.Xdefaults', '.Xpdefaults', '.Xresources', 'xdm-config', 'file.ad', '/Xresources/file', '/app-defaults/file', 'Xresources', 'Xresources-file', 'any/Xresources/file', 'any/app-defaults/file'],
     \ 'xf86conf': ['xorg.conf', 'xorg.conf-4'],
     \ 'xhtml': ['file.xhtml', 'file.xht'],
     \ 'xinetd': ['/etc/xinetd.conf', '/etc/xinetd.d/file', 'any/etc/xinetd.conf', 'any/etc/xinetd.d/file'],
+    \ 'xkb': ['/usr/share/X11/xkb/compat/pc', '/usr/share/X11/xkb/geometry/pc', '/usr/share/X11/xkb/keycodes/evdev', '/usr/share/X11/xkb/symbols/pc', '/usr/share/X11/xkb/types/pc'],
     \ 'xmath': ['file.msc', 'file.msf'],
     \ 'xml': ['/etc/blkid.tab', '/etc/blkid.tab.old', 'file.xmi', 'file.csproj', 'file.csproj.user', 'file.fsproj', 'file.fsproj.user', 'file.vbproj', 'file.vbproj.user', 'file.ui', 'file.tpm', '/etc/xdg/menus/file.menu', 'fglrxrc', 'file.xlf', 'file.xliff', 'file.xul', 'file.wsdl', 'file.wpl', 'any/etc/blkid.tab', 'any/etc/blkid.tab.old', 'any/etc/xdg/menus/file.menu', 'file.atom', 'file.rss', 'file.cdxml', 'file.psc1', 'file.mpd'],
     \ 'xmodmap': ['anyXmodmap', 'Xmodmap', 'some-Xmodmap', 'some-xmodmap', 'some-xmodmap-file', 'xmodmap', 'xmodmap-file'],
@@ -687,22 +736,23 @@ let s:filename_checks = {
     \ 'xsd': ['file.xsd'],
     \ 'xslt': ['file.xsl', 'file.xslt'],
     \ 'yacc': ['file.yy', 'file.yxx', 'file.y++'],
-    \ 'yaml': ['file.yaml', 'file.yml', '.clangd', '.clang-format', '.clang-tidy'],
+    \ 'yaml': ['file.yaml', 'file.yml', 'file.eyaml', '.clangd', '.clang-format', '.clang-tidy'],
     \ 'yang': ['file.yang'],
     \ 'yuck': ['file.yuck'],
     \ 'z8a': ['file.z8a'],
-    \ 'zig': ['file.zig'],
+    \ 'zig': ['file.zig', 'build.zig.zon'],
     \ 'zimbu': ['file.zu'],
     \ 'zimbutempl': ['file.zut'],
-    \ 'zir': ['file.zir'],
+    \ 'zserio': ['file.zs'],
     \ 'zsh': ['.zprofile', '/etc/zprofile', '.zfbfmarks', 'file.zsh', '.zcompdump', '.zlogin', '.zlogout', '.zshenv', '.zshrc', '.zcompdump-file', '.zlog', '.zlog-file', '.zsh', '.zsh-file', 'any/etc/zprofile', 'zlog', 'zlog-file', 'zsh', 'zsh-file'],
     \
     \ 'help': [$VIMRUNTIME . '/doc/help.txt'],
     \ }
+endfunc
 
 let s:filename_case_checks = {
     \ 'modula2': ['file.DEF'],
-    \ 'bzl': ['file.BUILD', 'BUILD'],
+    \ 'bzl': ['file.BUILD', 'BUILD', 'BUCK'],
     \ }
 
 func CheckItems(checks)
@@ -729,8 +779,14 @@ func CheckItems(checks)
 endfunc
 
 func Test_filetype_detection()
+  call s:SetupConfigHome()
+  if !empty(s:saveConfigHome)
+    defer setenv("XDG_CONFIG_HOME", s:saveConfigHome)
+  endif
+  call mkdir(s:GetConfigHome(), 'R')
+
   filetype on
-  call CheckItems(s:filename_checks)
+  call CheckItems(s:GetFilenameChecks())
   if has('fname_case')
     call CheckItems(s:filename_case_checks)
   endif
@@ -771,6 +827,7 @@ let s:script_checks = {
       \ 'expect': [['#!/path/expect']],
       \ 'gnuplot': [['#!/path/gnuplot']],
       \ 'make': [['#!/path/make']],
+      \ 'nix': [['#!/path/nix-shell']],
       \ 'pike': [['#!/path/pike'],
       \          ['#!/path/pike0'],
       \          ['#!/path/pike9']],
@@ -807,6 +864,11 @@ let s:script_checks = {
       \ 'fish': [['#!/path/fish']],
       \ 'forth': [['#!/path/gforth']],
       \ 'icon': [['#!/path/icon']],
+      \ 'crystal': [['#!/path/crystal']],
+      \ 'rexx': [['#!/path/rexx'],
+      \          ['#!/path/regina']],
+      \ 'janet':  [['#!/path/janet']],
+      \ 'dart':   [['#!/path/dart']],
       \ }
 
 " Various forms of "env" optional arguments.
@@ -817,6 +879,7 @@ let s:script_env_checks = {
       \ 'scheme': [['#!/usr/bin/env VAR=val --ignore-environment scheme']],
       \ 'python': [['#!/usr/bin/env VAR=val -S python -w -T']],
       \ 'wml': [['#!/usr/bin/env VAR=val --split-string wml']],
+      \ 'nix': [['#!/usr/bin/env nix-shell']],
       \ }
 
 func Run_script_detection(test_dict)
@@ -1125,6 +1188,54 @@ func Test_ex_file()
   filetype off
 endfunc
 
+func Test_f_file()
+  filetype on
+
+  call writefile(['looks like Fortran'], 'Xfile.f', 'D')
+  split Xfile.f
+  call assert_equal('fortran', &filetype)
+  bwipe!
+
+  let g:filetype_f = 'forth'
+  split Xfile.f
+  call assert_equal('forth', &filetype)
+  bwipe!
+  unlet g:filetype_f
+
+  " Test dist#ft#FTf()
+
+  " Forth
+
+  call writefile(['( Forth inline comment )'], 'Xfile.f')
+  split Xfile.f
+  call assert_equal('forth', &filetype)
+  bwipe!
+
+  call writefile(['\ Forth line comment'], 'Xfile.f')
+  split Xfile.f
+  call assert_equal('forth', &filetype)
+  bwipe!
+
+  call writefile([': squared ( n -- n^2 )', 'dup * ;'], 'Xfile.f')
+  split Xfile.f
+  call assert_equal('forth', &filetype)
+  bwipe!
+
+  " SwiftForth
+
+  call writefile(['{ ================', 'Header comment', '================ }'], 'Xfile.f')
+  split Xfile.f
+  call assert_equal('forth', &filetype)
+  bwipe!
+
+  call writefile(['OPTIONAL Maybe Descriptive text'], 'Xfile.f')
+  split Xfile.f
+  call assert_equal('forth', &filetype)
+  bwipe!
+
+  filetype off
+endfunc
+
 func Test_foam_file()
   filetype on
   call assert_true(mkdir('0', 'pR'))
@@ -1191,7 +1302,7 @@ func Test_frm_file()
 
   " Visual Basic
 
-  call writefile(['Begin VB.Form Form1'], 'Xfile.frm')
+  call writefile(['VERSION 5.00', 'Begin VB.Form Form1'], 'Xfile.frm')
   split Xfile.frm
   call assert_equal('vb', &filetype)
   bwipe!
@@ -1215,7 +1326,7 @@ func Test_fs_file()
 
   " Test dist#ft#FTfs()
 
-  " Forth (Gforth)
+  " Forth
 
   call writefile(['( Forth inline comment )'], 'Xfile.fs')
   split Xfile.fs
@@ -1228,6 +1339,18 @@ func Test_fs_file()
   bwipe!
 
   call writefile([': squared ( n -- n^2 )', 'dup * ;'], 'Xfile.fs')
+  split Xfile.fs
+  call assert_equal('forth', &filetype)
+  bwipe!
+
+  " SwiftForth
+
+  call writefile(['{ ================', 'Header comment', '================ }'], 'Xfile.fs')
+  split Xfile.fs
+  call assert_equal('forth', &filetype)
+  bwipe!
+
+  call writefile(['OPTIONAL Maybe Descriptive text'], 'Xfile.fs')
   split Xfile.fs
   call assert_equal('forth', &filetype)
   bwipe!
@@ -1268,12 +1391,12 @@ func Test_hook_file()
 
   call writefile(['[Trigger]', 'this is pacman config'], 'Xfile.hook', 'D')
   split Xfile.hook
-  call assert_equal('conf', &filetype)
+  call assert_equal('confini', &filetype)
   bwipe!
 
   call writefile(['not pacman'], 'Xfile.hook')
   split Xfile.hook
-  call assert_notequal('conf', &filetype)
+  call assert_notequal('confini', &filetype)
   bwipe!
 
   filetype off
@@ -1843,7 +1966,22 @@ func Test_cls_file()
 
   " Rexx
 
-  call writefile(['# rexx'], 'Xfile.cls')
+  call writefile(['#!/usr/bin/rexx'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('rexx', &filetype)
+  bwipe!
+
+  call writefile(['#!/usr/bin/regina'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('rexx', &filetype)
+  bwipe!
+
+  call writefile(['/* Comment */'], 'Xfile.cls')
+  split Xfile.cls
+  call assert_equal('rexx', &filetype)
+  bwipe!
+
+  call writefile(['::class Foo subclass Bar public'], 'Xfile.cls')
   split Xfile.cls
   call assert_equal('rexx', &filetype)
   bwipe!
@@ -2084,6 +2222,28 @@ func Test_typ_file()
   call assert_equal('typst', &filetype)
   bwipe!
   unlet g:filetype_typ
+
+  filetype off
+endfunc
+
+func Test_vba_file()
+  filetype on
+
+  " Test dist#ft#FTvba()
+
+  " Visual Basic
+
+  call writefile(['looks like Visual Basic'], 'Xfile.vba', 'D')
+  split Xfile.vba
+  call assert_equal('vb', &filetype)
+  bwipe!
+
+  " Vimball Archiver (ft=vim)
+
+  call writefile(['" Vimball Archiver by Charles E. Campbell, Ph.D.', 'UseVimball', 'finish'], 'Xfile.vba', 'D')
+  split Xfile.vba
+  call assert_equal('vim', &filetype)
+  bwipe!
 
   filetype off
 endfunc

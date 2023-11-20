@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // eval/window.c: Window related builtin functions
 
 #include <stdbool.h>
@@ -22,15 +19,14 @@
 #include "nvim/gettext.h"
 #include "nvim/globals.h"
 #include "nvim/macros.h"
-#include "nvim/memline_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/move.h"
-#include "nvim/option_defs.h"
 #include "nvim/pos.h"
 #include "nvim/types.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
+#include "nvim/winfloat.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "eval/window.c.generated.h"
@@ -266,7 +262,7 @@ static int get_winnr(tabpage_T *tp, typval_T *argvar)
     } else {
       // Extract the window count (if specified). e.g. winnr('3j')
       char *endp;
-      long count = strtol(arg, &endp, 10);
+      int count = (int)strtol(arg, &endp, 10);
       if (count <= 0) {
         // if count is not specified, default to 1
         count = 1;
@@ -640,7 +636,7 @@ void f_win_splitmove(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 
   if (wp == NULL || targetwin == NULL || wp == targetwin
       || !win_valid(wp) || !win_valid(targetwin)
-      || win_valid_floating(wp) || win_valid_floating(targetwin)) {
+      || win_float_valid(wp) || win_float_valid(targetwin)) {
     emsg(_(e_invalwindow));
     rettv->vval.v_number = -1;
     return;

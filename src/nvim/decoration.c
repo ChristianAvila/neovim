@@ -1,7 +1,5 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
+#include <limits.h>
 
 #include "nvim/buffer.h"
 #include "nvim/decoration.h"
@@ -13,7 +11,7 @@
 #include "nvim/memory.h"
 #include "nvim/move.h"
 #include "nvim/pos.h"
-#include "nvim/sign_defs.h"
+#include "nvim/sign.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "decoration.c.generated.h"
@@ -65,7 +63,7 @@ void bufhl_add_hl_pos_offset(buf_T *buf, int src_id, int hl_id, lpos_T pos_start
     }
     extmark_set(buf, (uint32_t)src_id, NULL,
                 (int)lnum - 1, hl_start, (int)lnum - 1 + end_off, hl_end,
-                &decor, true, false, kExtmarkNoUndo, NULL);
+                &decor, true, false, true, false, NULL);
   }
 }
 
@@ -94,7 +92,32 @@ void decor_redraw(buf_T *buf, int row1, int row2, Decoration *decor)
   }
 }
 
-void decor_remove(buf_T *buf, int row, int row2, Decoration *decor)
+static int sign_add_id = 0;
+
+void decor_add(buf_T *buf, int row, int row2, Decoration *decor, bool hl_id)
+{
+  if (decor) {
+    if (kv_size(decor->virt_text) && decor->virt_text_pos == kVTInline) {
+      buf->b_virt_text_inline++;
+    }
+    if (kv_size(decor->virt_lines)) {
+      buf->b_virt_line_blocks++;
+    }
+    if (decor_has_sign(decor)) {
+      decor->sign_add_id = sign_add_id++;
+      buf->b_signs++;
+    }
+    if (decor->sign_text) {
+      buf->b_signs_with_text++;
+      buf_signcols_add_check(buf, row + 1);
+    }
+  }
+  if (decor || hl_id) {
+    decor_redraw(buf, row, row2 > -1 ? row2 : row, decor);
+  }
+}
+
+void decor_remove(buf_T *buf, int row, int row2, Decoration *decor, bool invalidate)
 {
   decor_redraw(buf, row, row2, decor);
   if (decor) {
@@ -118,7 +141,9 @@ void decor_remove(buf_T *buf, int row, int row2, Decoration *decor)
       }
     }
   }
-  decor_free(decor);
+  if (!invalidate) {
+    decor_free(decor);
+  }
 }
 
 void decor_clear(Decoration *decor)
@@ -129,6 +154,7 @@ void decor_clear(Decoration *decor)
   }
   kv_destroy(decor->virt_lines);
   xfree(decor->sign_text);
+  xfree(decor->sign_name);
 }
 
 void decor_free(Decoration *decor)
@@ -153,15 +179,33 @@ void clear_virttext(VirtText *text)
   *text = (VirtText)KV_INITIAL_VALUE;
 }
 
+/// Get the next chunk of a virtual text item.
+///
+/// @param[in]     vt    The virtual text item
+/// @param[in,out] pos   Position in the virtual text item
+/// @param[in,out] attr  Highlight attribute
+///
+/// @return  The text of the chunk, or NULL if there are no more chunks
+char *next_virt_text_chunk(VirtText vt, size_t *pos, int *attr)
+{
+  char *text = NULL;
+  for (; text == NULL && *pos < kv_size(vt); (*pos)++) {
+    text = kv_A(vt, *pos).text;
+    int hl_id = kv_A(vt, *pos).hl_id;
+    *attr = hl_combine_attr(*attr, hl_id > 0 ? syn_id2attr(hl_id) : 0);
+  }
+  return text;
+}
+
 Decoration *decor_find_virttext(buf_T *buf, int row, uint64_t ns_id)
 {
   MarkTreeIter itr[1] = { 0 };
   marktree_itr_get(buf->b_marktree, row, 0,  itr);
   while (true) {
-    mtkey_t mark = marktree_itr_current(itr);
+    MTKey mark = marktree_itr_current(itr);
     if (mark.pos.row < 0 || mark.pos.row > row) {
       break;
-    } else if (marktree_decor_level(mark) < kDecorLevelVisible) {
+    } else if (mt_invalid(mark) || marktree_decor_level(mark) < kDecorLevelVisible) {
       goto next_mark;
     }
     Decoration *decor = mark.decor_full;
@@ -189,7 +233,7 @@ bool decor_redraw_reset(win_T *wp, DecorState *state)
   return wp->w_buffer->b_marktree->n_keys;
 }
 
-Decoration get_decor(mtkey_t mark)
+Decoration get_decor(MTKey mark)
 {
   if (mark.decor_full) {
     return *mark.decor_full;
@@ -211,50 +255,20 @@ bool decor_redraw_start(win_T *wp, int top_row, DecorState *state)
 {
   buf_T *buf = wp->w_buffer;
   state->top_row = top_row;
-  marktree_itr_get(buf->b_marktree, top_row, 0, state->itr);
-  if (!state->itr->node) {
+  if (!marktree_itr_get_overlap(buf->b_marktree, top_row, 0, state->itr)) {
     return false;
   }
-  marktree_itr_rewind(buf->b_marktree, state->itr);
-  while (true) {
-    mtkey_t mark = marktree_itr_current(state->itr);
-    if (mark.pos.row < 0) {  // || mark.row > end_row
-      break;
-    }
-    if ((mark.pos.row < top_row && mt_end(mark))
-        || marktree_decor_level(mark) < kDecorLevelVisible) {
-      goto next_mark;
+  MTPair pair;
+
+  while (marktree_itr_step_overlap(buf->b_marktree, state->itr, &pair)) {
+    if (mt_invalid(pair.start) || marktree_decor_level(pair.start) < kDecorLevelVisible) {
+      continue;
     }
 
-    Decoration decor = get_decor(mark);
+    Decoration decor = get_decor(pair.start);
 
-    mtpos_t altpos = marktree_get_altpos(buf->b_marktree, mark, NULL);
-
-    // Exclude start marks if the end mark position is above the top row
-    // Exclude end marks if we have already added the start mark
-    if ((mt_start(mark) && altpos.row < top_row && !decor_virt_pos(&decor))
-        || (mt_end(mark) && altpos.row >= top_row)) {
-      goto next_mark;
-    }
-
-    if (mt_end(mark)) {
-      decor_add(state, altpos.row, altpos.col, mark.pos.row, mark.pos.col,
-                &decor, false, mark.ns, mark.id);
-    } else {
-      if (altpos.row == -1) {
-        altpos.row = mark.pos.row;
-        altpos.col = mark.pos.col;
-      }
-      decor_add(state, mark.pos.row, mark.pos.col, altpos.row, altpos.col,
-                &decor, false, mark.ns, mark.id);
-    }
-
-next_mark:
-    if (marktree_itr_node_done(state->itr)) {
-      marktree_itr_next(buf->b_marktree, state->itr);
-      break;
-    }
-    marktree_itr_next(buf->b_marktree, state->itr);
+    decor_push(state, pair.start.pos.row, pair.start.pos.col, pair.end_pos.row, pair.end_pos.col,
+               &decor, false, pair.start.ns, pair.start.id);
   }
 
   return true;  // TODO(bfredl): check if available in the region
@@ -268,17 +282,23 @@ bool decor_redraw_line(win_T *wp, int row, DecorState *state)
   state->row = row;
   state->col_until = -1;
   state->eol_col = -1;
-  return true;  // TODO(bfredl): be more precise
+
+  if (kv_size(state->active)) {
+    return true;
+  }
+
+  MTKey k = marktree_itr_current(state->itr);
+  return (k.pos.row >= 0 && k.pos.row <= row);
 }
 
-static void decor_add(DecorState *state, int start_row, int start_col, int end_row, int end_col,
-                      Decoration *decor, bool owned, uint64_t ns_id, uint64_t mark_id)
+static void decor_push(DecorState *state, int start_row, int start_col, int end_row, int end_col,
+                       Decoration *decor, bool owned, uint64_t ns_id, uint64_t mark_id)
 {
   int attr_id = decor->hl_id > 0 ? syn_id2attr(decor->hl_id) : 0;
 
   DecorRange range = { start_row, start_col, end_row, end_col,
                        *decor, attr_id,
-                       kv_size(decor->virt_text) && owned, -1, ns_id, mark_id };
+                       kv_size(decor->virt_text) && owned, -10, ns_id, mark_id };
 
   kv_pushp(state->active);
   size_t index;
@@ -292,6 +312,28 @@ static void decor_add(DecorState *state, int start_row, int start_col, int end_r
   kv_A(state->active, index) = range;
 }
 
+/// Initialize the draw_col of a newly-added virtual text item.
+static void decor_init_draw_col(int win_col, bool hidden, DecorRange *item)
+{
+  if (win_col < 0 && item->decor.virt_text_pos != kVTInline) {
+    item->draw_col = win_col;
+  } else if (item->decor.virt_text_pos == kVTOverlay) {
+    item->draw_col = (item->decor.virt_text_hide && hidden) ? INT_MIN : win_col;
+  } else {
+    item->draw_col = -1;
+  }
+}
+
+void decor_recheck_draw_col(int win_col, bool hidden, DecorState *state)
+{
+  for (size_t i = 0; i < kv_size(state->active); i++) {
+    DecorRange *item = &kv_A(state->active, i);
+    if (item->draw_col == -3) {
+      decor_init_draw_col(win_col, hidden, item);
+    }
+  }
+}
+
 int decor_redraw_col(win_T *wp, int col, int win_col, bool hidden, DecorState *state)
 {
   buf_T *buf = wp->w_buffer;
@@ -302,7 +344,7 @@ int decor_redraw_col(win_T *wp, int col, int win_col, bool hidden, DecorState *s
   while (true) {
     // TODO(bfredl): check duplicate entry in "intersection"
     // branch
-    mtkey_t mark = marktree_itr_current(state->itr);
+    MTKey mark = marktree_itr_current(state->itr);
     if (mark.pos.row < 0 || mark.pos.row > state->row) {
       break;
     } else if (mark.pos.row == state->row && mark.pos.col > col) {
@@ -310,21 +352,19 @@ int decor_redraw_col(win_T *wp, int col, int win_col, bool hidden, DecorState *s
       break;
     }
 
-    if (mt_end(mark)
-        || marktree_decor_level(mark) < kDecorLevelVisible) {
+    if (mt_invalid(mark) || mt_end(mark) || marktree_decor_level(mark) < kDecorLevelVisible) {
       goto next_mark;
     }
 
     Decoration decor = get_decor(mark);
 
-    mtpos_t endpos = marktree_get_altpos(buf->b_marktree, mark, NULL);
-
+    MTPos endpos = marktree_get_altpos(buf->b_marktree, mark, NULL);
     if (endpos.row == -1) {
       endpos = mark.pos;
     }
 
-    decor_add(state, mark.pos.row, mark.pos.col, endpos.row, endpos.col,
-              &decor, false, mark.ns, mark.id);
+    decor_push(state, mark.pos.row, mark.pos.col, endpos.row, endpos.col,
+               &decor, false, mark.ns, mark.id);
 
 next_mark:
     marktree_itr_next(buf->b_marktree, state->itr);
@@ -332,7 +372,7 @@ next_mark:
 
   int attr = 0;
   size_t j = 0;
-  bool conceal = 0;
+  int conceal = 0;
   int conceal_char = 0;
   int conceal_attr = 0;
   TriState spell = kNone;
@@ -362,8 +402,9 @@ next_mark:
       attr = hl_combine_attr(attr, item.attr_id);
     }
     if (active && item.decor.conceal) {
-      conceal = true;
-      if (item.start_row == state->row && item.start_col == col && item.decor.conceal_char) {
+      conceal = 1;
+      if (item.start_row == state->row && item.start_col == col) {
+        conceal = 2;
         conceal_char = item.decor.conceal_char;
         state->col_until = MIN(state->col_until, item.start_col);
         conceal_attr = item.attr_id;
@@ -372,19 +413,9 @@ next_mark:
     if (active && item.decor.spell != kNone) {
       spell = item.decor.spell;
     }
-    if (item.start_row == state->row && decor_virt_pos(&item.decor)
-        && item.draw_col != INT_MIN) {
-      if (item.start_col <= col) {
-        if (item.decor.virt_text_pos == kVTOverlay && item.draw_col == -1) {
-          item.draw_col = (item.decor.virt_text_hide && hidden) ? INT_MIN : win_col;
-        } else if (item.draw_col == -3) {
-          item.draw_col = -1;
-        }
-      } else if (wp->w_p_wrap
-                 && (item.decor.virt_text_pos == kVTRightAlign
-                     || item.decor.virt_text_pos == kVTWinCol)) {
-        item.draw_col = -3;
-      }
+    if (item.start_row == state->row && item.start_col <= col
+        && decor_virt_pos(&item.decor) && item.draw_col == -10) {
+      decor_init_draw_col(win_col, hidden, &item);
     }
     if (keep) {
       kv_A(state->active, j++) = item;
@@ -401,81 +432,73 @@ next_mark:
   return attr;
 }
 
-void decor_redraw_signs(buf_T *buf, int row, int *num_signs, SignTextAttrs sattrs[],
-                        HlPriId *num_id, HlPriId *line_id, HlPriId *cul_id)
+/// Return the sign attributes on the currently refreshed row.
+///
+/// @param[out] sattrs Output array for sign text and texthl id
+/// @param[out] line_attr Highest priority linehl id
+/// @param[out] cul_attr Highest priority culhl id
+/// @param[out] num_attr Highest priority numhl id
+void decor_redraw_signs(win_T *wp, buf_T *buf, int row, SignTextAttrs sattrs[], int *line_id,
+                        int *cul_id, int *num_id)
 {
-  if (!buf->b_signs) {
+  MarkTreeIter itr[1];
+  if (!buf->b_signs || !marktree_itr_get_overlap(buf->b_marktree, row, 0, itr)) {
     return;
   }
 
-  MarkTreeIter itr[1] = { 0 };
-  marktree_itr_get(buf->b_marktree, row, 0, itr);
+  MTPair pair;
+  int num_text = 0;
+  kvec_t(MTKey) signs = KV_INITIAL_VALUE;
+  // TODO(bfredl): integrate with main decor loop.
+  while (marktree_itr_step_overlap(buf->b_marktree, itr, &pair)) {
+    if (!mt_invalid(pair.start) && pair.start.decor_full && decor_has_sign(pair.start.decor_full)) {
+      pair.start.pos.row = row;
+      num_text += (pair.start.decor_full->sign_text != NULL);
+      kv_push(signs, pair.start);
+    }
+  }
 
-  while (true) {
-    mtkey_t mark = marktree_itr_current(itr);
-    if (mark.pos.row < 0 || mark.pos.row > row) {
+  while (itr->x) {
+    MTKey mark = marktree_itr_current(itr);
+    if (mark.pos.row != row) {
       break;
     }
-
-    if (mt_end(mark) || marktree_decor_level(mark) < kDecorLevelVisible) {
-      goto next_mark;
+    if (!mt_end(mark) && !mt_invalid(mark) && mark.decor_full && decor_has_sign(mark.decor_full)) {
+      num_text += (mark.decor_full->sign_text != NULL);
+      kv_push(signs, mark);
     }
-
-    Decoration *decor = mark.decor_full;
-
-    if (!decor || !decor_has_sign(decor)) {
-      goto next_mark;
-    }
-
-    if (decor->sign_text) {
-      int j;
-      for (j = (*num_signs); j > 0; j--) {
-        if (sattrs[j - 1].priority >= decor->priority) {
-          break;
-        }
-        if (j < SIGN_SHOW_MAX) {
-          sattrs[j] = sattrs[j - 1];
-        }
-      }
-      if (j < SIGN_SHOW_MAX) {
-        sattrs[j] = (SignTextAttrs) {
-          .text = decor->sign_text,
-          .hl_id = decor->sign_hl_id,
-          .priority = decor->priority
-        };
-        (*num_signs)++;
-      }
-    }
-
-    struct { HlPriId *dest; int hl; } cattrs[] = {
-      { line_id, decor->line_hl_id        },
-      { num_id,  decor->number_hl_id      },
-      { cul_id,  decor->cursorline_hl_id  },
-      { NULL, -1 },
-    };
-    for (int i = 0; cattrs[i].dest; i++) {
-      if (cattrs[i].hl != 0 && decor->priority >= cattrs[i].dest->priority) {
-        *cattrs[i].dest = (HlPriId) {
-          .hl_id = cattrs[i].hl,
-          .priority = decor->priority
-        };
-      }
-    }
-
-next_mark:
     marktree_itr_next(buf->b_marktree, itr);
+  }
+
+  if (kv_size(signs)) {
+    int width = (*wp->w_p_scl == 'n' && *(wp->w_p_scl + 1) == 'u') ? 1 : wp->w_scwidth;
+    int idx = MIN(width, num_text) - 1;
+    qsort((void *)&kv_A(signs, 0), kv_size(signs), sizeof(MTKey), sign_cmp);
+
+    for (size_t i = 0; i < kv_size(signs); i++) {
+      Decoration *decor = kv_A(signs, i).decor_full;
+      if (idx >= 0 && decor->sign_text) {
+        sattrs[idx].text = decor->sign_text;
+        sattrs[idx--].hl_id = decor->sign_hl_id;
+      }
+      if (*num_id == 0) {
+        *num_id = decor->number_hl_id;
+      }
+      if (*line_id == 0) {
+        *line_id = decor->line_hl_id;
+      }
+      if (*cul_id == 0) {
+        *cul_id = decor->cursorline_hl_id;
+      }
+    }
+    kv_destroy(signs);
   }
 }
 
 // Get the maximum required amount of sign columns needed between row and
 // end_row.
-int decor_signcols(buf_T *buf, DecorState *state, int row, int end_row, int max)
+int decor_signcols(buf_T *buf, int row, int end_row, int max)
 {
-  int count = 0;         // count for the number of signs on a given row
-  int count_remove = 0;  // how much to decrement count by when iterating marks for a new row
-  int signcols = 0;      // highest value of count
-  int currow = -1;       // current row
-
   if (max <= 1 && buf->b_signs_with_text >= (size_t)max) {
     return max;
   }
@@ -484,66 +507,41 @@ int decor_signcols(buf_T *buf, DecorState *state, int row, int end_row, int max)
     return 0;
   }
 
-  MarkTreeIter itr[1] = { 0 };
-  marktree_itr_get(buf->b_marktree, 0, -1, itr);
-  while (true) {
-    mtkey_t mark = marktree_itr_current(itr);
-    if (mark.pos.row < 0 || mark.pos.row > end_row) {
-      break;
+  int signcols = 0;  // highest value of count
+  for (int currow = row; currow <= end_row; currow++) {
+    MarkTreeIter itr[1];
+    if (!marktree_itr_get_overlap(buf->b_marktree, currow, 0, itr)) {
+      continue;
     }
 
-    if ((mark.pos.row < row && mt_end(mark))
-        || marktree_decor_level(mark) < kDecorLevelVisible
-        || !mark.decor_full) {
-      goto next_mark;
-    }
-
-    Decoration decor = get_decor(mark);
-
-    if (!decor.sign_text) {
-      goto next_mark;
-    }
-
-    if (mark.pos.row > currow) {
-      count -= count_remove;
-      count_remove = 0;
-      currow = mark.pos.row;
-    }
-
-    if (!mt_paired(mark)) {
-      if (mark.pos.row >= row) {
+    int count = 0;
+    MTPair pair;
+    while (marktree_itr_step_overlap(buf->b_marktree, itr, &pair)) {
+      if (!mt_invalid(pair.start) && pair.start.decor_full && pair.start.decor_full->sign_text) {
         count++;
-        if (count > signcols) {
-          signcols = count;
-          if (signcols >= max) {
-            return max;
-          }
-        }
-        count_remove++;
       }
-      goto next_mark;
     }
 
-    mtpos_t altpos = marktree_get_altpos(buf->b_marktree, mark, NULL);
-
-    if (mt_end(mark)) {
-      if (mark.pos.row >= row && altpos.row <= end_row) {
-        count_remove++;
+    while (itr->x) {
+      MTKey mark = marktree_itr_current(itr);
+      if (mark.pos.row != currow) {
+        break;
       }
-    } else {
-      if (altpos.row >= row) {
+      if (!mt_invalid(mark) && !mt_end(mark) && mark.decor_full && mark.decor_full->sign_text) {
         count++;
-        if (count > signcols) {
-          signcols = count;
-          if (signcols >= max) {
-            return max;
-          }
-        }
       }
+      marktree_itr_next(buf->b_marktree, itr);
     }
 
-next_mark:
-    marktree_itr_next(buf->b_marktree, itr);
+    if (count > signcols) {
+      if (row != end_row) {
+        buf->b_signcols.sentinel = currow + 1;
+      }
+      if (count >= max) {
+        return max;
+      }
+      signcols = count;
+    }
   }
 
   return signcols;
@@ -572,14 +570,14 @@ bool decor_redraw_eol(win_T *wp, DecorState *state, int *eol_attr, int eol_col)
   return has_virttext;
 }
 
-void decor_add_ephemeral(int start_row, int start_col, int end_row, int end_col, Decoration *decor,
-                         uint64_t ns_id, uint64_t mark_id)
+void decor_push_ephemeral(int start_row, int start_col, int end_row, int end_col, Decoration *decor,
+                          uint64_t ns_id, uint64_t mark_id)
 {
   if (end_row == -1) {
     end_row = start_row;
     end_col = start_col;
   }
-  decor_add(&decor_state, start_row, start_col, end_row, end_col, decor, true, ns_id, mark_id);
+  decor_push(&decor_state, start_row, start_col, end_row, end_col, decor, true, ns_id, mark_id);
 }
 
 /// @param has_fold  whether line "lnum" has a fold, or kNone when not calculated yet
@@ -592,26 +590,34 @@ int decor_virt_lines(win_T *wp, linenr_T lnum, VirtLines *lines, TriState has_fo
     return 0;
   }
 
-  int virt_lines = 0;
-  int row = MAX(lnum - 2, 0);
-  int end_row = (int)lnum;
-  MarkTreeIter itr[1] = { 0 };
-  marktree_itr_get(buf->b_marktree, row, 0,  itr);
+  assert(lnum > 0);
   bool below_fold = lnum > 1 && hasFoldingWin(wp, lnum - 1, NULL, NULL, true, NULL);
   if (has_fold == kNone) {
     has_fold = hasFoldingWin(wp, lnum, NULL, NULL, true, NULL);
   }
+
+  const int row = lnum - 1;
+  const int start_row = below_fold ? row : MAX(row - 1, 0);
+  const int end_row = has_fold ? row : row + 1;
+  if (start_row >= end_row) {
+    return 0;
+  }
+
+  int virt_lines = 0;
+  MarkTreeIter itr[1] = { 0 };
+  marktree_itr_get(buf->b_marktree, start_row, 0, itr);
   while (true) {
-    mtkey_t mark = marktree_itr_current(itr);
+    MTKey mark = marktree_itr_current(itr);
     if (mark.pos.row < 0 || mark.pos.row >= end_row) {
       break;
-    } else if (mt_end(mark) || marktree_decor_level(mark) < kDecorLevelVirtLine) {
+    } else if (mt_end(mark)
+               || marktree_decor_level(mark) < kDecorLevelVirtLine
+               || !mark.decor_full) {
       goto next_mark;
     }
-    bool above = mark.pos.row > (lnum - 2);
-    bool has_fold_cur = above ? has_fold : below_fold;
-    Decoration *decor = mark.decor_full;
-    if (!has_fold_cur && decor && decor->virt_lines_above == above) {
+    Decoration *const decor = mark.decor_full;
+    const int draw_row = mark.pos.row + (decor->virt_lines_above ? 0 : 1);
+    if (draw_row == row) {
       virt_lines += (int)kv_size(decor->virt_lines);
       if (lines) {
         kv_splice(*lines, decor->virt_lines);

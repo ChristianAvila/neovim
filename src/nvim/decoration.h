@@ -1,5 +1,4 @@
-#ifndef NVIM_DECORATION_H
-#define NVIM_DECORATION_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -26,8 +25,8 @@ typedef enum {
   kVTInline,
 } VirtTextPos;
 
-EXTERN const char *const virt_text_pos_str[] INIT(= { "eol", "overlay", "win_col", "right_align",
-                                                      "inline" });
+EXTERN const char *const virt_text_pos_str[] INIT( = { "eol", "overlay", "win_col", "right_align",
+                                                       "inline" });
 
 typedef enum {
   kHlModeUnknown,
@@ -36,7 +35,7 @@ typedef enum {
   kHlModeBlend,
 } HlMode;
 
-EXTERN const char *const hl_mode_str[] INIT(= { "", "replace", "combine", "blend" });
+EXTERN const char *const hl_mode_str[] INIT( = { "", "replace", "combine", "blend" });
 
 #define VIRTTEXT_EMPTY ((VirtText)KV_INITIAL_VALUE)
 
@@ -61,7 +60,9 @@ struct Decoration {
   int col;  // fixed col value, like win_col
   int virt_text_width;  // width of virt_text
   char *sign_text;
+  char *sign_name;
   int sign_hl_id;
+  int sign_add_id;
   int number_hl_id;
   int line_hl_id;
   int cursorline_hl_id;
@@ -72,7 +73,7 @@ struct Decoration {
 };
 #define DECORATION_INIT { KV_INITIAL_VALUE, KV_INITIAL_VALUE, 0, kVTEndOfLine, \
                           kHlModeUnknown, false, false, false, false, kNone, \
-                          DECOR_PRIORITY_BASE, 0, 0, NULL, 0, 0, 0, 0, 0, false }
+                          DECOR_PRIORITY_BASE, 0, 0, NULL, NULL, 0, 0, 0, 0, 0, 0, false }
 
 typedef struct {
   int start_row;
@@ -84,7 +85,8 @@ typedef struct {
   bool virt_text_owned;
   /// Screen column to draw the virtual text.
   /// When -1, the virtual text may be drawn after deciding where.
-  /// When -3, the virtual text should be drawn on a later screen line.
+  /// When -3, the virtual text should be drawn on the next screen line.
+  /// When -10, the virtual text has just been added.
   /// When INT_MIN, the virtual text should no longer be drawn.
   int draw_col;
   uint64_t ns_id;
@@ -101,7 +103,7 @@ typedef struct {
   int current;
   int eol_col;
 
-  bool conceal;
+  int conceal;
   int conceal_char;
   int conceal_attr;
 
@@ -113,7 +115,7 @@ typedef struct {
   bool running_on_lines;
 } DecorState;
 
-EXTERN DecorState decor_state INIT(= { 0 });
+EXTERN DecorState decor_state INIT( = { 0 });
 
 static inline bool decor_has_sign(Decoration *decor)
 {
@@ -127,5 +129,3 @@ static inline bool decor_has_sign(Decoration *decor)
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "decoration.h.generated.h"
 #endif
-
-#endif  // NVIM_DECORATION_H

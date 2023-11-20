@@ -1,5 +1,4 @@
-#ifndef NVIM_API_PRIVATE_DEFS_H
-#define NVIM_API_PRIVATE_DEFS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -42,10 +41,10 @@ typedef enum {
 /// Mask for all internal calls
 #define INTERNAL_CALL_MASK (((uint64_t)1) << (sizeof(uint64_t) * 8 - 1))
 
-/// Internal call from VimL code
+/// Internal call from Vimscript code
 #define VIML_INTERNAL_CALL INTERNAL_CALL_MASK
 
-/// Internal call from lua code
+/// Internal call from Lua code
 #define LUA_INTERNAL_CALL (VIML_INTERNAL_CALL + 1)
 
 static inline bool is_internal_call(uint64_t channel_id)
@@ -124,10 +123,18 @@ struct key_value_pair {
   Object value;
 };
 
-typedef Object *(*field_hash)(void *retval, const char *str, size_t len);
+typedef uint64_t OptionalKeys;
+
+// this is the prefix of all keysets with optional keys
+typedef struct {
+  OptionalKeys is_set_;
+} OptKeySet;
+
 typedef struct {
   char *str;
   size_t ptr_off;
+  ObjectType type;  // kObjectTypeNil == untyped
+  int opt_index;
 } KeySetLink;
 
-#endif  // NVIM_API_PRIVATE_DEFS_H
+typedef KeySetLink *(*FieldHashfn)(const char *str, size_t len);

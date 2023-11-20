@@ -1,7 +1,6 @@
-#ifndef NVIM_UNDO_DEFS_H
-#define NVIM_UNDO_DEFS_H
+#pragma once
 
-#include <time.h>  // for time_t
+#include <time.h>
 
 #include "nvim/extmark_defs.h"
 #include "nvim/mark_defs.h"
@@ -26,7 +25,7 @@ struct u_entry {
   linenr_T ue_bot;              // number of line below undo block
   linenr_T ue_lcount;           // linecount when u_save called
   char **ue_array;              // array of lines in undo block
-  long ue_size;                 // number of lines in ue_array
+  linenr_T ue_size;             // number of lines in ue_array
 #ifdef U_DEBUG
   int ue_magic;                 // magic number to check allocation
 #endif
@@ -37,33 +36,33 @@ struct u_header {
   // the undo file in u_read_undo()
   union {
     u_header_T *ptr;            // pointer to next undo header in list
-    long seq;
+    int seq;
   } uh_next;
   union {
     u_header_T *ptr;            // pointer to previous header in list
-    long seq;
+    int seq;
   } uh_prev;
   union {
     u_header_T *ptr;            // pointer to next header for alt. redo
-    long seq;
+    int seq;
   } uh_alt_next;
   union {
     u_header_T *ptr;            // pointer to previous header for alt. redo
-    long seq;
+    int seq;
   } uh_alt_prev;
-  long uh_seq;                  // sequence number, higher == newer undo
+  int uh_seq;                   // sequence number, higher == newer undo
   int uh_walk;                  // used by undo_time()
-  u_entry_T *uh_entry;        // pointer to first entry
+  u_entry_T *uh_entry;          // pointer to first entry
   u_entry_T *uh_getbot_entry;   // pointer to where ue_bot must be set
   pos_T uh_cursor;              // cursor position before saving
-  long uh_cursor_vcol;
-  int uh_flags;                 // see below
-  fmark_T uh_namedm[NMARKS];    // marks before undo/after redo
+  colnr_T uh_cursor_vcol;
+  int uh_flags;                   // see below
+  fmark_T uh_namedm[NMARKS];      // marks before undo/after redo
   extmark_undo_vec_t uh_extmark;  // info to move extmarks
-  visualinfo_T uh_visual;       // Visual areas before undo/after redo
-  time_t uh_time;               // timestamp when the change was made
-  long uh_save_nr;              // set when the file was saved after the
-                                // changes in this block
+  visualinfo_T uh_visual;         // Visual areas before undo/after redo
+  time_t uh_time;                 // timestamp when the change was made
+  int uh_save_nr;                 // set when the file was saved after the
+                                  // changes in this block
 #ifdef U_DEBUG
   int uh_magic;                 // magic number to check allocation
 #endif
@@ -73,5 +72,3 @@ struct u_header {
 #define UH_CHANGED  0x01        // b_changed flag before undo/after redo
 #define UH_EMPTYBUF 0x02        // buffer was empty
 #define UH_RELOAD   0x04        // buffer was reloaded
-
-#endif  // NVIM_UNDO_DEFS_H

@@ -333,6 +333,36 @@ describe('ui/ext_messages', function()
     ]]}
   end)
 
+  it(':echoerr multiline', function()
+    exec_lua([[vim.g.multi = table.concat({ "bork", "fail" }, "\n")]])
+    feed(':echoerr g:multi<cr>')
+    screen:expect{grid=[[
+      ^                         |
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+    ]], messages={{
+      content = {{ "bork\nfail", 2 }},
+      kind = "echoerr"
+    }}}
+
+    feed(':messages<cr>')
+    screen:expect{grid=[[
+      ^                         |
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+    ]], messages={{
+      content = {{ "Press ENTER or type command to continue", 4 }},
+      kind = "return_prompt"
+    }}, msg_history={{
+      content = {{ "bork\nfail", 2 }},
+      kind = "echoerr"
+    }}}
+  end)
+
   it('shortmess-=S', function()
     command('set shortmess-=S')
     feed('iline 1\nline 2<esc>')
@@ -1031,6 +1061,53 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
     -- luacheck: pop
   end)
 
+  it('no empty line after :silent #12099', function()
+    exec([[
+      func T1()
+        silent !echo
+        echo "message T1"
+      endfunc
+      func T2()
+        silent lua print("lua message")
+        echo "message T2"
+      endfunc
+      func T3()
+        silent call nvim_out_write("api message\n")
+        echo "message T3"
+      endfunc
+    ]])
+    feed(':call T1()<CR>')
+    screen:expect{grid=[[
+      ^                                                            |
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      message T1                                                  |
+    ]]}
+    feed(':call T2()<CR>')
+    screen:expect{grid=[[
+      ^                                                            |
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      message T2                                                  |
+    ]]}
+    feed(':call T3()<CR>')
+    screen:expect{grid=[[
+      ^                                                            |
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      {1:~                                                           }|
+      message T3                                                  |
+    ]]}
+  end)
+
   it('supports ruler with laststatus=0', function()
     command("set ruler laststatus=0")
     screen:expect{grid=[[
@@ -1235,17 +1312,54 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
     ]])
   end)
 
-  it('echo messages are shown correctly when getchar() immediately follows', function()
-    feed([[:echo 'foo' | echo 'bar' | call getchar()<CR>]])
-    screen:expect([[
-                                                                  |
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {1:~                                                           }|
-      {3:                                                            }|
-      foo                                                         |
-      bar^                                                         |
-    ]])
+  describe('echo messages are shown when immediately followed by', function()
+    --- @param to_block  string           command to cause a blocking wait
+    --- @param to_unblock  number|string  number: timeout for blocking screen
+    ---                                   string: keys to stop the blocking wait
+    local function test_flush_before_block(to_block, to_unblock)
+      local timeout = type(to_unblock) == 'number' and to_unblock or nil
+      exec(([[
+        func PrintAndWait()
+          echon "aaa\nbbb"
+          %s
+          echon "\nccc"
+        endfunc
+      ]]):format(to_block))
+      feed(':call PrintAndWait()<CR>')
+      screen:expect{grid=[[
+                                                                    |
+        {1:~                                                           }|
+        {1:~                                                           }|
+        {1:~                                                           }|
+        {3:                                                            }|
+        aaa                                                         |
+        bbb^                                                         |
+      ]], timeout=timeout}
+      if type(to_unblock) == 'string' then
+        feed(to_unblock)
+      end
+      screen:expect{grid=[[
+                                                                    |
+        {1:~                                                           }|
+        {3:                                                            }|
+        aaa                                                         |
+        bbb                                                         |
+        ccc                                                         |
+        {4:Press ENTER or type command to continue}^                     |
+      ]]}
+    end
+
+    it('getchar()', function()
+      test_flush_before_block([[call getchar()]], 'k')
+    end)
+
+    it('wait()', function()
+      test_flush_before_block([[call wait(300, '0')]], 100)
+    end)
+
+    it('lua vim.wait()', function()
+      test_flush_before_block([[lua vim.wait(300, function() end)]], 100)
+    end)
   end)
 
   it('consecutive calls to win_move_statusline() work after multiline message #21014',function()
@@ -1366,7 +1480,7 @@ describe('ui/ext_messages', function()
 
     feed(":intro<cr>")
     screen:expect{grid=[[
-                                                                                      |
+      ^                                                                                |
                                                                                       |
                                                                                       |
                                                                                       |

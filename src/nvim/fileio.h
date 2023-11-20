@@ -1,9 +1,11 @@
-#ifndef NVIM_FILEIO_H
-#define NVIM_FILEIO_H
+#pragma once
 
 #include "nvim/buffer_defs.h"
 #include "nvim/eval/typval_defs.h"
+#include "nvim/ex_cmds_defs.h"
 #include "nvim/garray.h"
+#include "nvim/globals.h"
+#include "nvim/os/fs_defs.h"
 #include "nvim/os/os.h"
 
 // Values for readfile() flags
@@ -44,4 +46,3 @@ enum {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "fileio.h.generated.h"
 #endif
-#endif  // NVIM_FILEIO_H

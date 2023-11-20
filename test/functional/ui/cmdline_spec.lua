@@ -24,6 +24,7 @@ local function new_screen(opt)
     [7] = {bold = true, foreground = Screen.colors.Brown},
     [8] = {background = Screen.colors.LightGrey},
     [9] = {bold = true},
+    [10] = {background = Screen.colors.Yellow1};
   })
   return screen
 end
@@ -316,7 +317,7 @@ local function test_cmdline(linegrid)
     screen:expect{grid=[[
                                |
       {2:[No Name]                }|
-      {1::}make^                    |
+      {1::}mak^e                    |
       {3:[Command Line]           }|
                                |
     ]]}
@@ -326,7 +327,7 @@ local function test_cmdline(linegrid)
     screen:expect{grid=[[
                                |
       {2:[No Name]                }|
-      {1::}make^                    |
+      {1::}mak^e                    |
       {3:[Command Line]           }|
                                |
     ]], cmdline={nil, {
@@ -339,7 +340,7 @@ local function test_cmdline(linegrid)
     screen:expect{grid=[[
                                |
       {2:[No Name]                }|
-      {1::}make^                    |
+      {1::}mak^e                    |
       {3:[Command Line]           }|
                                |
     ]], cmdline={nil, {
@@ -352,7 +353,7 @@ local function test_cmdline(linegrid)
     screen:expect{grid=[[
                                |
       {2:[No Name]                }|
-      {1::}make^                    |
+      {1::}mak^e                    |
       {3:[Command Line]           }|
                                |
     ]]}
@@ -771,6 +772,84 @@ describe('cmdline redraw', function()
       :^abc                                    |
     ]])
   end)
+
+  it('with rightleftcmd', function()
+    command('set rightleft rightleftcmd=search shortmess+=s')
+    meths.buf_set_lines(0, 0, -1, true, {"let's rock!"})
+    screen:expect{grid=[[
+                    !kcor s'te^l|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+                               |
+    ]]}
+
+    feed '/'
+    screen:expect{grid=[[
+                    !kcor s'tel|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+                             ^ /|
+    ]]}
+
+    feed "let's"
+    -- note: cursor looks off but looks alright in real use
+    -- when rendered as a block so it touches the end of the text
+    screen:expect{grid=[[
+                    !kcor {2:s'tel}|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+                        ^ s'tel/|
+    ]]}
+
+    -- cursor movement
+    feed "<space>"
+    screen:expect{grid=[[
+                    !kcor{2: s'tel}|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+                       ^  s'tel/|
+    ]]}
+
+    feed "rock"
+    screen:expect{grid=[[
+                    !{2:kcor s'tel}|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+                   ^ kcor s'tel/|
+    ]]}
+
+    feed "<right>"
+    screen:expect{grid=[[
+                    !{2:kcor s'tel}|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+                    ^kcor s'tel/|
+    ]]}
+
+    feed "<left>"
+    screen:expect{grid=[[
+                    !{2:kcor s'tel}|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+                   ^ kcor s'tel/|
+    ]]}
+
+    feed "<cr>"
+    screen:expect{grid=[[
+                    !{10:kcor s'te^l}|
+      {1:                        ~}|
+      {1:                        ~}|
+      {1:                        ~}|
+      kcor s'tel/              |
+    ]]}
+  end)
 end)
 
 describe('statusline is redrawn on entering cmdline', function()
@@ -944,14 +1023,63 @@ describe('statusline is redrawn on entering cmdline', function()
   end)
 end)
 
+it('tabline is not redrawn in Ex mode #24122', function()
+  clear()
+  local screen = Screen.new(60, 5)
+  screen:set_default_attr_ids({
+    [0] = {bold = true, foreground = Screen.colors.Blue},  -- NonText
+    [1] = {bold = true, reverse = true},  -- MsgSeparator
+    [2] = {reverse = true},  -- TabLineFill
+  })
+  screen:attach()
+
+  exec([[
+    set showtabline=2
+    set tabline=%!MyTabLine()
+
+    function! MyTabLine()
+
+      return "foo"
+    endfunction
+  ]])
+
+  feed('gQ')
+  screen:expect{grid=[[
+    {2:foo                                                         }|
+                                                                |
+    {1:                                                            }|
+    Entering Ex mode.  Type "visual" to go to Normal mode.      |
+    :^                                                           |
+  ]]}
+
+  feed('echo 1<CR>')
+  screen:expect{grid=[[
+    {1:                                                            }|
+    Entering Ex mode.  Type "visual" to go to Normal mode.      |
+    :echo 1                                                     |
+    1                                                           |
+    :^                                                           |
+  ]]}
+end)
+
 describe("cmdline height", function()
+  before_each(clear)
+
   it("does not crash resized screen #14263", function()
-    clear()
     local screen = Screen.new(25, 10)
     screen:attach()
     command('set cmdheight=9999')
     screen:try_resize(25, 5)
     assert_alive()
+  end)
+
+  it('unchanged when restoring window sizes with global statusline', function()
+    command('set cmdheight=2 laststatus=2')
+    feed('q:')
+    command('set cmdheight=1 laststatus=3 | quit')
+    -- Available lines changed, so closing cmdwin should skip restoring window sizes, leaving the
+    -- cmdheight unchanged.
+    eq(1, eval('&cmdheight'))
   end)
 end)
 
@@ -970,6 +1098,26 @@ describe('cmdheight=0', function()
       [7] = {background = Screen.colors.Yellow};
     }
     screen:attach()
+  end)
+
+  it("with redrawdebug=invalid resize -1", function()
+    command("set redrawdebug=invalid cmdheight=0 noruler laststatus=0")
+    screen:expect{grid=[[
+      ^                         |
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+    ]]}
+    feed(":resize -1<CR>")
+    screen:expect{grid=[[
+      ^                         |
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+                               |
+    ]]}
+    assert_alive()
   end)
 
   it("with cmdheight=1 noruler laststatus=2", function()
@@ -1226,6 +1374,7 @@ describe('cmdheight=0', function()
   it('with multigrid', function()
     clear{args={'--cmd', 'set cmdheight=0'}}
     screen:attach{ext_multigrid=true}
+    meths.buf_set_lines(0, 0, -1, true, {'p'})
     screen:expect{grid=[[
     ## grid 1
       [2:-------------------------]|
@@ -1234,7 +1383,7 @@ describe('cmdheight=0', function()
       [2:-------------------------]|
       [2:-------------------------]|
     ## grid 2
-      ^                         |
+      ^p                        |
       {1:~                        }|
       {1:~                        }|
       {1:~                        }|
@@ -1253,7 +1402,7 @@ describe('cmdheight=0', function()
       [2:-------------------------]|
       [3:-------------------------]|
     ## grid 2
-                               |
+      {6:p}                        |
       {1:~                        }|
       {1:~                        }|
       {1:~                        }|
@@ -1378,7 +1527,21 @@ describe('cmdheight=0', function()
                                |
     ]])
     command('set cmdheight=0')
+    screen:expect{grid=[[
+      ^                         |
+      {1:~                        }|
+      {1:~                        }|
+      {1:~                        }|
+      {2:[No Name]                }|
+    ]]}
     command('resize -1')
+    screen:expect{grid=[[
+      ^                         |
+      {1:~                        }|
+      {1:~                        }|
+      {2:[No Name]                }|
+                               |
+    ]]}
     command('resize +1')
     screen:expect([[
       ^                         |

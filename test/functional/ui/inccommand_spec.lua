@@ -174,9 +174,12 @@ describe(":substitute, 'inccommand' preserves", function()
     it("'undolevels' (inccommand="..case..")", function()
       feed_command("set undolevels=139")
       feed_command("setlocal undolevels=34")
+      feed_command("split")  -- Show the buffer in multiple windows
       feed_command("set inccommand=" .. case)
       insert("as")
-      feed(":%s/as/glork/<enter>")
+      feed(":%s/as/glork/")
+      poke_eventloop()
+      feed("<enter>")
       eq(meths.get_option_value('undolevels', {scope='global'}), 139)
       eq(meths.get_option_value('undolevels', {buf=0}), 34)
     end)
@@ -2926,7 +2929,16 @@ it(':substitute with inccommand, allows :redraw before first separator is typed 
   meths.open_win(float_buf, false, {
     relative = 'editor', height = 1, width = 5, row = 3, col = 0, focusable = false,
   })
-  feed(':%s')
+  feed(':')
+  screen:expect([[
+    foo bar baz                   |
+    bar baz fox                   |
+    bar foo baz                   |
+    {16:     }{15:                         }|
+    {15:~                             }|
+    :^                             |
+  ]])
+  feed('%s')
   screen:expect([[
     foo bar baz                   |
     bar baz fox                   |
@@ -3083,11 +3095,40 @@ it(':substitute with inccommand works properly if undo is not synced #20029', fu
     baz]])
 end)
 
+it(':substitute with inccommand does not unexpectedly change viewport #25697', function()
+  clear()
+  local screen = Screen.new(45, 5)
+  common_setup(screen, 'nosplit', long_multiline_text)
+  command('vnew | tabnew | tabclose')
+  screen:expect([[
+    ^                      │£ m n                 |
+    {15:~                     }│t œ ¥                 |
+    {15:~                     }│                      |
+    {11:[No Name]              }{10:[No Name] [+]         }|
+                                                 |
+  ]])
+  feed(':s/')
+  screen:expect([[
+                          │£ m n                 |
+    {15:~                     }│t œ ¥                 |
+    {15:~                     }│                      |
+    {11:[No Name]              }{10:[No Name] [+]         }|
+    :s/^                                          |
+  ]])
+  feed('<Esc>')
+  screen:expect([[
+    ^                      │£ m n                 |
+    {15:~                     }│t œ ¥                 |
+    {15:~                     }│                      |
+    {11:[No Name]              }{10:[No Name] [+]         }|
+                                                 |
+  ]])
+end)
+
 it('long :%s/ with inccommand does not collapse cmdline', function()
   clear()
   local screen = Screen.new(10,5)
-  common_setup(screen)
-  command('set inccommand=nosplit')
+  common_setup(screen, 'nosplit')
   feed(':%s/AAAAAAA', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A',
     'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A')
   screen:expect([[
@@ -3096,6 +3137,21 @@ it('long :%s/ with inccommand does not collapse cmdline', function()
     :%s/AAAAAAAA|
     AAAAAAAAAAAA|
     AAAAAAA^     |
+  ]])
+end)
+
+it("with 'inccommand' typing invalid `={expr}` does not show error", function()
+  clear()
+  local screen = Screen.new(30, 6)
+  common_setup(screen, 'nosplit')
+  feed(':edit `=`')
+  screen:expect([[
+                                  |
+    {15:~                             }|
+    {15:~                             }|
+    {15:~                             }|
+    {15:~                             }|
+    :edit `=`^                     |
   ]])
 end)
 
@@ -3109,5 +3165,33 @@ it("with 'inccommand' typing :filter doesn't segfault or leak memory #19057", fu
   feed('h')
   assert_alive()
   feed('i')
+  assert_alive()
+end)
+
+it("'inccommand' cannot be changed during preview #23136", function()
+  clear()
+  local screen = Screen.new(30, 6)
+  common_setup(screen, 'nosplit', 'foo\nbar\nbaz')
+  source([[
+    function! IncCommandToggle()
+      let prev = &inccommand
+
+      if &inccommand ==# 'split'
+        set inccommand=nosplit
+      elseif &inccommand ==# 'nosplit'
+        set inccommand=split
+      elseif &inccommand ==# ''
+        set inccommand=nosplit
+      else
+        throw 'unknown inccommand'
+      endif
+
+      return " \<BS>"
+    endfun
+
+    cnoremap <expr> <C-E> IncCommandToggle()
+  ]])
+
+  feed(':%s/foo/bar<C-E><C-E><C-E>')
   assert_alive()
 end)

@@ -181,6 +181,18 @@ describe('vim.diagnostic', function()
     eq(0, #diagnostics)
   end)
 
+  it('always returns a copy of diagnostic tables', function()
+    local result = exec_lua [[
+      vim.diagnostic.set(diagnostic_ns, diagnostic_bufnr, {
+        make_error('Diagnostic #1', 1, 1, 1, 1),
+      })
+      local diag = vim.diagnostic.get()
+      diag[1].col = 10000
+      return vim.diagnostic.get()[1].col == 10000
+    ]]
+    eq(result, false)
+  end)
+
   it('resolves buffer number 0 to the current buffer', function()
     eq(2, exec_lua [[
       vim.api.nvim_set_current_buf(diagnostic_bufnr)
@@ -860,7 +872,7 @@ end)
       ]])
     end)
 
-    it('returns only requested diagnostics when severity is supplied', function()
+    it('returns only requested diagnostics when severity range is supplied', function()
       eq({2, 3, 2}, exec_lua [[
         vim.diagnostic.set(diagnostic_ns, diagnostic_bufnr, {
           make_error("Error 1", 1, 1, 1, 5),
@@ -876,6 +888,28 @@ end)
             severity = {
               min=vim.diagnostic.severity.INFO,
               max=vim.diagnostic.severity.WARN,
+            }
+          }),
+        }
+      ]])
+    end)
+
+    it('returns only requested diagnostics when severities are supplied', function()
+      eq({1, 1, 2}, exec_lua [[
+        vim.diagnostic.set(diagnostic_ns, diagnostic_bufnr, {
+          make_error("Error 1", 1, 1, 1, 5),
+          make_warning("Warning on Server 1", 1, 1, 2, 3),
+          make_info("Ignored information", 1, 1, 2, 3),
+          make_hint("Here's a hint", 1, 1, 2, 3),
+        })
+
+        return {
+          #vim.diagnostic.get(diagnostic_bufnr, { severity = {vim.diagnostic.severity.WARN} }),
+          #vim.diagnostic.get(diagnostic_bufnr, { severity = {vim.diagnostic.severity.ERROR} }),
+          #vim.diagnostic.get(diagnostic_bufnr, {
+            severity = {
+              vim.diagnostic.severity.INFO,
+              vim.diagnostic.severity.WARN,
             }
           }),
         }
@@ -1203,7 +1237,7 @@ end)
         return prefix .. message
       ]])
 
-      eq('[err-code] Some error',  exec_lua [[
+      eq('[(1/1) err-code] Some error',  exec_lua [[
         local diagnostics = {
           make_error('Some error', 0, 0, 0, 0, nil, 'err-code'),
         }
@@ -1211,7 +1245,7 @@ end)
         vim.diagnostic.set(diagnostic_ns, diagnostic_bufnr, diagnostics, {
           underline = false,
           virtual_text = {
-            prefix = function(diag) return string.format('[%s]', diag.code) end,
+            prefix = function(diag, i, total) return string.format('[(%d/%d) %s]', i, total, diag.code) end,
             suffix = '',
           }
         })

@@ -489,8 +489,8 @@ In Insert or Command-line mode:
 |v_ip|	   N  ip	Select "inner paragraph"
 |v_ab|	   N  ab	Select "a block" (from "[(" to "])")
 |v_ib|	   N  ib	Select "inner block" (from "[(" to "])")
-|v_aB|	   N  aB	Select "a Block" (from "[{" to "]}")
-|v_iB|	   N  iB	Select "inner Block" (from "[{" to "]}")
+|v_aB|	   N  aB	Select "a Block" (from `[{` to `]}`)
+|v_iB|	   N  iB	Select "inner Block" (from `[{` to `]}`)
 |v_a>|	   N  a>	Select "a <> block"
 |v_i>|	   N  i>	Select "inner <> block"
 |v_at|	   N  at	Select "a tag block" (from <aaa> to </aaa>)
@@ -817,7 +817,6 @@ Short explanation of each option:		*option-list*
 'path'		  'pa'	    list of directories searched with "gf" et.al.
 'preserveindent'  'pi'	    preserve the indent structure when reindenting
 'previewheight'   'pvh'     height of the preview window
-'previewpopup'    'pvp'     use popup window for preview
 'previewwindow'   'pvw'     identifies the preview window
 'pumheight'	  'ph'	    maximum number of items to show in the popup menu
 'pumwidth'	  'pw'	    minimum width of the popup menu

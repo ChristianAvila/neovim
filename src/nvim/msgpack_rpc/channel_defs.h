@@ -1,5 +1,4 @@
-#ifndef NVIM_MSGPACK_RPC_CHANNEL_DEFS_H
-#define NVIM_MSGPACK_RPC_CHANNEL_DEFS_H
+#pragma once
 
 #include <msgpack.h>
 #include <stdbool.h>
@@ -13,6 +12,16 @@
 
 typedef struct Channel Channel;
 typedef struct Unpacker Unpacker;
+
+typedef enum {
+  kClientTypeUnknown = -1,
+  kClientTypeRemote = 0,
+  kClientTypeMsgpackRpc = 5,
+  kClientTypeUi = 1,
+  kClientTypeEmbedder = 2,
+  kClientTypeHost = 3,
+  kClientTypePlugin = 4,
+} ClientType;
 
 typedef struct {
   uint32_t request_id;
@@ -37,6 +46,5 @@ typedef struct {
   uint32_t next_request_id;
   kvec_t(ChannelCallFrame *) call_stack;
   Dictionary info;
+  ClientType client_type;
 } RpcState;
-
-#endif  // NVIM_MSGPACK_RPC_CHANNEL_DEFS_H

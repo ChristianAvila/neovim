@@ -1,9 +1,9 @@
-#ifndef NVIM_SYNTAX_H
-#define NVIM_SYNTAX_H
+#pragma once
 
 #include <stdbool.h>
 
 #include "nvim/buffer_defs.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/globals.h"
 #include "nvim/macros.h"
@@ -36,5 +36,3 @@ extern const char *const highlight_init_cmdline[];
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "syntax.h.generated.h"
 #endif
-
-#endif  // NVIM_SYNTAX_H

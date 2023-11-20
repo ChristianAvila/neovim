@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // autocmd.c: Autocommand related functions
 
 #include <assert.h>
@@ -34,7 +31,7 @@
 #include "nvim/memline_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
-#include "nvim/option_defs.h"
+#include "nvim/option.h"
 #include "nvim/optionstr.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
@@ -46,10 +43,12 @@
 #include "nvim/search.h"
 #include "nvim/state.h"
 #include "nvim/strings.h"
+#include "nvim/types.h"
 #include "nvim/ui.h"
 #include "nvim/ui_compositor.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
+#include "nvim/winfloat.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "auevents_name_map.generated.h"
@@ -227,7 +226,7 @@ static void au_show_for_event(int group, event_T event, const char *pat)
         }
 
         msg_col = 4;
-        msg_outtrans(ac->pat->pat);
+        msg_outtrans(ac->pat->pat, 0);
       }
 
       if (got_int) {
@@ -252,12 +251,12 @@ static void au_show_for_event(int group, event_T event, const char *pat)
         } else {
           snprintf(msg, msglen, "%s [%s]", exec_to_string, ac->desc);
         }
-        msg_outtrans(msg);
+        msg_outtrans(msg, 0);
         XFREE_CLEAR(msg);
       } else if (ac->exec.type == CALLABLE_CB) {
         msg_puts_attr(exec_to_string, HL_ATTR(HLF_8));
       } else {
-        msg_outtrans(exec_to_string);
+        msg_outtrans(exec_to_string, 0);
       }
       XFREE_CLEAR(exec_to_string);
       if (p_verbose > 0) {
@@ -371,7 +370,7 @@ void aubuflocal_remove(buf_T *buf)
 
       if (p_verbose >= 6) {
         verbose_enter();
-        smsg(_("auto-removing autocommand: %s <buffer=%d>"), event_nr2name(event), buf->b_fnum);
+        smsg(0, _("auto-removing autocommand: %s <buffer=%d>"), event_nr2name(event), buf->b_fnum);
         verbose_leave();
       }
     }
@@ -542,7 +541,7 @@ void do_augroup(char *arg, int del_group)
 
     String name;
     int value;
-    map_foreach(int, &map_augroup_name_to_id, name, value, {
+    map_foreach(&map_augroup_name_to_id, name, value, {
       if (value > 0) {
         msg_puts(name.data);
       } else {
@@ -576,7 +575,7 @@ void free_all_autocmds(void)
   })
   map_destroy(String, &map_augroup_name_to_id);
 
-  map_foreach_value(String, &map_augroup_id_to_name, name, {
+  map_foreach_value(&map_augroup_id_to_name, name, {
     api_free_string(name);
   })
   map_destroy(int, &map_augroup_id_to_name);
@@ -596,9 +595,9 @@ bool is_aucmd_win(win_T *win)
   return false;
 }
 
-// Return the event number for event name "start".
-// Return NUM_EVENTS if the event name was not found.
-// Return a pointer to the next event name in "end".
+/// Return the event number for event name "start".
+/// Return NUM_EVENTS if the event name was not found.
+/// Return a pointer to the next event name in "end".
 event_T event_name2nr(const char *start, char **end)
 {
   const char *p;
@@ -620,6 +619,18 @@ event_T event_name2nr(const char *start, char **end)
     return NUM_EVENTS;
   }
   return event_names[i].event;
+}
+
+/// Return the event number for event name "str".
+/// Return NUM_EVENTS if the event name was not found.
+event_T event_name2nr_str(String str)
+{
+  for (int i = 0; event_names[i].name != NULL; i++) {
+    if (str.size == event_names[i].len && STRNICMP(str.data, event_names[i].name, str.size) == 0) {
+      return event_names[i].event;
+    }
+  }
+  return NUM_EVENTS;
 }
 
 /// Return the name for event
@@ -1018,7 +1029,7 @@ int autocmd_register(int64_t id, event_T event, const char *pat, int patlen, int
     }
 
     ap->refcount = 0;
-    ap->pat = xstrnsave(pat, (size_t)patlen);
+    ap->pat = xmemdupz(pat, (size_t)patlen);
     ap->patlen = patlen;
 
     // need to initialize last_mode for the first ModeChanged autocmd
@@ -1029,7 +1040,8 @@ int autocmd_register(int64_t id, event_T event, const char *pat, int patlen, int
     // If the event is CursorMoved, update the last cursor position
     // position to avoid immediately triggering the autocommand
     if (event == EVENT_CURSORMOVED && !has_event(EVENT_CURSORMOVED)) {
-      curwin->w_last_cursormoved = curwin->w_cursor;
+      last_cursormoved_win = curwin;
+      last_cursormoved = curwin->w_cursor;
     }
 
     // Initialize the fields checked by the WinScrolled and
@@ -1148,7 +1160,7 @@ int do_doautocmd(char *arg_start, bool do_msg, bool *did_something)
   }
 
   if (nothing_done && do_msg && !aborting()) {
-    smsg(_("No matching autocommands: %s"), arg_start);
+    smsg(0, _("No matching autocommands: %s"), arg_start);
   }
   if (did_something != NULL) {
     *did_something = !nothing_done;
@@ -1339,7 +1351,6 @@ void aucmd_restbuf(aco_save_T *aco)
   if (aco->use_aucmd_win_idx >= 0) {
     win_T *awp = aucmd_win[aco->use_aucmd_win_idx].auc_win;
 
-    curbuf->b_nwindows--;
     // Find "awp", it can't be closed, but it may be in another tab page.
     // Do not trigger autocommands here.
     block_autocmds();
@@ -1355,7 +1366,7 @@ void aucmd_restbuf(aco_save_T *aco)
       }
     }
 win_found:
-    ;
+    curbuf->b_nwindows--;
     const bool save_stop_insert_mode = stop_insert_mode;
     // May need to stop Insert mode if we were in a prompt buffer.
     leaving_window(curwin);
@@ -1551,7 +1562,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
   bool retval = false;
   static int nesting = 0;
   char *save_cmdarg;
-  long save_cmdbang;
+  varnumber_T save_cmdbang;
   static int filechangeshell_busy = false;
   proftime_T wait_time;
   bool did_save_redobuff = false;
@@ -1603,6 +1614,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
 
   // Save the autocmd_* variables and info about the current buffer.
   char *save_autocmd_fname = autocmd_fname;
+  bool save_autocmd_fname_full = autocmd_fname_full;
   int save_autocmd_bufnr = autocmd_bufnr;
   char *save_autocmd_match = autocmd_match;
   int save_autocmd_busy = autocmd_busy;
@@ -1631,6 +1643,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
     // Allocate MAXPATHL for when eval_vars() resolves the fullpath.
     autocmd_fname = xstrnsave(autocmd_fname, MAXPATHL);
   }
+  autocmd_fname_full = false;  // call FullName_save() later
 
   // Set the buffer number to be used for <abuf>.
   autocmd_bufnr = buf == NULL ? 0 : buf->b_fnum;
@@ -1674,6 +1687,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
         || event == EVENT_USER || event == EVENT_WINCLOSED
         || event == EVENT_WINRESIZED || event == EVENT_WINSCROLLED) {
       fname = xstrdup(fname);
+      autocmd_fname_full = true;  // don't expand it later
     } else {
       fname = FullName_save(fname, false);
     }
@@ -1762,10 +1776,10 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
     patcmd.data = data;
 
     // set v:cmdarg (only when there is a matching pattern)
-    save_cmdbang = (long)get_vim_var_nr(VV_CMDBANG);
+    save_cmdbang = get_vim_var_nr(VV_CMDBANG);
     if (eap != NULL) {
       save_cmdarg = set_cmdarg(eap, NULL);
-      set_vim_var_nr(VV_CMDBANG, (long)eap->forceit);
+      set_vim_var_nr(VV_CMDBANG, eap->forceit);
     } else {
       save_cmdarg = NULL;  // avoid gcc warning
     }
@@ -1780,8 +1794,14 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
       check_lnums_nested(true);
     }
 
+    const int save_did_emsg = did_emsg;
+    const bool save_ex_pressedreturn = get_pressedreturn();
+
     // Execute the autocmd. The `getnextac` callback handles iteration.
-    do_cmdline(NULL, getnextac, (void *)&patcmd, DOCMD_NOWAIT | DOCMD_VERBOSE | DOCMD_REPEAT);
+    do_cmdline(NULL, getnextac, &patcmd, DOCMD_NOWAIT | DOCMD_VERBOSE | DOCMD_REPEAT);
+
+    did_emsg += save_did_emsg;
+    set_pressedreturn(save_ex_pressedreturn);
 
     if (nesting == 1) {
       // restore cursor and topline, unless they were changed
@@ -1806,6 +1826,7 @@ bool apply_autocmds_group(event_T event, char *fname, char *fname_io, bool force
   estack_pop();
   xfree(autocmd_fname);
   autocmd_fname = save_autocmd_fname;
+  autocmd_fname_full = save_autocmd_fname_full;
   autocmd_bufnr = save_autocmd_bufnr;
   autocmd_match = save_autocmd_match;
   current_sctx = save_current_sctx;
@@ -1935,7 +1956,7 @@ static void aucmd_next(AutoPatCmd *apc)
       snprintf(namep, sourcing_name_len, s, name, ap->pat);
       if (p_verbose >= 8) {
         verbose_enter();
-        smsg(_("Executing %s"), namep);
+        smsg(0, _("Executing %s"), namep);
         verbose_leave();
       }
 
@@ -2034,7 +2055,7 @@ char *getnextac(int c, void *cookie, int indent, bool do_concat)
   if (p_verbose >= 9) {
     verbose_enter_scroll();
     char *exec_to_string = aucmd_exec_to_string(ac, ac->exec);
-    smsg(_("autocommand %s"), exec_to_string);
+    smsg(0, _("autocommand %s"), exec_to_string);
     msg_puts("\n");  // don't overwrite this either
     XFREE_CLEAR(exec_to_string);
     verbose_leave_scroll();
@@ -2200,6 +2221,13 @@ char *expand_get_event_name(expand_T *xp, int idx)
 
   // List event names
   return event_names[idx - next_augroup_id].name;
+}
+
+/// Function given to ExpandGeneric() to obtain the list of event names. Don't
+/// include groups.
+char *get_event_name_no_group(expand_T *xp FUNC_ATTR_UNUSED, int idx)
+{
+  return event_names[idx].name;
 }
 
 /// Check whether given autocommand is supported
@@ -2484,7 +2512,7 @@ static int arg_augroup_get(char **argp)
     return AUGROUP_ALL;
   }
 
-  char *group_name = xstrnsave(arg, (size_t)(p - arg));
+  char *group_name = xmemdupz(arg, (size_t)(p - arg));
   int group = augroup_find(group_name);
   if (group == AUGROUP_ERROR) {
     group = AUGROUP_ALL;  // no match, use all groups
@@ -2511,11 +2539,38 @@ static bool arg_autocmd_flag_get(bool *flag, char **cmd_ptr, char *pattern, int 
   return false;
 }
 
+/// When kFalse: VimSuspend should be triggered next.
+/// When kTrue: VimResume should be triggered next.
+/// When kNone: Currently triggering VimSuspend or VimResume.
+static TriState pending_vimresume = kFalse;
+
+static void vimresume_event(void **argv)
+{
+  apply_autocmds(EVENT_VIMRESUME, NULL, NULL, false, NULL);
+  pending_vimresume = kFalse;
+}
+
+/// Trigger VimSuspend or VimResume autocommand.
+void may_trigger_vim_suspend_resume(bool suspend)
+{
+  if (suspend && pending_vimresume == kFalse) {
+    pending_vimresume = kNone;
+    apply_autocmds(EVENT_VIMSUSPEND, NULL, NULL, false, NULL);
+    pending_vimresume = kTrue;
+  } else if (!suspend && pending_vimresume == kTrue) {
+    pending_vimresume = kNone;
+    multiqueue_put(main_loop.events, vimresume_event, 0);
+  }
+}
+
 // UI Enter
 void do_autocmd_uienter(uint64_t chanid, bool attached)
 {
   static bool recursive = false;
 
+  if (starting == NO_SCREEN) {
+    return;  // user config hasn't been sourced yet
+  }
   if (recursive) {
     return;  // disallow recursion
   }
@@ -2537,7 +2592,7 @@ void do_autocmd_uienter(uint64_t chanid, bool attached)
 void do_autocmd_focusgained(bool gained)
 {
   static bool recursive = false;
-  static Timestamp last_time = (time_t)0;
+  static Timestamp last_time = 0;
 
   if (recursive) {
     return;  // disallow recursion

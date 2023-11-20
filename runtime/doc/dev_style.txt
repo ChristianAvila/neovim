@@ -32,19 +32,13 @@ but we nonetheless keep things as they are in order to preserve consistency.
 Header Files                                            *dev-style-header*
 
 
-The #define Guard ~
+Header guard ~
 
-All header files should have `#define` guards to prevent multiple inclusion.
-The format of the symbol name should be `NVIM_<DIRECTORY>_<FILE>_H`.
+All header files should start with `#pragma once` to prevent multiple inclusion.
 
     In foo/bar.h:
 >c
-        #ifndef NVIM_FOO_BAR_H
-        #define NVIM_FOO_BAR_H
-
-        ...
-
-        #endif  // NVIM_FOO_BAR_H
+        #pragma once
 <
 
 
@@ -245,15 +239,13 @@ contain only non-static function declarations. >c
 
 
     // src/nvim/foo.h file
-    #ifndef NVIM_FOO_H
-    #define NVIM_FOO_H
+    #pragma once
 
     …
 
     #ifdef INCLUDE_GENERATED_DECLARATIONS
     # include "foo.h.generated.h"
     #endif
-    #endif  // NVIM_FOO_H
 
 
 64-bit Portability ~
@@ -846,7 +838,7 @@ Annotate non-trivial fall-through between cases.
 If not conditional on an enumerated value, switch statements should always
 have a `default` case (in the case of an enumerated value, the compiler will
 warn you if any values are not handled). If the default case should never
-execute, simply `assert`: >c
+execute, simply use `abort()`: >c
 
     switch (var) {
       case 0:
@@ -856,8 +848,54 @@ execute, simply `assert`: >c
         ...
         break;
       default:
-        assert(false);
+        abort();
     }
+
+Switch statements that are conditional on an enumerated value should not have
+a `default` case if it is exhaustive. Explicit case labels are preferred over
+`default`, even if it leads to multiple case labels for the same code. For
+example, instead of: >c
+
+    case A:
+      ...
+    case B:
+      ...
+    case C:
+      ...
+    default:
+      ...
+
+You should use: >c
+
+    case A:
+      ...
+    case B:
+      ...
+    case C:
+      ...
+    case D:
+    case E:
+    case F:
+      ...
+
+Certain compilers do not recognize an exhaustive enum switch statement as
+exhaustive, which causes compiler warnings when there is a return statement in
+every case of a switch statement, but no catch-all return statement. To fix
+these spurious errors, you are advised to use `UNREACHABLE` after the switch
+statement to explicitly tell the compiler that the switch statement always
+returns and any code after it is unreachable. For example: >c
+
+    enum { A, B, C } var;
+    ...
+    switch (var) {
+      case A:
+        return 1;
+      case B:
+        return 2;
+      case C:
+        return 3;
+    }
+    UNREACHABLE;
 
 Return Values ~
 

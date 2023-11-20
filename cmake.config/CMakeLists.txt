@@ -4,6 +4,7 @@ include(CheckFunctionExists)
 include(CheckIncludeFiles)
 include(CheckCSourceRuns)
 include(CheckCSourceCompiles)
+include(TestBigEndian)
 
 check_c_source_compiles("
 #include <execinfo.h>
@@ -40,6 +41,9 @@ check_include_files(sys/utsname.h HAVE_SYS_UTSNAME_H)
 check_include_files(termios.h HAVE_TERMIOS_H)
 check_include_files(sys/uio.h HAVE_SYS_UIO_H)
 check_include_files(sys/sdt.h HAVE_SYS_SDT_H)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  check_include_files(sys/xattr.h HAVE_XATTR)
+endif()
 
 # Functions
 check_function_exists(fseeko HAVE_FSEEKO)
@@ -127,36 +131,19 @@ endif()
 if("${HAVE_BE64TOH_MACROS}" OR "${HAVE_BE64TOH_FUNC}")
   set(HAVE_BE64TOH 1)
 endif()
-if (NOT "${HAVE_BE64TOH}")
-  if (NOT "${CMAKE_CROSSCOMPILING}")
-    # It is safe to make ORDER_BIG_ENDIAN not defined if
-    # - HAVE_BE64TOH is true. In this case be64toh will be used unconditionally in
-    #   any case and ORDER_BIG_ENDIAN will not be examined.
-    # - CMAKE_CROSSCOMPILING *and* HAVE_BE64TOH are both false. In this case
-    #   be64toh function which uses cycle and arithmetic operations is used which
-    #   will work regardless of endianness. Function is sub-optimal though.
-    check_c_source_runs("
-      ${SI}
-      ${MS}
-        char *s = (char *) &i;
-        return (
-          s[0] == 0x01
-          && s[1] == 0x02
-          && s[2] == 0x03
-          && s[3] == 0x04
-          && s[4] == 0x05
-          && s[5] == 0x06
-          && s[6] == 0x07
-          && s[7] == 0x08) ? 0 : 1;
-      ${ME}"
-      ORDER_BIG_ENDIAN)
-  endif()
-endif()
+
+test_big_endian(ORDER_BIG_ENDIAN)
 
 configure_file (
   "${PROJECT_SOURCE_DIR}/cmake.config/config.h.in"
   "${PROJECT_BINARY_DIR}/cmake.config/auto/config.h"
   )
+
+# Prevent double space in --version output if CMAKE_C_FLAGS is empty
+set(C_FLAGS_VERSION_OUTPUT ${CMAKE_C_FLAGS})
+if(C_FLAGS_VERSION_OUTPUT)
+  string(PREPEND C_FLAGS_VERSION_OUTPUT " ")
+endif()
 
 if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.15)
   configure_file(versiondef.h.in auto/versiondef.h.gen)

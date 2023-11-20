@@ -19,7 +19,8 @@ describe('search highlighting', function()
       [1] = {bold=true, foreground=Screen.colors.Blue},
       [2] = {background = Screen.colors.Yellow}, -- Search
       [3] = {reverse = true},
-      [4] = {foreground = Screen.colors.Red}, -- Message
+      [4] = {foreground = Screen.colors.Red}, -- WarningMsg
+      [5] = {bold = true, reverse = true}, -- StatusLine
       [6] = {foreground = Screen.colors.Blue4, background = Screen.colors.LightGrey}, -- Folded
     })
   end)
@@ -52,11 +53,11 @@ describe('search highlighting', function()
       {1:~                                       }|
       /text^                                   |
     ]], win_viewport={
-      [2] = {win = {id = 1000}, topline = 0, botline = 3, curline = 0, curcol = 9, linecount = 2, sum_scroll_delta = 0};
+      [2] = {win = {id = 1000}, topline = 0, botline = 3, curline = 0, curcol = 8, linecount = 2, sum_scroll_delta = 0};
     }}
   end)
 
-  it('works', function()
+  local function test_search_hl()
     insert([[
       some text
       more textstuff
@@ -109,6 +110,26 @@ describe('search highlighting', function()
       {1:~                                       }|
       :nohlsearch                             |
     ]])
+  end
+
+  it("works when 'winhighlight' is not set", function()
+    test_search_hl()
+  end)
+
+  it("works when 'winhighlight' doesn't change Search highlight", function()
+    command('setlocal winhl=NonText:Underlined')
+    local attrs = screen:get_default_attr_ids()
+    attrs[1] = {foreground = Screen.colors.SlateBlue, underline = true}
+    screen:set_default_attr_ids(attrs)
+    test_search_hl()
+  end)
+
+  it("works when 'winhighlight' changes Search highlight", function()
+    command('setlocal winhl=Search:Underlined')
+    local attrs = screen:get_default_attr_ids()
+    attrs[2] = {foreground = Screen.colors.SlateBlue, underline = true}
+    screen:set_default_attr_ids(attrs)
+    test_search_hl()
   end)
 
   describe('CurSearch highlight', function()
@@ -306,19 +327,33 @@ describe('search highlighting', function()
 
   it('is preserved during :terminal activity', function()
     feed((':terminal "%s" REP 5000 foo<cr>'):format(testprg('shell-test')))
-
     feed(':file term<CR>')
+    screen:expect([[
+      ^0: foo                                  |
+      1: foo                                  |
+      2: foo                                  |
+      3: foo                                  |
+      4: foo                                  |
+      5: foo                                  |
+      :file term                              |
+    ]])
+
     feed('G')  -- Follow :terminal output.
     feed(':vnew<CR>')
     insert([[
       foo bar baz
       bar baz foo
-      bar foo baz
-    ]])
+      bar foo baz]])
     feed('/foo')
-    helpers.poke_eventloop()
-    screen:sleep(0)
-    screen:expect_unchanged()
+    screen:expect([[
+      {3:foo} bar baz         │{MATCH:%d+}: {2:foo}{MATCH:%s+}|
+      bar baz {2:foo}         │{MATCH:%d+}: {2:foo}{MATCH:%s+}|
+      bar {2:foo} baz         │{MATCH:%d+}: {2:foo}{MATCH:%s+}|
+      {1:~                   }│{MATCH:.*}|
+      {1:~                   }│{MATCH:.*}|
+      {5:[No Name] [+]        }{3:term               }|
+      /foo^                                    |
+    ]])
   end)
 
   it('works with incsearch', function()

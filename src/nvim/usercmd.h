@@ -1,8 +1,8 @@
-#ifndef NVIM_USERCMD_H
-#define NVIM_USERCMD_H
+#pragma once
 
 #include <stdint.h>
 
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/garray.h"
@@ -32,4 +32,3 @@ extern garray_T ucmds;
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "usercmd.h.generated.h"
 #endif
-#endif  // NVIM_USERCMD_H

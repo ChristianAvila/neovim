@@ -1,9 +1,6 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// @file encode.c
 ///
-/// File containing functions for encoding and decoding VimL values.
+/// File containing functions for encoding and decoding Vimscript values.
 ///
 /// Split out from eval.c.
 
@@ -152,9 +149,9 @@ static int conv_error(const char *const msg, const MPConvStack *const mpstack,
                        ? 0
                        : (v.data.l.li == NULL
                           ? tv_list_len(v.data.l.list) - 1
-                          : (int)tv_list_idx_of_item(v.data.l.list,
-                                                     TV_LIST_ITEM_PREV(v.data.l.list,
-                                                                       v.data.l.li))));
+                          : tv_list_idx_of_item(v.data.l.list,
+                                                TV_LIST_ITEM_PREV(v.data.l.list,
+                                                                  v.data.l.li))));
       const listitem_T *const li = (v.data.l.li == NULL
                                     ? tv_list_last(v.data.l.list)
                                     : TV_LIST_ITEM_PREV(v.data.l.list,

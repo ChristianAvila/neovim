@@ -1,11 +1,12 @@
-#ifndef NVIM_EX_GETLN_H
-#define NVIM_EX_GETLN_H
+#pragma once
 
 #include <stdbool.h>
 
 #include "klib/kvec.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
+#include "nvim/option_defs.h"
 #include "nvim/types.h"
 
 struct cmdline_info;
@@ -82,4 +83,3 @@ enum {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "ex_getln.h.generated.h"
 #endif
-#endif  // NVIM_EX_GETLN_H

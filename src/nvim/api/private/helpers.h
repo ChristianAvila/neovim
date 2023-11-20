@@ -1,14 +1,15 @@
-#ifndef NVIM_API_PRIVATE_HELPERS_H
-#define NVIM_API_PRIVATE_HELPERS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
 
 #include "klib/kvec.h"
 #include "nvim/api/private/defs.h"
+#include "nvim/api/private/dispatch.h"
 #include "nvim/decoration.h"
 #include "nvim/ex_eval_defs.h"
 #include "nvim/getchar.h"
+#include "nvim/gettext.h"
 #include "nvim/globals.h"
 #include "nvim/macros.h"
 #include "nvim/map.h"
@@ -20,7 +21,6 @@
 #define BOOLEAN_OBJ(b) ((Object) { \
     .type = kObjectTypeBoolean, \
     .data.boolean = b })
-#define BOOL(b) BOOLEAN_OBJ(b)
 
 #define INTEGER_OBJ(i) ((Object) { \
     .type = kObjectTypeInteger, \
@@ -64,16 +64,15 @@
 #define NIL ((Object)OBJECT_INIT)
 #define NULL_STRING ((String)STRING_INIT)
 
-// currently treat key=vim.NIL as if the key was missing
-#define HAS_KEY(o) ((o).type != kObjectTypeNil)
+#define HAS_KEY(d, typ, key) (((d)->is_set__##typ##_ & (1 << KEYSET_OPTIDX_##typ##__##key)) != 0)
+
+#define GET_BOOL_OR_TRUE(d, typ, key) (HAS_KEY(d, typ, key) ? (d)->key : true)
 
 #define PUT(dict, k, v) \
   kv_push(dict, ((KeyValuePair) { .key = cstr_to_string(k), .value = v }))
 
 #define PUT_C(dict, k, v) \
   kv_push_c(dict, ((KeyValuePair) { .key = cstr_as_string(k), .value = v }))
-
-#define PUT_BOOL(dict, name, condition) PUT(dict, name, BOOLEAN_OBJ(condition));
 
 #define ADD(array, item) \
   kv_push(array, item)
@@ -95,7 +94,7 @@
 
 #define cbuf_as_string(d, s) ((String) { .data = d, .size = s })
 
-#define STATIC_CSTR_AS_STRING(s) ((String) { .data = s, .size = sizeof(s) - 1 })
+#define STATIC_CSTR_AS_STRING(s) ((String) { .data = s, .size = sizeof("" s) - 1 })
 
 /// Create a new String instance, putting data in allocated memory
 ///
@@ -126,9 +125,9 @@
 #define api_free_window(value)
 #define api_free_tabpage(value)
 
-EXTERN PMap(int) buffer_handles INIT(= MAP_INIT);
-EXTERN PMap(int) window_handles INIT(= MAP_INIT);
-EXTERN PMap(int) tabpage_handles INIT(= MAP_INIT);
+EXTERN PMap(int) buffer_handles INIT( = MAP_INIT);
+EXTERN PMap(int) window_handles INIT( = MAP_INIT);
+EXTERN PMap(int) tabpage_handles INIT( = MAP_INIT);
 
 #define handle_get_buffer(h) pmap_get(int)(&buffer_handles, (h))
 #define handle_get_window(h) pmap_get(int)(&window_handles, (h))
@@ -136,8 +135,8 @@ EXTERN PMap(int) tabpage_handles INIT(= MAP_INIT);
 
 /// Structure used for saving state for :try
 ///
-/// Used when caller is supposed to be operating when other VimL code is being
-/// processed and that “other VimL code” must not be affected.
+/// Used when caller is supposed to be operating when other Vimscript code is being
+/// processed and that “other Vimscript code” must not be affected.
 typedef struct {
   except_T *current_exception;
   msglist_T *private_msg_list;
@@ -199,5 +198,3 @@ typedef struct {
     current_channel_id = save_channel_id; \
     current_sctx = save_current_sctx; \
   } while (0);
-
-#endif  // NVIM_API_PRIVATE_HELPERS_H

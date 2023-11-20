@@ -1,4 +1,5 @@
 local uv = vim.uv
+local uri_encode = vim.uri_encode
 
 --- @type (fun(modename: string): fun()|string)[]
 local loaders = package.loaders
@@ -17,11 +18,14 @@ local M = {}
 ---@class ModuleInfo
 ---@field modpath string Path of the module
 ---@field modname string Name of the module
----@field stat? uv_fs_t File stat of the module path
+---@field stat? uv.uv_fs_t File stat of the module path
 
 ---@alias LoaderStats table<string, {total:number, time:number, [string]:number?}?>
 
+---@nodoc
 M.path = vim.fn.stdpath('cache') .. '/luac'
+
+---@nodoc
 M.enabled = false
 
 ---@class Loader
@@ -30,7 +34,7 @@ M.enabled = false
 ---@field _rtp_key string
 ---@field _hashes? table<string, CacheHash>
 local Loader = {
-  VERSION = 3,
+  VERSION = 4,
   ---@type table<string, table<string,ModuleInfo>>
   _indexed = {},
   ---@type table<string, string[]>
@@ -58,7 +62,6 @@ function Loader.get_hash(path)
   return Loader._hashes[path]
 end
 
----@private
 local function normalize(path)
   return vim.fs.normalize(path, { expand_env = false })
 end
@@ -97,7 +100,7 @@ end
 ---@return string file_name
 ---@private
 function Loader.cache_file(name)
-  local ret = M.path .. '/' .. name:gsub('[/\\:]', '%%')
+  local ret = ('%s/%s'):format(M.path, uri_encode(name, 'rfc2396'))
   return ret:sub(-4) == '.lua' and (ret .. 'c') or (ret .. '.luac')
 end
 
@@ -122,7 +125,6 @@ end
 --- @param path string
 --- @param mode integer
 --- @return string? data
---- @private
 local function readfile(path, mode)
   local f = uv.fs_open(path, 'r', mode)
   if f then
@@ -161,7 +163,7 @@ function Loader.read(name)
   end
 end
 
---- The `package.loaders` loader for lua files using the cache.
+--- The `package.loaders` loader for Lua files using the cache.
 ---@param modname string module name
 ---@return string|function
 ---@private
@@ -211,7 +213,7 @@ end
 ---@private
 -- luacheck: ignore 312
 function Loader.loadfile(filename, mode, env)
-  -- ignore mode, since we byte-compile the lua source files
+  -- ignore mode, since we byte-compile the Lua source files
   mode = nil
   return Loader.load(normalize(filename), { mode = mode, env = env })
 end
@@ -268,7 +270,7 @@ function Loader.load(modpath, opts)
   return chunk, err
 end
 
---- Finds lua modules for the given module name.
+--- Finds Lua modules for the given module name.
 ---@param modname string Module name, or `"*"` to find the top-level modules instead
 ---@param opts? ModuleFindOpts (table|nil) Options for finding a module:
 ---    - rtp: (boolean) Search for modname in the runtime path (defaults to `true`)
@@ -289,7 +291,7 @@ function M.find(modname, opts)
   local idx = modname:find('.', 1, true)
 
   -- HACK: fix incorrect require statements. Really not a fan of keeping this,
-  -- but apparently the regular lua loader also allows this
+  -- but apparently the regular Lua loader also allows this
   if idx == 1 then
     modname = modname:gsub('^%.+', '')
     basename = modname:gsub('%.', '/')
@@ -310,7 +312,6 @@ function M.find(modname, opts)
   local results = {}
 
   -- Only continue if we haven't found anything yet or we want to find all
-  ---@private
   local function continue()
     return #results == 0 or opts.all
   end
@@ -318,7 +319,6 @@ function M.find(modname, opts)
   -- Checks if the given paths contain the top-level module.
   -- If so, it tries to find the module path for the given module name.
   ---@param paths string[]
-  ---@private
   local function _find(paths)
     for _, path in ipairs(paths) do
       if topmod == '*' then
@@ -386,9 +386,9 @@ end
 
 --- Enables the experimental Lua module loader:
 --- * overrides loadfile
---- * adds the lua loader using the byte-compilation cache
+--- * adds the Lua loader using the byte-compilation cache
 --- * adds the libs loader
---- * removes the default Neovim loader
+--- * removes the default Nvim loader
 function M.enable()
   if M.enabled then
     return
@@ -396,11 +396,11 @@ function M.enable()
   M.enabled = true
   vim.fn.mkdir(vim.fn.fnamemodify(M.path, ':p'), 'p')
   _G.loadfile = Loader.loadfile
-  -- add lua loader
+  -- add Lua loader
   table.insert(loaders, 2, Loader.loader)
   -- add libs loader
   table.insert(loaders, 3, Loader.loader_lib)
-  -- remove Neovim loader
+  -- remove Nvim loader
   for l, loader in ipairs(loaders) do
     if loader == vim._load_package then
       table.remove(loaders, l)
@@ -411,7 +411,7 @@ end
 
 --- Disables the experimental Lua module loader:
 --- * removes the loaders
---- * adds the default Neovim loader
+--- * adds the default Nvim loader
 function M.disable()
   if not M.enabled then
     return
@@ -426,8 +426,8 @@ function M.disable()
   table.insert(loaders, 2, vim._load_package)
 end
 
---- Return the top-level `/lua/*` modules for this path
----@param path string path to check for top-level lua modules
+--- Return the top-level \`/lua/*` modules for this path
+---@param path string path to check for top-level Lua modules
 ---@private
 function Loader.lsmod(path)
   if not Loader._indexed[path] then
@@ -504,7 +504,6 @@ end
 ---@private
 function M._inspect(opts)
   if opts and opts.print then
-    ---@private
     local function ms(nsec)
       return math.floor(nsec / 1e6 * 1000 + 0.5) / 1000 .. 'ms'
     end

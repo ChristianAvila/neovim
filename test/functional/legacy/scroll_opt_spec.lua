@@ -3,6 +3,7 @@ local Screen = require('test.functional.ui.screen')
 local clear = helpers.clear
 local exec = helpers.exec
 local feed = helpers.feed
+local assert_alive = helpers.assert_alive
 
 before_each(clear)
 
@@ -172,6 +173,24 @@ describe('smoothscroll', function()
     screen:expect(s7)
     feed('<C-Y>')
     screen:expect(s8)
+  end)
+
+  -- oldtest: Test_smoothscroll_multibyte()
+  it('works with multibyte characters', function()
+    screen:try_resize(40, 6)
+    exec([[
+      set scrolloff=0 smoothscroll
+      call setline(1, [repeat('ϛ', 45), repeat('2', 36)])
+      exe "normal G35l\<C-E>k"
+    ]])
+    screen:expect([[
+      ϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛϛ^ϛϛϛϛϛ|
+      ϛϛϛϛϛ                                   |
+      222222222222222222222222222222222222    |
+      ~                                       |
+      ~                                       |
+                                              |
+    ]])
   end)
 
   -- oldtest: Test_smoothscroll_number()
@@ -865,6 +884,145 @@ describe('smoothscroll', function()
     ]])
   end)
 
+  -- oldtest: Test_smoothscroll_multi_skipcol()
+  it('scrolling multiple lines and stopping at non-zero skipcol', function()
+    screen:try_resize(40, 10)
+    screen:set_default_attr_ids({
+      [0] = {foreground = Screen.colors.Blue, bold = true},
+      [1] = {background = Screen.colors.Grey90},
+    })
+    exec([[
+      setlocal cursorline scrolloff=0 smoothscroll
+      call setline(1, repeat([''], 8))
+      call setline(3, repeat('a', 50))
+      call setline(4, repeat('a', 50))
+      call setline(7, 'bbb')
+      call setline(8, 'ccc')
+      redraw
+    ]])
+    screen:expect([[
+      {1:^                                        }|
+                                              |
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+      aaaaaaaaaa                              |
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+      aaaaaaaaaa                              |
+                                              |
+                                              |
+      bbb                                     |
+                                              |
+    ]])
+    feed('3<C-E>')
+    screen:expect([[
+      {0:<<<}{1:aaaaaa^a                              }|
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|
+      aaaaaaaaaa                              |
+                                              |
+                                              |
+      bbb                                     |
+      ccc                                     |
+      {0:~                                       }|
+      {0:~                                       }|
+                                              |
+    ]])
+    feed('2<C-E>')
+    screen:expect([[
+      {0:<<<}{1:aaaaaa^a                              }|
+                                              |
+                                              |
+      bbb                                     |
+      ccc                                     |
+      {0:~                                       }|
+      {0:~                                       }|
+      {0:~                                       }|
+      {0:~                                       }|
+                                              |
+    ]])
+  end)
+
+  -- oldtest: Test_smoothscroll_zero_width_scroll_cursor_bot()
+  it('does not divide by zero in zero-width window', function()
+    screen:try_resize(40, 19)
+    screen:set_default_attr_ids({
+      [1] = {foreground = Screen.colors.Brown};  -- LineNr
+      [2] = {bold = true, foreground = Screen.colors.Blue};  -- NonText
+      [3] = {bold = true, reverse = true};  -- StatusLine
+      [4] = {reverse = true};  -- StatusLineNC
+    })
+    exec([[
+      silent normal yy
+      silent normal 19p
+      set cpoptions+=n
+      vsplit
+      vertical resize 0
+      set foldcolumn=1
+      set number
+      set smoothscroll
+      silent normal 20G
+    ]])
+    screen:expect([[
+      {1: }│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:@}│                                      |
+      {2:^@}│                                      |
+      {3:< }{4:[No Name] [+]                         }|
+                                              |
+    ]])
+  end)
+
+  -- oldtest: Test_smoothscroll_cursor_top()
+  it('resets skipcol when scrolling cursor to top', function()
+    screen:try_resize(40, 12)
+    exec([[
+      set smoothscroll scrolloff=2
+      new | 11resize | wincmd j
+      call setline(1, ['line1', 'line2', 'line3'->repeat(20), 'line4'])
+      exe "norm G3\<C-E>k"
+    ]])
+    screen:expect([[
+                                              |
+      [No Name]                               |
+      line1                                   |
+      line2                                   |
+      ^line3line3line3line3line3line3line3line3|
+      line3line3line3line3line3line3line3line3|
+      line3line3line3line3                    |
+      line4                                   |
+      ~                                       |
+      ~                                       |
+      [No Name] [+]                           |
+                                              |
+    ]])
+  end)
+
+  -- oldtest: Test_smoothscroll_crash()
+  it('does not crash with small window and cpo+=n', function()
+    screen:try_resize(40, 12)
+    exec([[
+      20 new
+      vsp
+      put =repeat('aaaa', 20)
+      set nu fdc=1  smoothscroll cpo+=n
+      vert resize 0
+      exe "norm! 0\<c-e>"
+    ]])
+    feed('2<C-E>')
+    assert_alive()
+  end)
+
   it("works with virt_lines above and below", function()
     screen:try_resize(55, 7)
     exec([=[
@@ -989,6 +1147,46 @@ describe('smoothscroll', function()
       <<<e text with some text with some text |
       with some text with some text           |
       [No Name] [+]                           |
+                                              |
+    ]])
+  end)
+
+  it('works with very long line', function()
+    screen:set_default_attr_ids({
+      [1] = {foreground = Screen.colors.Brown},
+      [2] = {foreground = Screen.colors.Blue1, bold = true},
+    })
+    exec([[
+      edit test/functional/fixtures/bigfile_oneline.txt
+      setlocal smoothscroll number
+    ]])
+    screen:expect([[
+      {1:  1 }^0000;<control>;Cc;0;BN;;;;;N;NULL;;;|
+      {1:    }; 0001;<control>;Cc;0;BN;;;;;N;START|
+      {1:    } OF HEADING;;;; 0002;<control>;Cc;0;|
+      {1:    }BN;;;;;N;START OF TEXT;;;; 0003;<con|
+      {1:    }trol>;Cc;0;BN;;;;;N;END OF TEXT;;;; |
+      {1:    }0004;<control>;Cc;0;BN;;;;;N;END OF |
+      {1:    }TRANSMISSION;;;; 0005;<control>;Cc;0|
+      {1:    };BN;;;;;N;ENQUIRY;;;; 0006;<control>|
+      {1:    };Cc;0;BN;;;;;N;ACKNOWLEDGE;;;; 0007;|
+      {1:    }<control>;Cc;0;BN;;;;;N;BELL;;;; 000|
+      {1:    }8;<control>;Cc;0;BN;;;;;N;BACKSPACE;|
+                                              |
+    ]])
+    feed('j')
+    screen:expect([[
+      {2:<<<}{1: }CJK COMPATIBILITY IDEOGRAPH-2F91F;Lo|
+      {1:    };0;L;243AB;;;;N;;;;; 2F920;CJK COMPA|
+      {1:    }TIBILITY IDEOGRAPH-2F920;Lo;0;L;7228|
+      {1:    };;;;N;;;;; 2F921;CJK COMPATIBILITY I|
+      {1:    }DEOGRAPH-2F921;Lo;0;L;7235;;;;N;;;;;|
+      {1:    } 2F922;CJK COMPATIBILITY IDEOGRAPH-2|
+      {1:    }F922;Lo;0;L;7250;;;;N;;;;;          |
+      {1:  2 }^2F923;CJK COMPATIBILITY IDEOGRAPH-2F|
+      {1:    }923;Lo;0;L;24608;;;;N;;;;;          |
+      {1:  3 }2F924;CJK COMPATIBILITY IDEOGRAPH-2F|
+      {1:    }924;Lo;0;L;7280;;;;N;;;;;           |
                                               |
     ]])
   end)

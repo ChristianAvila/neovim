@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <msgpack/object.h>
 #include <msgpack/sbuffer.h>
 #include <msgpack/unpack.h>
@@ -11,7 +8,6 @@
 
 #include "klib/kvec.h"
 #include "msgpack/pack.h"
-#include "nvim/api/keysets.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/assert.h"
 #include "nvim/event/wstream.h"
@@ -476,8 +472,8 @@ msgpack_object *msgpack_rpc_method(msgpack_object *req)
 {
   msgpack_object *obj = req->via.array.ptr
                         + (msgpack_rpc_is_notification(req) ? 1 : 2);
-  return obj->type == MSGPACK_OBJECT_STR || obj->type == MSGPACK_OBJECT_BIN ?
-         obj : NULL;
+  return obj->type == MSGPACK_OBJECT_STR || obj->type == MSGPACK_OBJECT_BIN
+         ? obj : NULL;
 }
 
 msgpack_object *msgpack_rpc_args(msgpack_object *req)

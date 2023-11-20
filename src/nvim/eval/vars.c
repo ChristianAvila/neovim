@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // eval/vars.c: functions for dealing with variables
 
 #include <assert.h>
@@ -8,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "nvim/ascii.h"
@@ -19,7 +17,6 @@
 #include "nvim/eval/encode.h"
 #include "nvim/eval/funcs.h"
 #include "nvim/eval/typval.h"
-#include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/eval/vars.h"
 #include "nvim/eval/window.h"
@@ -27,6 +24,7 @@
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
+#include "nvim/garray.h"
 #include "nvim/gettext.h"
 #include "nvim/globals.h"
 #include "nvim/hashtab.h"
@@ -35,6 +33,8 @@
 #include "nvim/message.h"
 #include "nvim/ops.h"
 #include "nvim/option.h"
+#include "nvim/option_defs.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/os.h"
 #include "nvim/search.h"
 #include "nvim/strings.h"
@@ -52,8 +52,8 @@
 
 static const char *e_letunexp = N_("E18: Unexpected characters in :let");
 static const char *e_lock_unlock = N_("E940: Cannot lock or unlock variable %s");
-static const char e_setting_str_to_value_with_wrong_type[]
-  = N_("E963: Setting %s to value with wrong type");
+static const char e_setting_v_str_to_value_with_wrong_type[]
+  = N_("E963: Setting v:%s to value with wrong type");
 static const char e_cannot_use_heredoc_here[]
   = N_("E991: Cannot use =<< here");
 
@@ -271,7 +271,7 @@ list_T *heredoc_get(exarg_T *eap, char *cmd, bool script_get)
         p++;
         text_indent_len++;
       }
-      text_indent = xstrnsave(theline, (size_t)text_indent_len);
+      text_indent = xmemdupz(theline, (size_t)text_indent_len);
     }
     // with "trim": skip the indent matching the first line
     if (text_indent != NULL) {
@@ -766,84 +766,80 @@ static char *ex_let_option(char *arg, typval_T *const tv, const bool is_const,
       || (endchars != NULL
           && vim_strchr(endchars, (uint8_t)(*skipwhite(p))) == NULL)) {
     emsg(_(e_letunexp));
-  } else {
-    varnumber_T n = 0;
-    getoption_T opt_type;
-    long numval;
-    char *stringval = NULL;
-    const char *s = NULL;
-    bool failed = false;
-    uint32_t opt_p_flags;
-    char *tofree = NULL;
-
-    const char c1 = *p;
-    *p = NUL;
-
-    opt_type = get_option_value(arg, &numval, &stringval, &opt_p_flags, scope);
-    if (opt_type == gov_bool
-        || opt_type == gov_number
-        || opt_type == gov_hidden_bool
-        || opt_type == gov_hidden_number) {
-      // number, possibly hidden
-      n = (long)tv_get_number(tv);
-    }
-
-    if ((opt_p_flags & P_FUNC) && tv_is_func(*tv)) {
-      // If the option can be set to a function reference or a lambda
-      // and the passed value is a function reference, then convert it to
-      // the name (string) of the function reference.
-      s = tofree = encode_tv2string(tv, NULL);
-    } else if (tv->v_type != VAR_BOOL && tv->v_type != VAR_SPECIAL) {
-      // Avoid setting a string option to the text "v:false" or similar.
-      s = tv_get_string_chk(tv);
-    }
-
-    if (op != NULL && *op != '=') {
-      if (((opt_type == gov_bool || opt_type == gov_number) && *op == '.')
-          || (opt_type == gov_string && *op != '.')) {
-        semsg(_(e_letwrong), op);
-        failed = true;  // don't set the value
-      } else {
-        // number or bool
-        if (opt_type == gov_number || opt_type == gov_bool) {
-          switch (*op) {
-          case '+':
-            n = numval + n; break;
-          case '-':
-            n = numval - n; break;
-          case '*':
-            n = numval * n; break;
-          case '/':
-            n = num_divide(numval, n); break;
-          case '%':
-            n = num_modulus(numval, n); break;
-          }
-          s = NULL;
-        } else if (opt_type == gov_string && stringval != NULL && s != NULL) {
-          // string
-          char *const oldstringval = stringval;
-          stringval = concat_str(stringval, s);
-          xfree(oldstringval);
-          s = stringval;
-        }
-      }
-    }
-
-    if (!failed) {
-      if (opt_type != gov_string || s != NULL) {
-        const char *err = set_option_value(arg, (long)n, s, scope);
-        arg_end = p;
-        if (err != NULL) {
-          emsg(_(err));
-        }
-      } else {
-        emsg(_(e_stringreq));
-      }
-    }
-    *p = c1;
-    xfree(stringval);
-    xfree(tofree);
+    return NULL;
   }
+
+  const char c1 = *p;
+  *p = NUL;
+
+  uint32_t opt_p_flags;
+  bool hidden;
+  OptVal curval = get_option_value(arg, &opt_p_flags, scope, &hidden);
+  OptVal newval = NIL_OPTVAL;
+  if (curval.type == kOptValTypeNil && arg[0] != 't' && arg[1] != '_') {
+    semsg(_(e_unknown_option2), arg);
+    goto theend;
+  }
+  if (op != NULL && *op != '='
+      && ((curval.type != kOptValTypeString && *op == '.')
+          || (curval.type == kOptValTypeString && *op != '.'))) {
+    semsg(_(e_letwrong), op);
+    goto theend;
+  }
+
+  bool error;
+  newval = tv_to_optval(tv, arg, opt_p_flags, &error);
+  if (error) {
+    goto theend;
+  }
+
+  // Don't assume current and new values are of the same type in order to future-proof the code for
+  // when an option can have multiple types.
+  const bool is_num = ((curval.type == kOptValTypeNumber || curval.type == kOptValTypeBoolean)
+                       && (newval.type == kOptValTypeNumber || newval.type == kOptValTypeBoolean));
+  const bool is_string = curval.type == kOptValTypeString && newval.type == kOptValTypeString;
+
+  if (op != NULL && *op != '=') {
+    if (!hidden && is_num) {  // number or bool
+      OptInt cur_n = curval.type == kOptValTypeNumber ? curval.data.number : curval.data.boolean;
+      OptInt new_n = newval.type == kOptValTypeNumber ? newval.data.number : newval.data.boolean;
+
+      switch (*op) {
+      case '+':
+        new_n = cur_n + new_n; break;
+      case '-':
+        new_n = cur_n - new_n; break;
+      case '*':
+        new_n = cur_n * new_n; break;
+      case '/':
+        new_n = num_divide(cur_n, new_n); break;
+      case '%':
+        new_n = num_modulus(cur_n, new_n); break;
+      }
+
+      if (curval.type == kOptValTypeNumber) {
+        newval = NUMBER_OPTVAL(new_n);
+      } else {
+        newval = BOOLEAN_OPTVAL(TRISTATE_FROM_INT(new_n));
+      }
+    } else if (!hidden && is_string
+               && curval.data.string.data != NULL && newval.data.string.data != NULL) {  // string
+      OptVal newval_old = newval;
+      newval = CSTR_AS_OPTVAL(concat_str(curval.data.string.data, newval.data.string.data));
+      optval_free(newval_old);
+    }
+  }
+
+  const char *err = set_option_value(arg, newval, scope);
+  arg_end = p;
+  if (err != NULL) {
+    emsg(_(err));
+  }
+
+theend:
+  *p = c1;
+  optval_free(curval);
+  optval_free(newval);
   return arg_end;
 }
 
@@ -1056,55 +1052,55 @@ static int do_unlet_var(lval_T *lp, char *name_end, exarg_T *eap, int deep FUNC_
                                      lp->ll_name_len))) {
     return FAIL;
   } else if (lp->ll_range) {
-    assert(lp->ll_list != NULL);
-    // Delete a range of List items.
-    listitem_T *const first_li = lp->ll_li;
-    listitem_T *last_li = first_li;
-    while (true) {
-      listitem_T *const li = TV_LIST_ITEM_NEXT(lp->ll_list, lp->ll_li);
-      if (value_check_lock(TV_LIST_ITEM_TV(lp->ll_li)->v_lock,
-                           lp->ll_name,
-                           lp->ll_name_len)) {
-        return false;
-      }
-      lp->ll_li = li;
-      lp->ll_n1++;
-      if (lp->ll_li == NULL || (!lp->ll_empty2 && lp->ll_n2 < lp->ll_n1)) {
-        break;
-      }
-      last_li = lp->ll_li;
-    }
-    tv_list_remove_items(lp->ll_list, first_li, last_li);
+    tv_list_unlet_range(lp->ll_list, lp->ll_li, lp->ll_n1, !lp->ll_empty2, lp->ll_n2);
+  } else if (lp->ll_list != NULL) {
+    // unlet a List item.
+    tv_list_item_remove(lp->ll_list, lp->ll_li);
   } else {
-    if (lp->ll_list != NULL) {
-      // unlet a List item.
-      tv_list_item_remove(lp->ll_list, lp->ll_li);
-    } else {
-      // unlet a Dictionary item.
-      dict_T *d = lp->ll_dict;
-      assert(d != NULL);
-      dictitem_T *di = lp->ll_di;
-      bool watched = tv_dict_is_watched(d);
-      char *key = NULL;
-      typval_T oldtv;
+    // unlet a Dictionary item.
+    dict_T *d = lp->ll_dict;
+    assert(d != NULL);
+    dictitem_T *di = lp->ll_di;
+    bool watched = tv_dict_is_watched(d);
+    char *key = NULL;
+    typval_T oldtv;
 
-      if (watched) {
-        tv_copy(&di->di_tv, &oldtv);
-        // need to save key because dictitem_remove will free it
-        key = xstrdup(di->di_key);
-      }
+    if (watched) {
+      tv_copy(&di->di_tv, &oldtv);
+      // need to save key because dictitem_remove will free it
+      key = xstrdup(di->di_key);
+    }
 
-      tv_dict_item_remove(d, di);
+    tv_dict_item_remove(d, di);
 
-      if (watched) {
-        tv_dict_watcher_notify(d, key, NULL, &oldtv);
-        tv_clear(&oldtv);
-        xfree(key);
-      }
+    if (watched) {
+      tv_dict_watcher_notify(d, key, NULL, &oldtv);
+      tv_clear(&oldtv);
+      xfree(key);
     }
   }
 
   return ret;
+}
+
+/// Unlet one item or a range of items from a list.
+/// Return OK or FAIL.
+static void tv_list_unlet_range(list_T *const l, listitem_T *const li_first, const int n1_arg,
+                                const bool has_n2, const int n2)
+{
+  assert(l != NULL);
+  // Delete a range of List items.
+  listitem_T *li_last = li_first;
+  int n1 = n1_arg;
+  while (true) {
+    listitem_T *const li = TV_LIST_ITEM_NEXT(l, li_last);
+    n1++;
+    if (li == NULL || (has_n2 && n2 < n1)) {
+      break;
+    }
+    li_last = li;
+  }
+  tv_list_remove_items(l, li_first, li_last);
 }
 
 /// unlet a variable
@@ -1356,11 +1352,11 @@ static void list_one_var(dictitem_T *v, const char *prefix, int *first)
 static void list_one_var_a(const char *prefix, const char *name, const ptrdiff_t name_len,
                            const VarType type, const char *string, int *first)
 {
-  // don't use msg() or msg_attr() to avoid overwriting "v:statusmsg"
+  // don't use msg() to avoid overwriting "v:statusmsg"
   msg_start();
   msg_puts(prefix);
   if (name != NULL) {  // "a:" vars don't have a name stored
-    msg_puts_attr_len(name, name_len, 0);
+    msg_puts_len(name, name_len, 0);
   }
   msg_putchar(' ');
   msg_advance(22);
@@ -1382,7 +1378,7 @@ static void list_one_var_a(const char *prefix, const char *name, const ptrdiff_t
     msg_putchar(' ');
   }
 
-  msg_outtrans(string);
+  msg_outtrans(string, 0);
 
   if (type == VAR_FUNC || type == VAR_PARTIAL) {
     msg_puts("()");
@@ -1391,6 +1387,62 @@ static void list_one_var_a(const char *prefix, const char *name, const ptrdiff_t
     msg_clr_eos();
     *first = false;
   }
+}
+
+/// Additional handling for setting a v: variable.
+///
+/// @return  true if the variable should be set normally,
+///          false if nothing else needs to be done.
+bool before_set_vvar(const char *const varname, dictitem_T *const di, typval_T *const tv,
+                     const bool copy, const bool watched, bool *const type_error)
+{
+  if (di->di_tv.v_type == VAR_STRING) {
+    typval_T oldtv = TV_INITIAL_VALUE;
+    if (watched) {
+      tv_copy(&di->di_tv, &oldtv);
+    }
+    XFREE_CLEAR(di->di_tv.vval.v_string);
+    if (copy || tv->v_type != VAR_STRING) {
+      const char *const val = tv_get_string(tv);
+      // Careful: when assigning to v:errmsg and tv_get_string()
+      // causes an error message the variable will already be set.
+      if (di->di_tv.vval.v_string == NULL) {
+        di->di_tv.vval.v_string = xstrdup(val);
+      }
+    } else {
+      // Take over the string to avoid an extra alloc/free.
+      di->di_tv.vval.v_string = tv->vval.v_string;
+      tv->vval.v_string = NULL;
+    }
+    // Notify watchers
+    if (watched) {
+      tv_dict_watcher_notify(&vimvardict, varname, &di->di_tv, &oldtv);
+      tv_clear(&oldtv);
+    }
+    return false;
+  } else if (di->di_tv.v_type == VAR_NUMBER) {
+    typval_T oldtv = TV_INITIAL_VALUE;
+    if (watched) {
+      tv_copy(&di->di_tv, &oldtv);
+    }
+    di->di_tv.vval.v_number = tv_get_number(tv);
+    if (strcmp(varname, "searchforward") == 0) {
+      set_search_direction(di->di_tv.vval.v_number ? '/' : '?');
+    } else if (strcmp(varname, "hlsearch") == 0) {
+      no_hlsearch = !di->di_tv.vval.v_number;
+      redraw_all_later(UPD_SOME_VALID);
+    }
+    // Notify watchers
+    if (watched) {
+      tv_dict_watcher_notify(&vimvardict, varname, &di->di_tv, &oldtv);
+      tv_clear(&oldtv);
+    }
+    return false;
+  } else if (di->di_tv.v_type != tv->v_type) {
+    *type_error = true;
+    return false;
+  }
+  return true;
 }
 
 /// Set variable to the given value
@@ -1422,31 +1474,29 @@ void set_var_const(const char *name, const size_t name_len, typval_T *const tv, 
                    const bool is_const)
   FUNC_ATTR_NONNULL_ALL
 {
-  dictitem_T *v;
-  hashtab_T *ht;
-  dict_T *dict;
-
   const char *varname;
-  ht = find_var_ht_dict(name, name_len, &varname, &dict);
+  dict_T *dict;
+  hashtab_T *ht = find_var_ht_dict(name, name_len, &varname, &dict);
   const bool watched = tv_dict_is_watched(dict);
 
   if (ht == NULL || *varname == NUL) {
     semsg(_(e_illvar), name);
     return;
   }
-  v = find_var_in_ht(ht, 0, varname, name_len - (size_t)(varname - name), true);
+  const size_t varname_len = name_len - (size_t)(varname - name);
+  dictitem_T *di = find_var_in_ht(ht, 0, varname, varname_len, true);
 
   // Search in parent scope which is possible to reference from lambda
-  if (v == NULL) {
-    v = find_var_in_scoped_ht(name, name_len, true);
+  if (di == NULL) {
+    di = find_var_in_scoped_ht(name, name_len, true);
   }
 
-  if (tv_is_func(*tv) && var_wrong_func_name(name, v == NULL)) {
+  if (tv_is_func(*tv) && var_wrong_func_name(name, di == NULL)) {
     return;
   }
 
   typval_T oldtv = TV_INITIAL_VALUE;
-  if (v != NULL) {
+  if (di != NULL) {
     if (is_const) {
       emsg(_(e_cannot_mod));
       return;
@@ -1456,9 +1506,9 @@ void set_var_const(const char *name, const size_t name_len, typval_T *const tv, 
     // - Whether the variable is read-only
     // - Whether the variable value is locked
     // - Whether the variable is locked
-    if (var_check_ro(v->di_flags, name, name_len)
-        || value_check_lock(v->di_tv.v_lock, name, name_len)
-        || var_check_lock(v->di_flags, name, name_len)) {
+    if (var_check_ro(di->di_flags, name, name_len)
+        || value_check_lock(di->di_tv.v_lock, name, name_len)
+        || var_check_lock(di->di_flags, name, name_len)) {
       return;
     }
 
@@ -1466,42 +1516,19 @@ void set_var_const(const char *name, const size_t name_len, typval_T *const tv, 
 
     // Handle setting internal v: variables separately where needed to
     // prevent changing the type.
-    if (is_vimvarht(ht)) {
-      if (v->di_tv.v_type == VAR_STRING) {
-        XFREE_CLEAR(v->di_tv.vval.v_string);
-        if (copy || tv->v_type != VAR_STRING) {
-          const char *const val = tv_get_string(tv);
-
-          // Careful: when assigning to v:errmsg and tv_get_string()
-          // causes an error message the variable will already be set.
-          if (v->di_tv.vval.v_string == NULL) {
-            v->di_tv.vval.v_string = xstrdup(val);
-          }
-        } else {
-          // Take over the string to avoid an extra alloc/free.
-          v->di_tv.vval.v_string = tv->vval.v_string;
-          tv->vval.v_string = NULL;
-        }
-        return;
-      } else if (v->di_tv.v_type == VAR_NUMBER) {
-        v->di_tv.vval.v_number = tv_get_number(tv);
-        if (strcmp(varname, "searchforward") == 0) {
-          set_search_direction(v->di_tv.vval.v_number ? '/' : '?');
-        } else if (strcmp(varname, "hlsearch") == 0) {
-          no_hlsearch = !v->di_tv.vval.v_number;
-          redraw_all_later(UPD_SOME_VALID);
-        }
-        return;
-      } else if (v->di_tv.v_type != tv->v_type) {
-        semsg(_(e_setting_str_to_value_with_wrong_type), name);
-        return;
+    bool type_error = false;
+    if (is_vimvarht(ht)
+        && !before_set_vvar(varname, di, tv, copy, watched, &type_error)) {
+      if (type_error) {
+        semsg(_(e_setting_v_str_to_value_with_wrong_type), varname);
       }
+      return;
     }
 
     if (watched) {
-      tv_copy(&v->di_tv, &oldtv);
+      tv_copy(&di->di_tv, &oldtv);
     }
-    tv_clear(&v->di_tv);
+    tv_clear(&di->di_tv);
   } else {  // Add a new variable.
     // Can't add "v:" or "a:" variable.
     if (is_vimvarht(ht) || ht == get_funccal_args_ht()) {
@@ -1517,28 +1544,28 @@ void set_var_const(const char *name, const size_t name_len, typval_T *const tv, 
     // Make sure dict is valid
     assert(dict != NULL);
 
-    v = xmalloc(offsetof(dictitem_T, di_key) + strlen(varname) + 1);
-    STRCPY(v->di_key, varname);
-    if (hash_add(ht, v->di_key) == FAIL) {
-      xfree(v);
+    di = xmalloc(offsetof(dictitem_T, di_key) + varname_len + 1);
+    memcpy(di->di_key, varname, varname_len + 1);
+    if (hash_add(ht, di->di_key) == FAIL) {
+      xfree(di);
       return;
     }
-    v->di_flags = DI_FLAGS_ALLOC;
+    di->di_flags = DI_FLAGS_ALLOC;
     if (is_const) {
-      v->di_flags |= DI_FLAGS_LOCK;
+      di->di_flags |= DI_FLAGS_LOCK;
     }
   }
 
   if (copy || tv->v_type == VAR_NUMBER || tv->v_type == VAR_FLOAT) {
-    tv_copy(tv, &v->di_tv);
+    tv_copy(tv, &di->di_tv);
   } else {
-    v->di_tv = *tv;
-    v->di_tv.v_lock = VAR_UNLOCKED;
+    di->di_tv = *tv;
+    di->di_tv.v_lock = VAR_UNLOCKED;
     tv_init(tv);
   }
 
   if (watched) {
-    tv_dict_watcher_notify(dict, v->di_key, &v->di_tv, &oldtv);
+    tv_dict_watcher_notify(dict, di->di_key, &di->di_tv, &oldtv);
     tv_clear(&oldtv);
   }
 
@@ -1546,7 +1573,7 @@ void set_var_const(const char *name, const size_t name_len, typval_T *const tv, 
     // Like :lockvar! name: lock the value and what it contains, but only
     // if the reference count is up to one.  That locks only literal
     // values.
-    tv_item_lock(&v->di_tv, DICT_MAXNEST, true, true);
+    tv_item_lock(&di->di_tv, DICT_MAXNEST, true, true);
   }
 }
 
@@ -1809,28 +1836,121 @@ static void getwinvar(typval_T *argvars, typval_T *rettv, int off)
   get_var_from(varname, rettv, &argvars[off + 2], 'w', tp, win, NULL);
 }
 
+/// Convert typval to option value for a particular option.
+///
+/// @param[in]   tv      typval to convert.
+/// @param[in]   option  Option name.
+/// @param[in]   flags   Option flags.
+/// @param[out]  error   Whether an error occurred.
+///
+/// @return  Typval converted to OptVal. Must be freed by caller.
+///          Returns NIL_OPTVAL for invalid option name.
+static OptVal tv_to_optval(typval_T *tv, const char *option, uint32_t flags, bool *error)
+{
+  OptVal value = NIL_OPTVAL;
+  char nbuf[NUMBUFLEN];
+  bool err = false;
+
+  if ((flags & P_FUNC) && tv_is_func(*tv)) {
+    // If the option can be set to a function reference or a lambda
+    // and the passed value is a function reference, then convert it to
+    // the name (string) of the function reference.
+    char *strval = encode_tv2string(tv, NULL);
+    err = strval == NULL;
+    value = CSTR_AS_OPTVAL(strval);
+  } else if (flags & (P_NUM | P_BOOL)) {
+    varnumber_T n = (flags & P_NUM) ? tv_get_number_chk(tv, &err)
+                                    : tv_get_bool_chk(tv, &err);
+    // This could be either "0" or a string that's not a number.
+    // So we need to check if it's actually a number.
+    if (!err && tv->v_type == VAR_STRING && n == 0) {
+      unsigned idx;
+      for (idx = 0; tv->vval.v_string[idx] == '0'; idx++) {}
+      if (tv->vval.v_string[idx] != NUL || idx == 0) {
+        // There's another character after zeros or the string is empty.
+        // In both cases, we are trying to set a num option using a string.
+        err = true;
+        semsg(_("E521: Number required: &%s = '%s'"), option, tv->vval.v_string);
+      }
+    }
+    value = (flags & P_NUM) ? NUMBER_OPTVAL((OptInt)n) : BOOLEAN_OPTVAL(TRISTATE_FROM_INT(n));
+  } else if ((flags & P_STRING) || is_tty_option(option)) {
+    // Avoid setting string option to a boolean or a special value.
+    if (tv->v_type != VAR_BOOL && tv->v_type != VAR_SPECIAL) {
+      const char *strval = tv_get_string_buf_chk(tv, nbuf);
+      err = strval == NULL;
+      value = CSTR_TO_OPTVAL(strval);
+    } else if (flags & P_STRING) {
+      err = true;
+      emsg(_(e_stringreq));
+    }
+  } else {
+    abort();  // This should never happen.
+  }
+
+  if (error != NULL) {
+    *error = err;
+  }
+  return value;
+}
+
+/// Convert an option value to typval.
+///
+/// @param[in]  value  Option value to convert.
+///
+/// @return  OptVal converted to typval.
+typval_T optval_as_tv(OptVal value)
+{
+  typval_T rettv = { .v_type = VAR_SPECIAL, .vval = { .v_special = kSpecialVarNull } };
+
+  switch (value.type) {
+  case kOptValTypeNil:
+    break;
+  case kOptValTypeBoolean:
+    switch (value.data.boolean) {
+    case kTrue:
+      rettv.v_type = VAR_BOOL;
+      rettv.vval.v_bool = kBoolVarTrue;
+      break;
+    case kFalse:
+      rettv.v_type = VAR_BOOL;
+      rettv.vval.v_bool = kBoolVarFalse;
+      break;
+    case kNone:
+      break;  // return v:null for None boolean value
+    }
+    break;
+  case kOptValTypeNumber:
+    rettv.v_type = VAR_NUMBER;
+    rettv.vval.v_number = value.data.number;
+    break;
+  case kOptValTypeString:
+    rettv.v_type = VAR_STRING;
+    rettv.vval.v_string = value.data.string.data;
+    break;
+  }
+
+  return rettv;
+}
+
 /// Set option "varname" to the value of "varp" for the current buffer/window.
 static void set_option_from_tv(const char *varname, typval_T *varp)
 {
-  long numval = 0;
-  const char *strval;
-  bool error = false;
-  char nbuf[NUMBUFLEN];
+  int opt_idx = findoption(varname);
+  if (opt_idx < 0) {
+    semsg(_(e_unknown_option2), varname);
+    return;
+  }
+  uint32_t opt_p_flags = get_option(opt_idx)->flags;
 
-  if (varp->v_type == VAR_BOOL) {
-    if (is_string_option(varname)) {
-      emsg(_(e_stringreq));
-      return;
-    }
-    numval = (long)varp->vval.v_number;
-    strval = "0";  // avoid using "false"
-  } else {
-    numval = (long)tv_get_number_chk(varp, &error);
-    strval = tv_get_string_buf_chk(varp, nbuf);
+  bool error = false;
+  OptVal value = tv_to_optval(varp, varname, opt_p_flags, &error);
+
+  if (!error) {
+    set_option_value_give_err(varname, value, OPT_LOCAL);
   }
-  if (!error && strval != NULL) {
-    set_option_value_give_err(varname, numval, strval, OPT_LOCAL);
-  }
+
+  optval_free(value);
 }
 
 /// "setwinvar()" and "settabwinvar()" functions

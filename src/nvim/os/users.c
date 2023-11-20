@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // users.c -- operating system user information
 
 #include <stdbool.h>
@@ -10,10 +7,10 @@
 
 #include "auto/config.h"
 #include "nvim/ascii.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/garray.h"
 #include "nvim/memory.h"
 #include "nvim/os/os.h"
-#include "nvim/types.h"
 #include "nvim/vim.h"
 #ifdef HAVE_PWD_FUNCS
 # include <pwd.h>
@@ -30,7 +27,7 @@ static garray_T ga_users = GA_EMPTY_INIT_VALUE;
 static void add_user(garray_T *users, char *user, bool need_copy)
 {
   char *user_copy = (user != NULL && need_copy)
-    ? xstrdup(user) : user;
+                    ? xstrdup(user) : user;
 
   if (user_copy == NULL || *user_copy == NUL) {
     if (need_copy) {

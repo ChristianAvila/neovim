@@ -1,5 +1,4 @@
-#ifndef NVIM_EVAL_ENCODE_H
-#define NVIM_EVAL_ENCODE_H
+#pragma once
 
 #include <msgpack.h>
 #include <msgpack/pack.h>
@@ -12,7 +11,7 @@
 #include "nvim/garray.h"
 #include "nvim/vim.h"
 
-/// Convert VimL value to msgpack string
+/// Convert Vimscript value to msgpack string
 ///
 /// @param[out]  packer  Packer to save results in.
 /// @param[in]  tv  Dumped value.
@@ -21,7 +20,7 @@
 /// @return OK in case of success, FAIL otherwise.
 int encode_vim_to_msgpack(msgpack_packer *packer, typval_T *tv, const char *objname);
 
-/// Convert VimL value to :echo output
+/// Convert Vimscript value to :echo output
 ///
 /// @param[out]  packer  Packer to save results in.
 /// @param[in]  tv  Dumped value.
@@ -74,4 +73,3 @@ extern const char *const encode_special_var_names[];
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "eval/encode.h.generated.h"
 #endif
-#endif  // NVIM_EVAL_ENCODE_H

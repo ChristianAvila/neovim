@@ -1,9 +1,9 @@
-#ifndef NVIM_PROFILE_H
-#define NVIM_PROFILE_H
+#pragma once
 
 #include <stdint.h>
 #include <time.h>
 
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/runtime.h"
 
@@ -14,5 +14,3 @@
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "profile.h.generated.h"
 #endif
-
-#endif  // NVIM_PROFILE_H

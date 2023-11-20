@@ -1,4 +1,3 @@
-require('test.compat')
 local shared = vim
 local assert = require('luassert')
 local busted = require('busted')
@@ -16,6 +15,7 @@ local function shell_quote(str)
   end
 end
 
+--- @class test.helpers
 local module = {
   REMOVE_THIS = {},
 }
@@ -189,10 +189,16 @@ function module.pcall(fn, ...)
   local errmsg = tostring(rv):gsub('([%s<])vim[/\\]([^%s:/\\]+):%d+', '%1\xffvim\xff%2:0')
                              :gsub('[^%s<]-[/\\]([^%s:/\\]+):%d+', '.../%1:0')
                              :gsub('\xffvim\xff', 'vim/')
+
   -- Scrub numbers in paths/stacktraces:
   --    shared.lua:0: in function 'gsplit'
   --    shared.lua:0: in function <shared.lua:0>'
-  errmsg = errmsg:gsub('([^%s]):%d+', '%1:0')
+  errmsg = errmsg:gsub('([^%s].lua):%d+', '%1:0')
+  --    [string "<nvim>"]:0:
+  --    [string ":lua"]:0:
+  --    [string ":luado"]:0:
+  errmsg = errmsg:gsub('(%[string "[^"]+"%]):%d+', '%1:0')
+
   -- Scrub tab chars:
   errmsg = errmsg:gsub('\t', '    ')
   -- In Lua 5.1, we sometimes get a "(tail call): ?" on the last line.
@@ -570,21 +576,23 @@ function module.concat_tables(...)
 end
 
 --- @param str string
---- @param leave_indent? boolean
+--- @param leave_indent? integer
 --- @return string
 function module.dedent(str, leave_indent)
   -- find minimum common indent across lines
-  local indent = nil
+  local indent --- @type string?
   for line in str:gmatch('[^\n]+') do
     local line_indent = line:match('^%s+') or ''
     if indent == nil or #line_indent < #indent then
       indent = line_indent
     end
   end
-  if indent == nil or #indent == 0 then
+
+  if not indent or #indent == 0 then
     -- no minimum common indent
     return str
   end
+
   local left_indent = (' '):rep(leave_indent or 0)
   -- create a pattern for the indent
   indent = indent:gsub('%s', '[ \t]')

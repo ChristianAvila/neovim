@@ -2,10 +2,9 @@ local Screen = require('test.functional.ui.screen')
 local helpers = require('test.functional.helpers')(after_each)
 local thelpers = require('test.functional.terminal.helpers')
 local clear, eq, curbuf = helpers.clear, helpers.eq, helpers.curbuf
-local feed, testprg, feed_command = helpers.feed, helpers.testprg, helpers.feed_command
+local feed, testprg = helpers.feed, helpers.testprg
 local eval = helpers.eval
 local command = helpers.command
-local matches = helpers.matches
 local poke_eventloop = helpers.poke_eventloop
 local retry = helpers.retry
 local meths = helpers.meths
@@ -349,8 +348,7 @@ describe(':terminal prints more lines than the screen height and exits', functio
     clear()
     local screen = Screen.new(30, 7)
     screen:attach({rgb=false})
-    feed_command(("call termopen(['%s', '10']) | startinsert"):format(testprg('tty-test')))
-    poke_eventloop()
+    command(("call termopen(['%s', '10']) | startinsert"):format(testprg('tty-test')))
     screen:expect([[
       line6                         |
       line7                         |
@@ -380,9 +378,7 @@ describe("'scrollback' option", function()
   end)
 
   local function set_fake_shell()
-    -- shell-test.c is a fake shell that prints its arguments and exits.
-    nvim('set_option_value', 'shell', testprg('shell-test'), {})
-    nvim('set_option_value', 'shellcmdflag', 'EXE', {})
+    nvim('set_option_value', 'shell', string.format('"%s" INTERACT', testprg('shell-test')), {})
   end
 
   local function expect_lines(expected, epsilon)
@@ -460,8 +456,8 @@ describe("'scrollback' option", function()
     expect_lines(58)
 
     -- Verify off-screen state
-    matches((is_os('win') and '^36: line[ ]*$' or '^35: line[ ]*$'), eval("getline(line('w0') - 1)"))
-    matches((is_os('win') and '^27: line[ ]*$' or '^26: line[ ]*$'), eval("getline(line('w0') - 10)"))
+    eq((is_os('win') and '36: line' or '35: line'), eval("getline(line('w0') - 1)->trim(' ', 2)"))
+    eq((is_os('win') and '27: line' or '26: line'), eval("getline(line('w0') - 10)->trim(' ', 2)"))
   end)
 
   it('deletes extra lines immediately', function()

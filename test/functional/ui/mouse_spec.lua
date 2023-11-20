@@ -3,6 +3,7 @@ local Screen = require('test.functional.ui.screen')
 local clear, feed, meths = helpers.clear, helpers.feed, helpers.meths
 local insert, feed_command = helpers.insert, helpers.feed_command
 local eq, funcs = helpers.eq, helpers.funcs
+local poke_eventloop = helpers.poke_eventloop
 local command = helpers.command
 local exec = helpers.exec
 
@@ -32,6 +33,7 @@ describe('ui/mouse/input', function()
       [5] = {bold = true, reverse = true},
       [6] = {foreground = Screen.colors.Grey100, background = Screen.colors.Red},
       [7] = {bold = true, foreground = Screen.colors.SeaGreen4},
+      [8] = {foreground = Screen.colors.Brown},
     })
     command("set mousemodel=extend")
     feed('itesting<cr>mouse<cr>support and selection<esc>')
@@ -798,6 +800,66 @@ describe('ui/mouse/input', function()
     feed('<cr>')
   end)
 
+  it('dragging vertical separator', function()
+    screen:try_resize(45, 5)
+    command('setlocal nowrap')
+    local oldwin = meths.get_current_win().id
+    command('rightbelow vnew')
+    screen:expect([[
+      testing               │{0:^$}                     |
+      mouse                 │{0:~                     }|
+      support and selection │{0:~                     }|
+      {4:[No Name] [+]          }{5:[No Name]             }|
+                                                   |
+    ]])
+    meths.input_mouse('left', 'press', '', 0, 0, 22)
+    poke_eventloop()
+    meths.input_mouse('left', 'drag', '', 0, 1, 12)
+    screen:expect([[
+      testing     │{0:^$}                               |
+      mouse       │{0:~                               }|
+      support and │{0:~                               }|
+      {4:< Name] [+]  }{5:[No Name]                       }|
+                                                   |
+    ]])
+    meths.input_mouse('left', 'drag', '', 0, 2, 2)
+    screen:expect([[
+      te│{0:^$}                                         |
+      mo│{0:~                                         }|
+      su│{0:~                                         }|
+      {4:<  }{5:[No Name]                                 }|
+                                                   |
+    ]])
+    meths.input_mouse('left', 'release', '', 0, 2, 2)
+    meths.set_option_value('statuscolumn', 'foobar', { win = oldwin })
+    screen:expect([[
+      {8:fo}│{0:^$}                                         |
+      {8:fo}│{0:~                                         }|
+      {8:fo}│{0:~                                         }|
+      {4:<  }{5:[No Name]                                 }|
+                                                   |
+    ]])
+    meths.input_mouse('left', 'press', '', 0, 0, 2)
+    poke_eventloop()
+    meths.input_mouse('left', 'drag', '', 0, 1, 12)
+    screen:expect([[
+      {8:foobar}testin│{0:^$}                               |
+      {8:foobar}mouse │{0:~                               }|
+      {8:foobar}suppor│{0:~                               }|
+      {4:< Name] [+]  }{5:[No Name]                       }|
+                                                   |
+    ]])
+    meths.input_mouse('left', 'drag', '', 0, 2, 22)
+    screen:expect([[
+      {8:foobar}testing         │{0:^$}                     |
+      {8:foobar}mouse           │{0:~                     }|
+      {8:foobar}support and sele│{0:~                     }|
+      {4:[No Name] [+]          }{5:[No Name]             }|
+                                                   |
+    ]])
+    meths.input_mouse('left', 'release', '', 0, 2, 22)
+  end)
+
   local function wheel(use_api)
     feed('ggdG')
     insert([[
@@ -1011,37 +1073,7 @@ describe('ui/mouse/input', function()
     ]])
   end)
 
-  describe('on concealed text', function()
-    -- Helpful for reading the test expectations:
-    -- :match Error /\^/
-
-    before_each(function()
-      screen:try_resize(25, 7)
-      screen:set_default_attr_ids({
-        [0] = {bold=true, foreground=Screen.colors.Blue},
-        c = { foreground = Screen.colors.LightGrey, background = Screen.colors.DarkGray },
-        sm = {bold = true},
-      })
-      feed('ggdG')
-
-      feed_command('set concealcursor=ni')
-      feed_command('set nowrap')
-      feed_command('set shiftwidth=2 tabstop=4 list')
-      feed_command('setl listchars=tab:>-')
-      feed_command('syntax match NonText "\\*" conceal')
-      feed_command('syntax match NonText "cats" conceal cchar=X')
-      feed_command('syntax match NonText "x" conceal cchar=>')
-
-      -- First column is there to retain the tabs.
-      insert([[
-      |Section				*t1*
-      |			  *t2* *t3* *t4*
-      |x 私は猫が大好き	*cats* ✨🐈✨
-      ]])
-
-      feed('gg<c-v>Gxgg')
-    end)
-
+  local function test_mouse_click_conceal()
     it('(level 1) click on non-wrapped lines', function()
       feed_command('let &conceallevel=1', 'echo')
 
@@ -1433,7 +1465,6 @@ describe('ui/mouse/input', function()
       ]])
     end) -- level 2 - wrapped
 
-
     it('(level 3) click on non-wrapped lines', function()
       feed_command('let &conceallevel=3', 'echo')
 
@@ -1471,6 +1502,7 @@ describe('ui/mouse/input', function()
       ]])
 
       feed('<esc><LeftMouse><20,2>')
+      feed('zH')  -- FIXME: unnecessary horizontal scrolling
       screen:expect([[
         Section{0:>>--->--->---}t1   |
         {0:>--->--->---}  t2 t3 t4   |
@@ -1574,9 +1606,77 @@ describe('ui/mouse/input', function()
       ]])
 
     end) -- level 3 - wrapped
+  end
+
+  describe('on concealed text', function()
+    -- Helpful for reading the test expectations:
+    -- :match Error /\^/
+
+    before_each(function()
+      screen:try_resize(25, 7)
+      screen:set_default_attr_ids({
+        [0] = { bold = true, foreground = Screen.colors.Blue },
+        c = { foreground = Screen.colors.LightGrey, background = Screen.colors.DarkGray },
+        sm = { bold = true },
+      })
+      feed('ggdG')
+
+      command([[setlocal concealcursor=ni nowrap shiftwidth=2 tabstop=4 list listchars=tab:>-]])
+      command([[highlight link X0 Normal]])
+      command([[highlight link X1 NonText]])
+      command([[highlight link X2 NonText]])
+      command([[highlight link X3 NonText]])
+
+      -- First column is there to retain the tabs.
+      insert([[
+      |Section				*t1*
+      |			  *t2* *t3* *t4*
+      |x 私は猫が大好き	*cats* ✨🐈✨
+      ]])
+
+      feed('gg<c-v>Gxgg')
+    end)
+
+    describe('(syntax)', function()
+      before_each(function()
+        command([[syntax region X0 matchgroup=X1 start=/\*/ end=/\*/ concealends contains=X2]])
+        command([[syntax match X2 /cats/ conceal cchar=X contained]])
+        command([[syntax match X3 /\n\@<=x/ conceal cchar=>]])
+      end)
+      test_mouse_click_conceal()
+    end)
+
+    describe('(matchadd())', function()
+      before_each(function()
+        funcs.matchadd('Conceal', [[\*]])
+        funcs.matchadd('Conceal', [[cats]], 10, -1, { conceal = 'X' })
+        funcs.matchadd('Conceal', [[\n\@<=x]], 10, -1, { conceal = '>' })
+      end)
+      test_mouse_click_conceal()
+    end)
+
+    describe('(extmarks)', function()
+      before_each(function()
+        local ns = meths.create_namespace('conceal')
+        meths.buf_set_extmark(0, ns, 0, 11, { end_col = 12, conceal = '' })
+        meths.buf_set_extmark(0, ns, 0, 14, { end_col = 15, conceal = '' })
+        meths.buf_set_extmark(0, ns, 1, 5, { end_col = 6, conceal = '' })
+        meths.buf_set_extmark(0, ns, 1, 8, { end_col = 9, conceal = '' })
+        meths.buf_set_extmark(0, ns, 1, 10, { end_col = 11, conceal = '' })
+        meths.buf_set_extmark(0, ns, 1, 13, { end_col = 14, conceal = '' })
+        meths.buf_set_extmark(0, ns, 1, 15, { end_col = 16, conceal = '' })
+        meths.buf_set_extmark(0, ns, 1, 18, { end_col = 19, conceal = '' })
+        meths.buf_set_extmark(0, ns, 2, 24, { end_col = 25, conceal = '' })
+        meths.buf_set_extmark(0, ns, 2, 29, { end_col = 30, conceal = '' })
+        meths.buf_set_extmark(0, ns, 2, 25, { end_col = 29, conceal = 'X' })
+        meths.buf_set_extmark(0, ns, 2, 0, { end_col = 1, conceal = '>' })
+      end)
+      test_mouse_click_conceal()
+    end)
+
   end)
 
-  it('getmousepos works correctly', function()
+  it('getmousepos() works correctly', function()
     local winwidth = meths.get_option_value('winwidth', {})
     -- Set winwidth=1 so that window sizes don't change.
     meths.set_option_value('winwidth', 1, {})
@@ -1617,6 +1717,7 @@ describe('ui/mouse/input', function()
             eq(0, mousepos.wincol)
             eq(0, mousepos.line)
             eq(0, mousepos.column)
+            eq(0, mousepos.coladd)
           end
         end
       end
@@ -1636,15 +1737,18 @@ describe('ui/mouse/input', function()
         eq(win_col + 1, mousepos.wincol)
         local line = 0
         local column = 0
+        local coladd = 0
         if win_row > 0 and win_row < opts.height + 1
             and win_col > 0 and win_col < opts.width + 1 then
           -- Because of border, win_row and win_col don't need to be
           -- incremented by 1.
           line = math.min(win_row, funcs.line('$'))
           column = math.min(win_col, #funcs.getline(line) + 1)
+          coladd = win_col - column
         end
         eq(line, mousepos.line)
         eq(column, mousepos.column)
+        eq(coladd, mousepos.coladd)
       end
     end
 
@@ -1664,14 +1768,16 @@ describe('ui/mouse/input', function()
         eq(win_col + 1, mousepos.wincol)
         local line = math.min(win_row + 1, funcs.line('$'))
         local column = math.min(win_col + 1, #funcs.getline(line) + 1)
+        local coladd = win_col + 1 - column
         eq(line, mousepos.line)
         eq(column, mousepos.column)
+        eq(coladd, mousepos.coladd)
       end
     end
 
     -- Test that mouse position values are properly set for ordinary windows.
     -- Set the float to be unfocusable instead of closing, to additionally test
-    -- that getmousepos does not consider unfocusable floats. (see discussion
+    -- that getmousepos() does not consider unfocusable floats. (see discussion
     -- in PR #14937 for details).
     opts.focusable = false
     meths.win_set_config(float, opts)
@@ -1688,8 +1794,10 @@ describe('ui/mouse/input', function()
           eq(win_col + 1, mousepos.wincol)
           local line = math.min(win_row + 1, funcs.line('$'))
           local column = math.min(win_col + 1, #funcs.getline(line) + 1)
+          local coladd = win_col + 1 - column
           eq(line, mousepos.line)
           eq(column, mousepos.column)
+          eq(coladd, mousepos.coladd)
         end
       end
     end

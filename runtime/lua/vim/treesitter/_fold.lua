@@ -147,11 +147,14 @@ local function normalise_erow(bufnr, erow)
   return math.min(erow or max_erow, max_erow)
 end
 
+-- TODO(lewis6991): Setup a decor provider so injections folds can be parsed
+-- as the window is redrawn
 ---@param bufnr integer
 ---@param info TS.FoldInfo
 ---@param srow integer?
 ---@param erow integer?
-local function get_folds_levels(bufnr, info, srow, erow)
+---@param parse_injections? boolean
+local function get_folds_levels(bufnr, info, srow, erow, parse_injections)
   srow = srow or 0
   erow = normalise_erow(bufnr, erow)
 
@@ -162,9 +165,7 @@ local function get_folds_levels(bufnr, info, srow, erow)
 
   local parser = ts.get_parser(bufnr)
 
-  if not parser:is_valid() then
-    return
-  end
+  parser:parse(parse_injections and { srow, erow } or nil)
 
   parser:for_each_tree(function(tree, ltree)
     local query = ts.query.get(ltree:lang(), 'folds')
@@ -234,20 +235,50 @@ local M = {}
 ---@type table<integer,TS.FoldInfo>
 local foldinfos = {}
 
-local function recompute_folds()
+local group = api.nvim_create_augroup('treesitter/fold', {})
+
+--- Update the folds in the windows that contain the buffer and use expr foldmethod (assuming that
+--- the user doesn't use different foldexpr for the same buffer).
+---
+--- Nvim usually automatically updates folds when text changes, but it doesn't work here because
+--- FoldInfo update is scheduled. So we do it manually.
+local function foldupdate(bufnr)
+  local function do_update()
+    for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+      api.nvim_win_call(win, function()
+        if vim.wo.foldmethod == 'expr' then
+          vim._foldupdate()
+        end
+      end)
+    end
+  end
+
   if api.nvim_get_mode().mode == 'i' then
     -- foldUpdate() is guarded in insert mode. So update folds on InsertLeave
+    if #(api.nvim_get_autocmds({
+      group = group,
+      buffer = bufnr,
+    })) > 0 then
+      return
+    end
     api.nvim_create_autocmd('InsertLeave', {
+      group = group,
+      buffer = bufnr,
       once = true,
-      callback = vim._foldupdate,
+      callback = do_update,
     })
     return
   end
 
-  vim._foldupdate()
+  do_update()
 end
 
---- Schedule a function only if bufnr is loaded
+--- Schedule a function only if bufnr is loaded.
+--- We schedule fold level computation for the following reasons:
+--- * queries seem to use the old buffer state in on_bytes for some unknown reason;
+--- * to avoid textlock;
+--- * to avoid infinite recursion:
+---   get_folds_levels → parse → _do_callback → on_changedtree → get_folds_levels.
 ---@param bufnr integer
 ---@param fn function
 local function schedule_if_loaded(bufnr, fn)
@@ -263,14 +294,14 @@ end
 ---@param foldinfo TS.FoldInfo
 ---@param tree_changes Range4[]
 local function on_changedtree(bufnr, foldinfo, tree_changes)
-  -- For some reason, queries seem to use the old buffer state in on_bytes.
-  -- Get around this by scheduling and manually updating folds.
   schedule_if_loaded(bufnr, function()
     for _, change in ipairs(tree_changes) do
       local srow, _, erow = Range.unpack4(change)
       get_folds_levels(bufnr, foldinfo, srow, erow)
     end
-    recompute_folds()
+    if #tree_changes > 0 then
+      foldupdate(bufnr)
+    end
   end)
 end
 
@@ -283,13 +314,15 @@ local function on_bytes(bufnr, foldinfo, start_row, old_row, new_row)
   local end_row_old = start_row + old_row
   local end_row_new = start_row + new_row
 
-  if new_row < old_row then
-    foldinfo:remove_range(end_row_new, end_row_old)
-  elseif new_row > old_row then
-    foldinfo:add_range(start_row, end_row_new)
+  if new_row ~= old_row then
+    if new_row < old_row then
+      foldinfo:remove_range(end_row_new, end_row_old)
+    else
+      foldinfo:add_range(start_row, end_row_new)
+    end
     schedule_if_loaded(bufnr, function()
       get_folds_levels(bufnr, foldinfo, start_row, end_row_new)
-      recompute_folds()
+      foldupdate(bufnr)
     end)
   end
 end
@@ -326,6 +359,98 @@ function M.foldexpr(lnum)
   end
 
   return foldinfos[bufnr].levels[lnum] or '0'
+end
+
+---@package
+---@return { [1]: string, [2]: string[] }[]|string
+function M.foldtext()
+  local foldstart = vim.v.foldstart
+  local bufnr = api.nvim_get_current_buf()
+
+  ---@type boolean, LanguageTree
+  local ok, parser = pcall(ts.get_parser, bufnr)
+  if not ok then
+    return vim.fn.foldtext()
+  end
+
+  local query = ts.query.get(parser:lang(), 'highlights')
+  if not query then
+    return vim.fn.foldtext()
+  end
+
+  local tree = parser:parse({ foldstart - 1, foldstart })[1]
+
+  local line = api.nvim_buf_get_lines(bufnr, foldstart - 1, foldstart, false)[1]
+  if not line then
+    return vim.fn.foldtext()
+  end
+
+  ---@type { [1]: string, [2]: string[], range: { [1]: integer, [2]: integer } }[] | { [1]: string, [2]: string[] }[]
+  local result = {}
+
+  local line_pos = 0
+
+  for id, node, metadata in query:iter_captures(tree:root(), 0, foldstart - 1, foldstart) do
+    local name = query.captures[id]
+    local start_row, start_col, end_row, end_col = node:range()
+
+    local priority = tonumber(metadata.priority or vim.highlight.priorities.treesitter)
+
+    if start_row == foldstart - 1 and end_row == foldstart - 1 then
+      -- check for characters ignored by treesitter
+      if start_col > line_pos then
+        table.insert(result, {
+          line:sub(line_pos + 1, start_col),
+          {},
+          range = { line_pos, start_col },
+        })
+      end
+      line_pos = end_col
+
+      local text = line:sub(start_col + 1, end_col)
+      table.insert(result, { text, { { '@' .. name, priority } }, range = { start_col, end_col } })
+    end
+  end
+
+  local i = 1
+  while i <= #result do
+    -- find first capture that is not in current range and apply highlights on the way
+    local j = i + 1
+    while
+      j <= #result
+      and result[j].range[1] >= result[i].range[1]
+      and result[j].range[2] <= result[i].range[2]
+    do
+      for k, v in ipairs(result[i][2]) do
+        if not vim.tbl_contains(result[j][2], v) then
+          table.insert(result[j][2], k, v)
+        end
+      end
+      j = j + 1
+    end
+
+    -- remove the parent capture if it is split into children
+    if j > i + 1 then
+      table.remove(result, i)
+    else
+      -- highlights need to be sorted by priority, on equal prio, the deeper nested capture (earlier
+      -- in list) should be considered higher prio
+      if #result[i][2] > 1 then
+        table.sort(result[i][2], function(a, b)
+          return a[2] < b[2]
+        end)
+      end
+
+      result[i][2] = vim.tbl_map(function(tbl)
+        return tbl[1]
+      end, result[i][2])
+      result[i] = { result[i][1], result[i][2] }
+
+      i = i + 1
+    end
+  end
+
+  return result
 end
 
 return M

@@ -1,5 +1,4 @@
-#ifndef NVIM_TYPES_H
-#define NVIM_TYPES_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -18,7 +17,7 @@ typedef int handle_T;
 // absent callback etc.
 typedef int LuaRef;
 
-/// Type used for VimL VAR_FLOAT values
+/// Type used for Vimscript VAR_FLOAT values
 typedef double float_T;
 
 typedef struct MsgpackRpcRequestHandler MsgpackRpcRequestHandler;
@@ -31,8 +30,6 @@ typedef union {
 
 typedef handle_T NS;
 
-typedef struct expand expand_T;
-
 typedef uint64_t proftime_T;
 
 typedef enum {
@@ -44,6 +41,8 @@ typedef enum {
 #define TRISTATE_TO_BOOL(val, \
                          default) ((val) == kTrue ? true : ((val) == kFalse ? false : (default)))
 
+#define TRISTATE_FROM_INT(val) ((val) == 0 ? kFalse : ((val) >= 1 ? kTrue : kNone))
+
 typedef struct Decoration Decoration;
 
-#endif  // NVIM_TYPES_H
+typedef int64_t OptInt;

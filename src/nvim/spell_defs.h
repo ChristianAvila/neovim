@@ -1,5 +1,4 @@
-#ifndef NVIM_SPELL_DEFS_H
-#define NVIM_SPELL_DEFS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -120,7 +119,7 @@ struct slang_S {
   bool sl_add;              // true if it's a .add file.
 
   uint8_t *sl_fbyts;        // case-folded word bytes
-  long sl_fbyts_len;        // length of sl_fbyts
+  int sl_fbyts_len;         // length of sl_fbyts
   idx_T *sl_fidxs;          // case-folded word indexes
   uint8_t *sl_kbyts;        // keep-case word bytes
   idx_T *sl_kidxs;          // keep-case word indexes
@@ -253,5 +252,3 @@ typedef struct wordcount_S {
 // Remember what "z?" replaced.
 extern char *repl_from;
 extern char *repl_to;
-
-#endif  // NVIM_SPELL_DEFS_H

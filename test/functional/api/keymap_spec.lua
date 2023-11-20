@@ -19,6 +19,20 @@ local sleep = helpers.sleep
 local sid_api_client = -9
 local sid_lua = -8
 
+local mode_bits_map = {
+  ['n'] = 0x01,
+  ['x'] = 0x02,
+  ['o'] = 0x04,
+  ['c'] = 0x08,
+  ['i'] = 0x10,
+  ['l'] = 0x20,
+  ['s'] = 0x40,
+  ['t'] = 0x80,
+  [' '] = 0x47,
+  ['v'] = 0x42,
+  ['!'] = 0x18,
+}
+
 describe('nvim_get_keymap', function()
   before_each(clear)
 
@@ -32,9 +46,12 @@ describe('nvim_get_keymap', function()
     rhs='bar',
     expr=0,
     sid=0,
+    scriptversion=1,
     buffer=0,
     nowait=0,
     mode='n',
+    mode_bits=0x01,
+    abbr=0,
     noremap=1,
     lnum=0,
   }
@@ -81,6 +98,7 @@ describe('nvim_get_keymap', function()
     -- The table will be the same except for the mode
     local insert_table = shallowcopy(foo_bar_map_table)
     insert_table['mode'] = 'i'
+    insert_table['mode_bits'] = 0x10
 
     eq({insert_table}, meths.get_keymap('i'))
   end)
@@ -258,8 +276,10 @@ describe('nvim_get_keymap', function()
       silent=0,
       expr=0,
       sid=0,
+      scriptversion=1,
       buffer=0,
       nowait=0,
+      abbr=0,
       noremap=1,
       lnum=0,
     }
@@ -268,6 +288,7 @@ describe('nvim_get_keymap', function()
       ret.lhs = lhs
       ret.rhs = rhs
       ret.mode = mode
+      ret.mode_bits = mode_bits_map[mode]
       return ret
     end
 
@@ -323,10 +344,13 @@ describe('nvim_get_keymap', function()
       lhsraw='|   |',
       rhs='|    |',
       mode='n',
+      mode_bits=0x01,
+      abbr=0,
       script=0,
       silent=0,
       expr=0,
       sid=0,
+      scriptversion=1,
       buffer=0,
       nowait=0,
       noremap=1,
@@ -365,15 +389,18 @@ describe('nvim_get_keymap', function()
       silent=0,
       expr=0,
       sid=sid_lua,
+      scriptversion=1,
       buffer=0,
       nowait=0,
       mode='n',
+      mode_bits=0x01,
+      abbr=0,
       noremap=0,
       lnum=0,
     }, mapargs[1])
   end)
 
-  it ('can handle map descriptions', function()
+  it('can handle map descriptions', function()
     meths.set_keymap('n', 'lhs', 'rhs', {desc="map description"})
     eq({
       lhs='lhs',
@@ -383,9 +410,12 @@ describe('nvim_get_keymap', function()
       silent=0,
       expr=0,
       sid=sid_api_client,
+      scriptversion=1,
       buffer=0,
       nowait=0,
       mode='n',
+      mode_bits=0x01,
+      abbr=0,
       noremap=0,
       lnum=0,
       desc='map description'
@@ -400,6 +430,9 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
   -- maparg(), which does not accept "!" (though it returns "!" in its output
   -- if getting a mapping set with |:map!|).
   local function normalize_mapmode(mode, generate_expected)
+    if mode:sub(-1) == 'a' then
+      mode = mode:sub(1, -2)
+    end
     if not generate_expected and mode == '!' then
       -- Cannot retrieve mapmode-ic mappings with "!", but can with "i" or "c".
       mode = 'i'
@@ -417,7 +450,10 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
     end
 
     local to_return = {}
-    to_return.mode = normalize_mapmode(mode, true)
+    local expected_mode = normalize_mapmode(mode, true)
+    to_return.mode = expected_mode
+    to_return.mode_bits = mode_bits_map[expected_mode]
+    to_return.abbr = mode:sub(-1) == 'a' and 1 or 0
     to_return.noremap = not opts.noremap and 0 or 1
     to_return.lhs = lhs
     to_return.rhs = rhs
@@ -426,6 +462,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
     to_return.nowait = not opts.nowait and 0 or 1
     to_return.expr = not opts.expr and 0 or 1
     to_return.sid = not opts.sid and sid_api_client or opts.sid
+    to_return.scriptversion = 1
     to_return.buffer = not opts.buffer and 0 or opts.buffer
     to_return.lnum = not opts.lnum and 0 or opts.lnum
     to_return.desc = opts.desc
@@ -435,7 +472,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
 
   -- Gets a maparg() dict from Nvim, if one exists.
   local function get_mapargs(mode, lhs)
-    local mapargs = funcs.maparg(lhs, normalize_mapmode(mode), false, true)
+    local mapargs = funcs.maparg(lhs, normalize_mapmode(mode), mode:sub(-1) == 'a', true)
     -- drop "lhsraw" and "lhsrawalt" which are hard to check
     mapargs.lhsraw = nil
     mapargs.lhsrawalt = nil
@@ -484,35 +521,33 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
        get_mapargs('', 'lhs'))
   end)
 
-  it('throws errors when given too-long mode shortnames', function()
-    eq('Shortname is too long: map',
-      pcall_err(meths.set_keymap, 'map', 'lhs', 'rhs', {}))
-
-    eq('Shortname is too long: vmap',
-      pcall_err(meths.set_keymap, 'vmap', 'lhs', 'rhs', {}))
-
-    eq('Shortname is too long: xnoremap',
-      pcall_err(meths.set_keymap, 'xnoremap', 'lhs', 'rhs', {}))
-
-    eq('Shortname is too long: map', pcall_err(meths.del_keymap, 'map', 'lhs'))
-    eq('Shortname is too long: vmap', pcall_err(meths.del_keymap, 'vmap', 'lhs'))
-    eq('Shortname is too long: xnoremap', pcall_err(meths.del_keymap, 'xnoremap', 'lhs'))
-  end)
-
   it('error on invalid mode shortname', function()
-    eq('Invalid mode shortname: " "',
-      pcall_err(meths.set_keymap, ' ', 'lhs', 'rhs', {}))
-    eq('Invalid mode shortname: "m"',
-      pcall_err(meths.set_keymap, 'm', 'lhs', 'rhs', {}))
-    eq('Invalid mode shortname: "?"',
-      pcall_err(meths.set_keymap, '?', 'lhs', 'rhs', {}))
-    eq('Invalid mode shortname: "y"',
-      pcall_err(meths.set_keymap, 'y', 'lhs', 'rhs', {}))
-    eq('Invalid mode shortname: "p"',
-      pcall_err(meths.set_keymap, 'p', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: " "', pcall_err(meths.set_keymap, ' ', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "m"', pcall_err(meths.set_keymap, 'm', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "?"', pcall_err(meths.set_keymap, '?', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "y"', pcall_err(meths.set_keymap, 'y', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "p"', pcall_err(meths.set_keymap, 'p', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "a"', pcall_err(meths.set_keymap, 'a', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "oa"', pcall_err(meths.set_keymap, 'oa', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "!o"', pcall_err(meths.set_keymap, '!o', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "!i"', pcall_err(meths.set_keymap, '!i', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "!!"', pcall_err(meths.set_keymap, '!!', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "map"', pcall_err(meths.set_keymap, 'map', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "vmap"', pcall_err(meths.set_keymap, 'vmap', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: "xnoremap"', pcall_err(meths.set_keymap, 'xnoremap', 'lhs', 'rhs', {}))
+    eq('Invalid mode shortname: " "', pcall_err(meths.del_keymap, ' ', 'lhs'))
+    eq('Invalid mode shortname: "m"', pcall_err(meths.del_keymap, 'm', 'lhs'))
     eq('Invalid mode shortname: "?"', pcall_err(meths.del_keymap, '?', 'lhs'))
     eq('Invalid mode shortname: "y"', pcall_err(meths.del_keymap, 'y', 'lhs'))
     eq('Invalid mode shortname: "p"', pcall_err(meths.del_keymap, 'p', 'lhs'))
+    eq('Invalid mode shortname: "a"', pcall_err(meths.del_keymap, 'a', 'lhs'))
+    eq('Invalid mode shortname: "oa"', pcall_err(meths.del_keymap, 'oa', 'lhs'))
+    eq('Invalid mode shortname: "!o"', pcall_err(meths.del_keymap, '!o', 'lhs'))
+    eq('Invalid mode shortname: "!i"', pcall_err(meths.del_keymap, '!i', 'lhs'))
+    eq('Invalid mode shortname: "!!"', pcall_err(meths.del_keymap, '!!', 'lhs'))
+    eq('Invalid mode shortname: "map"', pcall_err(meths.del_keymap, 'map', 'lhs'))
+    eq('Invalid mode shortname: "vmap"', pcall_err(meths.del_keymap, 'vmap', 'lhs'))
+    eq('Invalid mode shortname: "xnoremap"', pcall_err(meths.del_keymap, 'xnoremap', 'lhs'))
   end)
 
   it('error on invalid optnames', function()
@@ -744,7 +779,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
   end)
 
   -- Perform exhaustive tests of basic functionality
-  local mapmodes = {'n', 'v', 'x', 's', 'o', '!', 'i', 'l', 'c', 't', ''}
+  local mapmodes = {'n', 'v', 'x', 's', 'o', '!', 'i', 'l', 'c', 't', '', 'ia', 'ca', '!a'}
   for _, mapmode in ipairs(mapmodes) do
     it('can set/unset normal mappings in mapmode '..mapmode, function()
       meths.set_keymap(mapmode, 'lhs', 'rhs', {})
@@ -773,11 +808,9 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
   -- remove some map arguments that are harder to test, or were already tested
   optnames = {'nowait', 'silent', 'expr', 'noremap'}
   for _, mapmode in ipairs(mapmodes) do
-    local printable_mode = normalize_mapmode(mapmode)
-
     -- Test with single mappings
     for _, maparg in ipairs(optnames) do
-      it('can set/unset '..printable_mode..'-mappings with maparg: '..maparg,
+      it('can set/unset '..mapmode..'-mappings with maparg: '..maparg,
           function()
         meths.set_keymap(mapmode, 'lhs', 'rhs', {[maparg] = true})
         eq(generate_mapargs(mapmode, 'lhs', 'rhs', {[maparg] = true}),
@@ -785,7 +818,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
         meths.del_keymap(mapmode, 'lhs')
         eq({}, get_mapargs(mapmode, 'lhs'))
       end)
-      it ('can set/unset '..printable_mode..'-mode mappings with maparg '..
+      it ('can set/unset '..mapmode..'-mode mappings with maparg '..
           maparg..', whose value is false', function()
         meths.set_keymap(mapmode, 'lhs', 'rhs', {[maparg] = false})
         eq(generate_mapargs(mapmode, 'lhs', 'rhs'),
@@ -798,7 +831,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
     -- Test with triplets of mappings, one of which is false
     for i = 1, (#optnames - 2) do
       local opt1, opt2, opt3 = optnames[i], optnames[i + 1], optnames[i + 2]
-      it('can set/unset '..printable_mode..'-mode mappings with mapargs '..
+      it('can set/unset '..mapmode..'-mode mappings with mapargs '..
           opt1..', '..opt2..', '..opt3, function()
         local opts = {[opt1] = true, [opt2] = false, [opt3] = true}
         meths.set_keymap(mapmode, 'lhs', 'rhs', opts)
@@ -822,7 +855,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
     eq(1, exec_lua[[return GlobalCount]])
   end)
 
-  it (':map command shows lua mapping correctly', function()
+  it(':map command shows lua mapping correctly', function()
     exec_lua [[
       vim.api.nvim_set_keymap('n', 'asdf', '', {callback = function() print('jkl;') end })
     ]]
@@ -834,7 +867,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
     )
   end)
 
-  it ('mapcheck() returns lua mapping correctly', function()
+  it('mapcheck() returns lua mapping correctly', function()
     exec_lua [[
       vim.api.nvim_set_keymap('n', 'asdf', '', {callback = function() print('jkl;') end })
     ]]
@@ -842,7 +875,7 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
                   "^<Lua %d+>"))
   end)
 
-  it ('maparg() returns lua mapping correctly', function()
+  it('maparg() returns lua mapping correctly', function()
     eq(0, exec_lua([[
       GlobalCount = 0
       vim.api.nvim_set_keymap('n', 'asdf', '', {callback = function() GlobalCount = GlobalCount + 1 end })
@@ -987,6 +1020,54 @@ describe('nvim_set_keymap, nvim_del_keymap', function()
     eq(generate_mapargs('n', 'lhs', 'rhs', {desc="map description"}), get_mapargs('n', 'lhs'))
     eq("\nn  lhs           rhs\n                 map description",
        helpers.exec_capture("nmap lhs"))
+  end)
+
+  it('can define !-mode abbreviations with lua callbacks', function()
+    exec_lua [[
+      GlobalCount = 0
+      vim.api.nvim_set_keymap('!a', 'foo', '', {expr = true, callback = function()
+        GlobalCount = GlobalCount + 1
+        return tostring(GlobalCount)
+      end})
+    ]]
+
+    feed 'iThe foo and the bar and the foo again<esc>'
+    eq('The 1 and the bar and the 2 again', meths.get_current_line())
+
+    feed ':let x = "The foo is the one"<cr>'
+    eq('The 3 is the one', meths.eval'x')
+  end)
+
+  it('can define insert mode abbreviations with lua callbacks', function()
+    exec_lua [[
+      GlobalCount = 0
+      vim.api.nvim_set_keymap('ia', 'foo', '', {expr = true, callback = function()
+        GlobalCount = GlobalCount + 1
+        return tostring(GlobalCount)
+      end})
+    ]]
+
+    feed 'iThe foo and the bar and the foo again<esc>'
+    eq('The 1 and the bar and the 2 again', meths.get_current_line())
+
+    feed ':let x = "The foo is the one"<cr>'
+    eq('The foo is the one', meths.eval'x')
+  end)
+
+  it('can define cmdline mode abbreviations with lua callbacks', function()
+    exec_lua [[
+      GlobalCount = 0
+      vim.api.nvim_set_keymap('ca', 'foo', '', {expr = true, callback = function()
+        GlobalCount = GlobalCount + 1
+        return tostring(GlobalCount)
+      end})
+    ]]
+
+    feed 'iThe foo and the bar and the foo again<esc>'
+    eq('The foo and the bar and the foo again', meths.get_current_line())
+
+    feed ':let x = "The foo is the one"<cr>'
+    eq('The 1 is the one', meths.eval'x')
   end)
 end)
 

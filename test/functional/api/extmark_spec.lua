@@ -105,7 +105,11 @@ describe('API/extmarks', function()
   it('validation', function()
     eq("Invalid 'end_col': expected Integer, got Array", pcall_err(set_extmark, ns, marks[2], 0, 0, { end_col = {}, end_row = 1 }))
     eq("Invalid 'end_row': expected Integer, got Array", pcall_err(set_extmark, ns, marks[2], 0, 0, { end_col = 1, end_row = {} }))
-    eq("Invalid 'id': expected positive Integer", pcall_err(set_extmark, ns, {}, 0, 0, { end_col = 1, end_row = 1 }))
+    eq("Invalid 'virt_text_pos': expected String, got Integer", pcall_err(set_extmark, ns, marks[2], 0, 0, { virt_text_pos = 0 }))
+    eq("Invalid 'virt_text_pos': 'foo'", pcall_err(set_extmark, ns, marks[2], 0, 0, { virt_text_pos = 'foo' }))
+    eq("Invalid 'hl_mode': expected String, got Integer", pcall_err(set_extmark, ns, marks[2], 0, 0, { hl_mode = 0 }))
+    eq("Invalid 'hl_mode': 'foo'", pcall_err(set_extmark, ns, marks[2], 0, 0, { hl_mode = 'foo' }))
+    eq("Invalid 'id': expected Integer, got Array", pcall_err(set_extmark, ns, {}, 0, 0, { end_col = 1, end_row = 1 }))
     eq("Invalid mark position: expected 2 Integer items", pcall_err(get_extmarks, ns, {}, {-1, -1}))
     eq("Invalid mark position: expected mark id Integer or 2-item Array", pcall_err(get_extmarks, ns, true, {-1, -1}))
     -- No memory leak with virt_text, virt_lines, sign_text
@@ -202,6 +206,23 @@ describe('API/extmarks', function()
     feed('<c-r>')
     eq({}, get_extmarks(ns, {0, 0}, {-1, -1}))
     eq({}, get_extmarks(ns2, {0, 0}, {-1, -1}))
+  end)
+
+  it('can undo with extmarks (#25147)', function()
+    feed('itest<esc>')
+    set_extmark(ns, 1, 0, 0)
+    set_extmark(ns, 2, 1, 0)
+    eq({ { 1, 0, 0 }, { 2, 1, 0 } }, get_extmarks(ns, {0, 0}, {-1, -1}))
+    feed('dd')
+    eq({ { 1, 1, 0 }, { 2, 1, 0 } }, get_extmarks(ns, {0, 0}, {-1, -1}))
+    curbufmeths.clear_namespace(ns, 0, -1)
+    eq({}, get_extmarks(ns, {0, 0}, {-1, -1}))
+    set_extmark(ns, 1, 0, 0, { right_gravity = false })
+    set_extmark(ns, 2, 1, 0, { right_gravity = false })
+    eq({ { 1, 0, 0 }, { 2, 1, 0 } }, get_extmarks(ns, {0, 0}, {-1, -1}))
+    feed('u')
+    eq({ { 1, 0, 0 }, { 2, 1, 0 } }, get_extmarks(ns, {0, 0}, {-1, -1}))
+    curbufmeths.clear_namespace(ns, 0, -1)
   end)
 
   it('querying for information and ranges', function()
@@ -749,7 +770,14 @@ describe('API/extmarks', function()
       })
     end)
 
-    -- TODO(bfredl): add more tests!
+    it('can get overlapping extmarks', function()
+      set_extmark(ns, 1, 0, 0, {end_row = 5, end_col=0})
+      set_extmark(ns, 2, 2, 5, {end_row = 2, end_col=30})
+      set_extmark(ns, 3, 0, 5, {end_row = 2, end_col=10})
+      set_extmark(ns, 4, 0, 0, {end_row = 1, end_col=0})
+      eq({{ 2, 2, 5 }}, get_extmarks(ns, {2, 0}, {2, -1}, { overlap=false }))
+      eq({{ 1, 0, 0 }, { 3, 0, 5}, {2, 2, 5}}, get_extmarks(ns, {2, 0}, {2, -1}, { overlap=true }))
+    end)
   end)
 
   it('replace works', function()
@@ -1496,16 +1524,19 @@ describe('API/extmarks', function()
       sign_hl_group = "Statement",
       sign_text = ">>",
       spell = true,
-      virt_lines = { { { "lines", "Statement" } }},
+      virt_lines = {
+        { { "lines", "Macro" }, { "???" } },
+        { { "stack", { "Type", "Search" } }, { "!!!" } },
+      },
       virt_lines_above = true,
       virt_lines_leftcol = true,
-      virt_text = { { "text", "Statement" } },
+      virt_text = { { "text", "Macro" }, { "???" }, { "stack", { "Type", "Search" } } },
       virt_text_hide = true,
       virt_text_pos = "right_align",
     })
     set_extmark(ns, marks[2], 0, 0, {
       priority = 0,
-      virt_text = { { "text", "Statement" } },
+      virt_text = { { "", "Macro" }, { "", { "Type", "Search" } }, { "" } },
       virt_text_win_col = 1,
     })
     eq({0, 0, {
@@ -1525,10 +1556,13 @@ describe('API/extmarks', function()
       sign_hl_group = "Statement",
       sign_text = ">>",
       spell = true,
-      virt_lines = { { { "lines", "Statement" } }},
+      virt_lines = {
+        { { "lines", "Macro" }, { "???" } },
+        { { "stack", { "Type", "Search" } }, { "!!!" } },
+      },
       virt_lines_above = true,
       virt_lines_leftcol = true,
-      virt_text = { { "text", "Statement" } },
+      virt_text = { { "text", "Macro" }, { "???" }, { "stack", { "Type", "Search" } } },
       virt_text_hide = true,
       virt_text_pos = "right_align",
     } }, get_extmark_by_id(ns, marks[1], { details = true }))
@@ -1536,7 +1570,7 @@ describe('API/extmarks', function()
       ns_id = 1,
       right_gravity = true,
       priority = 0,
-      virt_text = { { "text", "Statement" } },
+      virt_text = { { "", "Macro" }, { "", { "Type", "Search" } }, { "" } },
       virt_text_hide = false,
       virt_text_pos = "win_col",
       virt_text_win_col = 1,
@@ -1565,11 +1599,69 @@ describe('API/extmarks', function()
     set_extmark(ns, 3, 0, 0, { sign_text = '>>' })
     set_extmark(ns, 4, 0, 0, { virt_text = {{'text', 'Normal'}}})
     set_extmark(ns, 5, 0, 0, { virt_lines = {{{ 'line', 'Normal' }}}})
-    eq(5, #get_extmarks(-1, 0, -1, { details = true }))
+    eq(5, #get_extmarks(-1, 0, -1, {}))
     eq({{ 2, 0, 0 }}, get_extmarks(-1, 0, -1, { type = 'highlight' }))
     eq({{ 3, 0, 0 }}, get_extmarks(-1, 0, -1, { type = 'sign' }))
     eq({{ 4, 0, 0 }}, get_extmarks(-1, 0, -1, { type = 'virt_text' }))
     eq({{ 5, 0, 0 }}, get_extmarks(-1, 0, -1, { type = 'virt_lines' }))
+  end)
+
+  it("invalidated marks are deleted", function()
+    screen = Screen.new(40, 6)
+    screen:attach()
+    feed('dd6iaaa bbb ccc<CR><ESC>gg')
+    set_extmark(ns, 1, 0, 0, { invalidate = true, sign_text = 'S1' })
+    set_extmark(ns, 2, 1, 0, { invalidate = true, sign_text = 'S2' })
+    -- mark with invalidate is removed
+    command('d')
+    screen:expect([[
+      S2^aaa bbb ccc                           |
+        aaa bbb ccc                           |
+        aaa bbb ccc                           |
+        aaa bbb ccc                           |
+        aaa bbb ccc                           |
+                                              |
+    ]])
+    -- mark is restored with undo_restore == true
+    command('silent undo')
+    screen:expect([[
+      S1^aaa bbb ccc                           |
+      S2aaa bbb ccc                           |
+        aaa bbb ccc                           |
+        aaa bbb ccc                           |
+        aaa bbb ccc                           |
+                                              |
+    ]])
+    -- mark is deleted with undo_restore == false
+    set_extmark(ns, 1, 0, 0, { invalidate = true, undo_restore = false, sign_text = 'S1' })
+    set_extmark(ns, 2, 1, 0, { invalidate = true, undo_restore = false, sign_text = 'S2' })
+    command('1d 2')
+    eq(0, #get_extmarks(-1, 0, -1, {}))
+    -- mark is not removed when deleting bytes before the range
+    set_extmark(ns, 3, 0, 4, { invalidate = true, undo_restore = false,
+                               hl_group = 'Error', end_col = 7 })
+    feed('dw')
+    eq(3, get_extmark_by_id(ns, 3, { details = true })[3].end_col)
+    -- mark is not removed when deleting bytes at the start of the range
+    feed('x')
+    eq(2, get_extmark_by_id(ns, 3, { details = true })[3].end_col)
+    -- mark is not removed when deleting bytes from the end of the range
+    feed('lx')
+    eq(1, get_extmark_by_id(ns, 3, { details = true})[3].end_col)
+    -- mark is not removed when deleting bytes beyond end of the range
+    feed('x')
+    eq(1, get_extmark_by_id(ns, 3, { details = true})[3].end_col)
+    -- mark is removed when all bytes in the range are deleted
+    feed('hx')
+    eq({}, get_extmark_by_id(ns, 3, {}))
+    -- multiline mark is not removed when start of its range is deleted
+    set_extmark(ns, 4, 1, 4, { undo_restore = false, invalidate = true,
+                               hl_group = 'Error', end_col = 7, end_row = 3 })
+    feed('ddDdd')
+    eq({0, 0}, get_extmark_by_id(ns, 4, {}))
+    -- multiline mark is removed when entirety of its range is deleted
+    feed('vj2ed')
+    eq({}, get_extmark_by_id(ns, 4, {}))
   end)
 end)
 

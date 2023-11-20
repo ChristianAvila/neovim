@@ -1,4 +1,5 @@
 local helpers = require('test.functional.helpers')(after_each)
+local uv = require('luv')
 
 local clear = helpers.clear
 local exec_lua = helpers.exec_lua
@@ -281,12 +282,19 @@ describe('vim.fs', function()
     it('works with backward slashes', function()
       eq('C:/Users/jdoe', exec_lua [[ return vim.fs.normalize('C:\\Users\\jdoe') ]])
     end)
+    it('removes trailing /', function()
+      eq('/home/user', exec_lua [[ return vim.fs.normalize('/home/user/') ]])
+    end)
+    it('works with /', function()
+      eq('/', exec_lua [[ return vim.fs.normalize('/') ]])
+    end)
     it('works with ~', function()
-      eq( exec_lua([[
-      local home = ...
-      return home .. '/src/foo'
-      ]], is_os('win') and vim.fs.normalize(os.getenv('USERPROFILE')) or os.getenv('HOME')
-      ) , exec_lua [[ return vim.fs.normalize('~/src/foo') ]])
+      eq(
+        exec_lua([[
+          local home = ...
+          return home .. '/src/foo'
+        ]], vim.fs.normalize(uv.os_homedir())),
+        exec_lua [[ return vim.fs.normalize('~/src/foo') ]])
     end)
     it('works with environment variables', function()
       local xdg_config_home = test_build_dir .. '/.config'
@@ -295,5 +303,10 @@ describe('vim.fs', function()
         return vim.fs.normalize('$XDG_CONFIG_HOME/nvim')
       ]], xdg_config_home))
     end)
+    if is_os('win') then
+      it('Last slash is not truncated from root drive', function()
+        eq('C:/', exec_lua [[ return vim.fs.normalize('C:/') ]])
+      end)
+    end
   end)
 end)

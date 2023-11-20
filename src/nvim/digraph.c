@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// @file digraph.c
 ///
 /// code for digraphs
@@ -17,7 +14,6 @@
 #include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
-#include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_getln.h"
@@ -32,7 +28,7 @@
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/normal.h"
-#include "nvim/option_defs.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/input.h"
 #include "nvim/runtime.h"
 #include "nvim/strings.h"
@@ -880,6 +876,7 @@ static digr_T digraphdefault[] =
   { '1', '\'', 0x2032 },
   { '2', '\'', 0x2033 },
   { '3', '\'', 0x2034 },
+  { '4', '\'', 0x2057 },
   { '1', '"', 0x2035 },
   { '2', '"', 0x2036 },
   { '3', '"', 0x2037 },
@@ -1624,7 +1621,7 @@ int digraph_get(int char1, int char2, bool meta_char)
 
   if (((retval = getexactdigraph(char1, char2, meta_char)) == char2)
       && (char1 != char2)
-      && ((retval = getexactdigraph(char2, char1, meta_char))  // -V764
+      && ((retval = getexactdigraph(char2, char1, meta_char))
           == char1)) {
     return char2;
   }
@@ -1657,7 +1654,7 @@ static void registerdigraph(int char1, int char2, int n)
 bool check_digraph_chars_valid(int char1, int char2)
 {
   if (char2 == 0) {
-    char msg[MB_MAXBYTES + 1];
+    char msg[MB_MAXCHAR + 1];
     msg[utf_char2bytes(char1, msg)] = NUL;
     semsg(_(e_digraph_must_be_just_two_characters_str), msg);
     return false;
@@ -1706,7 +1703,7 @@ static void digraph_header(const char *msg)
   if (msg_col > 0) {
     msg_putchar('\n');
   }
-  msg_outtrans_attr(msg, HL_ATTR(HLF_CM));
+  msg_outtrans(msg, HL_ATTR(HLF_CM));
   msg_putchar('\n');
 }
 
@@ -1860,7 +1857,7 @@ static void printdigraph(const digr_T *dp, result_T *previous)
   *p++ = (char)dp->char2;
   *p++ = ' ';
   *p = NUL;
-  msg_outtrans(buf);
+  msg_outtrans(buf, 0);
   p = buf;
 
   // add a space to draw a composing char on
@@ -1870,14 +1867,14 @@ static void printdigraph(const digr_T *dp, result_T *previous)
   p += utf_char2bytes(dp->result, p);
 
   *p = NUL;
-  msg_outtrans_attr(buf, HL_ATTR(HLF_8));
+  msg_outtrans(buf, HL_ATTR(HLF_8));
   p = buf;
   if (char2cells(dp->result) == 1) {
     *p++ = ' ';
   }
   assert(p >= buf);
   vim_snprintf(p, sizeof(buf) - (size_t)(p - buf), " %3d", dp->result);
-  msg_outtrans(buf);
+  msg_outtrans(buf, 0);
 }
 
 /// Get the two digraph characters from a typval.
@@ -2077,8 +2074,6 @@ char *keymap_init(void)
 /// @param eap
 void ex_loadkeymap(exarg_T *eap)
 {
-  char *s;
-
 #define KMAP_LLEN 200  // max length of "to" and "from" together
   char buf[KMAP_LLEN + 11];
   char *save_cpo = p_cpo;
@@ -2109,11 +2104,11 @@ void ex_loadkeymap(exarg_T *eap)
 
     if ((*p != '"') && (*p != NUL)) {
       kmap_T *kp = GA_APPEND_VIA_PTR(kmap_T, &curbuf->b_kmap_ga);
-      s = skiptowhite(p);
-      kp->from = xstrnsave(p, (size_t)(s - p));
+      char *s = skiptowhite(p);
+      kp->from = xmemdupz(p, (size_t)(s - p));
       p = skipwhite(s);
       s = skiptowhite(p);
-      kp->to = xstrnsave(p, (size_t)(s - p));
+      kp->to = xmemdupz(p, (size_t)(s - p));
 
       if ((strlen(kp->from) + strlen(kp->to) >= KMAP_LLEN)
           || (*kp->from == NUL)

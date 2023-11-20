@@ -1,19 +1,13 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
-#include "nvim/buffer_defs.h"
 #include "nvim/drawscreen.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
-#include "nvim/eval/typval_defs.h"
 #include "nvim/event/defs.h"
-#include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
 #include "nvim/getchar.h"
 #include "nvim/globals.h"
@@ -23,6 +17,7 @@
 #include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/input.h"
 #include "nvim/state.h"
 #include "nvim/strings.h"
@@ -61,6 +56,8 @@ getkey:
     if (vpeekc() != NUL || typebuf.tb_len > 0) {
       key = safe_vgetc();
     } else if (!multiqueue_empty(main_loop.events)) {
+      // No input available and processing events may take time, flush now.
+      ui_flush();
       // Event was made available after the last multiqueue_process_events call
       key = K_EVENT;
     } else {
@@ -70,7 +67,7 @@ getkey:
         update_screen();
         setcursor();  // put cursor back where it belongs
       }
-      // Flush screen updates before blocking
+      // Flush screen updates before blocking.
       ui_flush();
       // Call `os_inchar` directly to block for events or user input without
       // consuming anything from `input_buffer`(os/input.c) or calling the
@@ -267,4 +264,51 @@ void may_trigger_modechanged(void)
   STRCPY(last_mode, curr_mode);
 
   restore_v_event(v_event, &save_v_event);
+}
+
+/// When true in a safe state when starting to wait for a character.
+static bool was_safe = false;
+
+/// Return whether currently it is safe, assuming it was safe before (high level
+/// state didn't change).
+static bool is_safe_now(void)
+{
+  return stuff_empty()
+         && typebuf.tb_len == 0
+         && !using_script()
+         && !global_busy
+         && !debug_mode;
+}
+
+/// Trigger SafeState if currently in s safe state, that is "safe" is TRUE and
+/// there is no typeahead.
+void may_trigger_safestate(bool safe)
+{
+  bool is_safe = safe && is_safe_now();
+
+  if (was_safe != is_safe) {
+    // Only log when the state changes, otherwise it happens at nearly
+    // every key stroke.
+    DLOG(is_safe ? "SafeState: Start triggering" : "SafeState: Stop triggering");
+  }
+  if (is_safe) {
+    apply_autocmds(EVENT_SAFESTATE, NULL, NULL, false, curbuf);
+  }
+  was_safe = is_safe;
+}
+
+/// Something changed which causes the state possibly to be unsafe, e.g. a
+/// character was typed.  It will remain unsafe until the next call to
+/// may_trigger_safestate().
+void state_no_longer_safe(const char *reason)
+{
+  if (was_safe && reason != NULL) {
+    DLOG("SafeState reset: %s", reason);
+  }
+  was_safe = false;
+}
+
+bool get_was_safe_state(void)
+{
+  return was_safe;
 }

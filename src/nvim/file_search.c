@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // File searching functions for 'path', 'tags' and 'cdpath' options.
 //
 // External visible functions:
@@ -47,16 +44,15 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
-#include "nvim/buffer_defs.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
-#include "nvim/eval/typval_defs.h"
 #include "nvim/file_search.h"
 #include "nvim/gettext.h"
 #include "nvim/globals.h"
@@ -65,12 +61,12 @@
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/fs_defs.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/path.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
 #include "nvim/vim.h"
 #include "nvim/window.h"
 
@@ -294,7 +290,7 @@ void *vim_findfile_init(char *path, char *filename, char *stopdirs, int level, i
       xstrlcpy(ff_expand_buffer, rel_fname, len + 1);
       search_ctx->ffsc_start_dir = FullName_save(ff_expand_buffer, false);
     } else {
-      search_ctx->ffsc_start_dir = xstrnsave(rel_fname, len);
+      search_ctx->ffsc_start_dir = xmemdupz(rel_fname, len);
     }
     if (*++path != NUL) {
       path++;
@@ -615,7 +611,7 @@ char *vim_findfile(void *search_ctx_arg)
 #ifdef FF_VERBOSE
         if (p_verbose >= 5) {
           verbose_enter_scroll();
-          smsg("Already Searched: %s (%s)",
+          smsg(0, "Already Searched: %s (%s)",
                stackp->ffs_fix_path, stackp->ffs_wc_path);
           msg_puts("\n");  // don't overwrite this either
           verbose_leave_scroll();
@@ -626,7 +622,7 @@ char *vim_findfile(void *search_ctx_arg)
 #ifdef FF_VERBOSE
       } else if (p_verbose >= 5) {
         verbose_enter_scroll();
-        smsg("Searching: %s (%s)",
+        smsg(0, "Searching: %s (%s)",
              stackp->ffs_fix_path, stackp->ffs_wc_path);
         msg_puts("\n");  // don't overwrite this either
         verbose_leave_scroll();
@@ -798,7 +794,7 @@ char *vim_findfile(void *search_ctx_arg)
                                      file_path, "") == FAIL) {
                   if (p_verbose >= 5) {
                     verbose_enter_scroll();
-                    smsg("Already: %s", file_path);
+                    smsg(0, "Already: %s", file_path);
                     msg_puts("\n");  // don't overwrite this either
                     verbose_leave_scroll();
                   }
@@ -823,7 +819,7 @@ char *vim_findfile(void *search_ctx_arg)
 #ifdef FF_VERBOSE
                 if (p_verbose >= 5) {
                   verbose_enter_scroll();
-                  smsg("HIT: %s", file_path);
+                  smsg(0, "HIT: %s", file_path);
                   msg_puts("\n");  // don't overwrite this either
                   verbose_leave_scroll();
                 }
@@ -986,7 +982,7 @@ static ff_visited_list_hdr_T *ff_get_visited_list(char *filename,
 #ifdef FF_VERBOSE
         if (p_verbose >= 5) {
           verbose_enter_scroll();
-          smsg("ff_get_visited_list: FOUND list for %s", filename);
+          smsg(0, "ff_get_visited_list: FOUND list for %s", filename);
           msg_puts("\n");  // don't overwrite this either
           verbose_leave_scroll();
         }
@@ -1000,7 +996,7 @@ static ff_visited_list_hdr_T *ff_get_visited_list(char *filename,
 #ifdef FF_VERBOSE
   if (p_verbose >= 5) {
     verbose_enter_scroll();
-    smsg("ff_get_visited_list: new list for %s", filename);
+    smsg(0, "ff_get_visited_list: new list for %s", filename);
     msg_puts("\n");  // don't overwrite this either
     verbose_leave_scroll();
   }
@@ -1120,12 +1116,12 @@ static ff_stack_T *ff_create_stack_element(char *fix_part, char *wc_part, int le
 {
   ff_stack_T *stack = xmalloc(sizeof(ff_stack_T));
 
-  stack->ffs_prev          = NULL;
-  stack->ffs_filearray     = NULL;
+  stack->ffs_prev = NULL;
+  stack->ffs_filearray = NULL;
   stack->ffs_filearray_size = 0;
-  stack->ffs_filearray_cur  = 0;
-  stack->ffs_stage         = 0;
-  stack->ffs_level         = level;
+  stack->ffs_filearray_cur = 0;
+  stack->ffs_stage = 0;
+  stack->ffs_level = level;
   stack->ffs_star_star_empty = star_star_empty;
 
   // the following saves NULL pointer checks in vim_findfile
@@ -1548,7 +1544,7 @@ void do_autocmd_dirchanged(char *new_dir, CdScope scope, CdCause cause, bool pre
   } else {
     tv_dict_add_str(dict, S_LEN("cwd"), new_dir);
   }
-  tv_dict_add_str(dict, S_LEN("scope"), buf);  // -V614
+  tv_dict_add_str(dict, S_LEN("scope"), buf);
   tv_dict_add_bool(dict, S_LEN("changed_window"), cause == kCdCauseWindow);
   tv_dict_set_keys_readonly(dict);
 

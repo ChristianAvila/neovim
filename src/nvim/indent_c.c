@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,6 +17,8 @@
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
+#include "nvim/plines.h"
 #include "nvim/pos.h"
 #include "nvim/search.h"
 #include "nvim/strings.h"
@@ -106,7 +105,7 @@ static pos_T *ind_find_start_CORS(linenr_T *is_raw)
 static pos_T *find_start_rawstring(int ind_maxcomment)  // XXX
 {
   pos_T *pos;
-  long cur_maxcomment = ind_maxcomment;
+  int cur_maxcomment = ind_maxcomment;
 
   while (true) {
     pos = findmatchlimit(NULL, 'R', FM_BACKWARD, cur_maxcomment);
@@ -1506,10 +1505,10 @@ static pos_T *find_match_paren_after_brace(int ind_maxparen)
 // looking a few lines further.
 static int corr_ind_maxparen(pos_T *startpos)
 {
-  long n = (long)startpos->lnum - (long)curwin->w_cursor.lnum;
+  int n = startpos->lnum - curwin->w_cursor.lnum;
 
   if (n > 0 && n < curbuf->b_ind_maxparen / 2) {
-    return curbuf->b_ind_maxparen - (int)n;
+    return curbuf->b_ind_maxparen - n;
   }
   return curbuf->b_ind_maxparen;
 }

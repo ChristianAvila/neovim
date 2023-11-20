@@ -6,6 +6,7 @@ local exec = helpers.exec
 local feed = helpers.feed
 local meths = helpers.meths
 local nvim_dir = helpers.nvim_dir
+local assert_alive = helpers.assert_alive
 
 before_each(clear)
 
@@ -46,6 +47,71 @@ describe('messages', function()
       {0:~                                                                          }|
       {0:~                                                                          }|
       Already at oldest change                                                   |
+    ]])
+  end)
+
+  -- oldtest: Test_message_not_cleared_after_mode()
+  it('clearing mode does not remove message', function()
+    screen = Screen.new(60, 10)
+    screen:set_default_attr_ids({
+      [0] = {bold = true, foreground = Screen.colors.Blue},  -- NonText
+      [1] = {background = Screen.colors.Red, foreground = Screen.colors.White},  -- ErrorMsg
+    })
+    screen:attach()
+    exec([[
+      nmap <silent> gx :call DebugSilent('normal')<CR>
+      vmap <silent> gx :call DebugSilent('visual')<CR>
+      function DebugSilent(arg)
+          echomsg "from DebugSilent" a:arg
+      endfunction
+      set showmode
+      set cmdheight=1
+      call setline(1, ['one', 'NoSuchFile', 'three'])
+    ]])
+
+    feed('gx')
+    screen:expect([[
+      ^one                                                         |
+      NoSuchFile                                                  |
+      three                                                       |
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      from DebugSilent normal                                     |
+    ]])
+
+    -- removing the mode message used to also clear the intended message
+    feed('vEgx')
+    screen:expect([[
+      ^one                                                         |
+      NoSuchFile                                                  |
+      three                                                       |
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      from DebugSilent visual                                     |
+    ]])
+
+    -- removing the mode message used to also clear the error message
+    command('set cmdheight=2')
+    feed('2GvEgf')
+    screen:expect([[
+      one                                                         |
+      NoSuchFil^e                                                  |
+      three                                                       |
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      {0:~                                                           }|
+      from DebugSilent visual                                     |
+      {1:E447: Can't find file "NoSuchFile" in path}                  |
     ]])
   end)
 
@@ -692,5 +758,10 @@ describe('messages', function()
       'b' written                             |
     ]])
     os.remove('b.txt')
+  end)
+
+  it('no crash when truncating overlong message', function()
+    pcall(command, 'source test/old/testdir/crash/vim_msg_trunc_poc')
+    assert_alive()
   end)
 end)

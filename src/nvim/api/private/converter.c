@@ -1,11 +1,7 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 
 #include "klib/kvec.h"
 #include "nvim/api/private/converter.h"
@@ -15,7 +11,6 @@
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
-#include "nvim/garray.h"
 #include "nvim/lua/executor.h"
 #include "nvim/memory.h"
 #include "nvim/types.h"
@@ -204,6 +199,7 @@ static inline void typval_encode_dict_end(EncodedData *const edata)
 #define TYPVAL_ENCODE_FIRST_ARG_TYPE EncodedData *const
 #define TYPVAL_ENCODE_FIRST_ARG_NAME edata
 #include "nvim/eval/typval_encode.c.h"
+
 #undef TYPVAL_ENCODE_SCOPE
 #undef TYPVAL_ENCODE_NAME
 #undef TYPVAL_ENCODE_FIRST_ARG_TYPE
@@ -256,12 +252,14 @@ Object vim_to_object(typval_T *obj)
   return ret;
 }
 
-/// Converts from type Object to a VimL value.
+/// Converts from type Object to a Vimscript value.
 ///
 /// @param obj  Object to convert from.
 /// @param tv   Conversion result is placed here. On failure member v_type is
 ///             set to VAR_UNKNOWN (no allocation was made for this variable).
-/// returns     true if conversion is successful, otherwise false.
+/// @param err  Error object.
+///
+/// @returns    true if conversion is successful, otherwise false.
 bool object_to_vim(Object obj, typval_T *tv, Error *err)
 {
   tv->v_type = VAR_UNKNOWN;
@@ -283,7 +281,7 @@ bool object_to_vim(Object obj, typval_T *tv, Error *err)
   case kObjectTypeTabpage:
   case kObjectTypeInteger:
     STATIC_ASSERT(sizeof(obj.data.integer) <= sizeof(varnumber_T),
-                  "Integer size must be <= VimL number size");
+                  "Integer size must be <= Vimscript number size");
     tv->v_type = VAR_NUMBER;
     tv->vval.v_number = (varnumber_T)obj.data.integer;
     break;
@@ -363,9 +361,6 @@ bool object_to_vim(Object obj, typval_T *tv, Error *err)
     tv->vval.v_string = xstrdup(name);
     break;
   }
-
-  default:
-    abort();
   }
 
   return true;

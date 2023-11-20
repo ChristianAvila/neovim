@@ -1,11 +1,11 @@
-#ifndef NVIM_AUTOCMD_H
-#define NVIM_AUTOCMD_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "nvim/api/private/defs.h"
 #include "nvim/buffer_defs.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/macros.h"
@@ -78,7 +78,12 @@ typedef kvec_t(AutoCmd) AutoCmdVec;
 //
 // Relying on this value requires one to reset it prior calling
 // apply_autocmds_group.
-EXTERN bool au_did_filetype INIT(= false);
+EXTERN bool au_did_filetype INIT( = false);
+
+/// For CursorMoved event
+EXTERN win_T *last_cursormoved_win INIT( = NULL);
+/// For CursorMoved event, only used when last_cursormoved_win == curwin
+EXTERN pos_T last_cursormoved INIT( = { 0, 0, 0 });
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "autocmd.h.generated.h"
@@ -95,5 +100,3 @@ EXTERN bool au_did_filetype INIT(= false);
 /// Iterates over all the events for auto commands
 #define FOR_ALL_AUEVENTS(event) \
   for (event_T event = (event_T)0; (int)event < (int)NUM_EVENTS; event = (event_T)((int)event + 1))  // NOLINT
-
-#endif  // NVIM_AUTOCMD_H

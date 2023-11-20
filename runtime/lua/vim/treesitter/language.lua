@@ -82,9 +82,8 @@ function M.add(lang, opts)
     filetype = { filetype, { 'string', 'table' }, true },
   })
 
-  M.register(lang, filetype)
-
   if vim._ts_has_language(lang) then
+    M.register(lang, filetype)
     return
   end
 
@@ -102,9 +101,9 @@ function M.add(lang, opts)
   end
 
   vim._ts_add_language(path, lang, symbol_name)
+  M.register(lang, filetype)
 end
 
---- @private
 --- @param x string|string[]
 --- @return string[]
 local function ensure_list(x)

@@ -475,7 +475,7 @@ tag		command		   action in op-pending and Visual mode	~
 |v_a)|		a)		   same as ab
 |v_a<|		a<		   "a <>" from '<' to the matching '>'
 |v_a>|		a>		   same as a<
-|v_aB|		aB		   "a Block" from "[{" to "]}" (with brackets)
+|v_aB|		aB		   "a Block" from `[{` to `]}` (with brackets)
 |v_aW|		aW		   "a WORD" (with white space)
 |v_a[|		a[		   "a []" from '[' to the matching ']'
 |v_a]|		a]		   same as a[
@@ -493,7 +493,7 @@ tag		command		   action in op-pending and Visual mode	~
 |v_i)|		i)		   same as ib
 |v_i<|		i<		   "inner <>" from '<' to the matching '>'
 |v_i>|		i>		   same as i<
-|v_iB|		iB		   "inner Block" from "[{" and "]}"
+|v_iB|		iB		   "inner Block" from `[{` and `]}`
 |v_iW|		iW		   "inner WORD"
 |v_i[|		i[		   "inner []" from '[' to the matching ']'
 |v_i]|		i]		   same as i[
@@ -1096,6 +1096,22 @@ tag		command		action in Command-line editing mode	~
 |c_<Insert>|	<Insert>	toggle insert/overstrike mode
 |c_<LeftMouse>|	<LeftMouse>	cursor at mouse click
 
+commands in wildmenu mode (see 'wildmenu')
+
+		<Up>		move up to parent
+		<Down>		move down to submenu
+		<Left>		select the previous match
+		<Right>		select the next match
+		<CR>		move into submenu when doing menu completion
+		CTRL-E		stop completion and go back to original text
+		CTRL-Y		accept selected match and stop completion
+		other		stop completion and insert the typed character
+
+commands in wildmenu mode with 'wildoptions' set to "pum"
+
+		<PageUp>	select a match several entries back
+		<PageDown>	select a match several entries forward
+
 ==============================================================================
 5. Terminal mode				*terminal-mode-index*
 
@@ -1110,7 +1126,7 @@ to terminal mode.
 You found it, Arthur!				*holy-grail*
 
 ==============================================================================
-6. EX commands				*ex-commands* *ex-cmd-index* *:index*
+6. EX commands				*Ex-commands* *ex-cmd-index* *:index*
 
 This is a brief but complete listing of all the ":" commands, without
 mentioning any arguments.  The optional part of the command name is inside [].
@@ -1288,6 +1304,7 @@ tag		command		action ~
 |:execute|	:exe[cute]	execute result of expressions
 |:exit|		:exi[t]		same as ":xit"
 |:exusage|	:exu[sage]	overview of Ex commands
+|:fclose|	:fc[lose]	close floating window
 |:file|		:f[ile]		show or set the current file name
 |:files|	:files		list all files in the buffer list
 |:filetype|	:filet[ype]	switch file type detection on/off

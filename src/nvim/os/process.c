@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// OS process functions
 ///
 /// psutil is a good reference for cross-platform syscall voodoo:
@@ -13,14 +10,8 @@
 #include <stdio.h>
 #include <uv.h>
 
-#include "nvim/log.h"
-#include "nvim/memory.h"
-#include "nvim/os/process.h"
-
 #ifdef MSWIN
 # include <tlhelp32.h>
-
-# include "nvim/api/private/helpers.h"
 #endif
 
 #if defined(__FreeBSD__)  // XXX: OpenBSD ?
@@ -36,6 +27,14 @@
 #if defined(__APPLE__) || defined(BSD)
 # include <pwd.h>
 # include <sys/sysctl.h>
+#endif
+
+#include "nvim/log.h"
+#include "nvim/memory.h"
+#include "nvim/os/process.h"
+
+#ifdef MSWIN
+# include "nvim/api/private/helpers.h"
 #endif
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS

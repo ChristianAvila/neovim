@@ -1,5 +1,4 @@
-#ifndef NVIM_WINDOW_H
-#define NVIM_WINDOW_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -33,8 +32,7 @@
 #define MIN_LINES       2       // minimal lines for screen
 
 // Set to true if 'cmdheight' was explicitly set to 0.
-EXTERN bool p_ch_was_zero INIT(= false);
+EXTERN bool p_ch_was_zero INIT( = false);
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "window.h.generated.h"
 #endif
-#endif  // NVIM_WINDOW_H

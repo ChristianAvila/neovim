@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <uv.h>
 
 #include "nvim/os/os.h"
@@ -14,9 +11,9 @@
 # define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
 #endif
 
-HRESULT (WINAPI *pCreatePseudoConsole)(COORD, HANDLE, HANDLE, DWORD, HPCON *);
-HRESULT (WINAPI *pResizePseudoConsole)(HPCON, COORD);
-void (WINAPI *pClosePseudoConsole)(HPCON);
+HRESULT(WINAPI *pCreatePseudoConsole)(COORD, HANDLE, HANDLE, DWORD, HPCON *);
+HRESULT(WINAPI *pResizePseudoConsole)(HPCON, COORD);
+void(WINAPI *pClosePseudoConsole)(HPCON);
 
 bool os_has_conpty_working(void)
 {

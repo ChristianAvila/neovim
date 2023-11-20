@@ -1,7 +1,7 @@
-#ifndef NVIM_TAG_H
-#define NVIM_TAG_H
+#pragma once
 
 #include "nvim/ex_cmds_defs.h"
+#include "nvim/option_defs.h"
 #include "nvim/types.h"
 
 // Values for do_tag().
@@ -42,4 +42,3 @@ typedef struct {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "tag.h.generated.h"
 #endif
-#endif  // NVIM_TAG_H

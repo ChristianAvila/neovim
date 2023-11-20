@@ -18,8 +18,7 @@ local sleep = global_helpers.sleep
 local tbl_contains = global_helpers.tbl_contains
 local fail = global_helpers.fail
 
-local module = {
-}
+local module = {}
 
 local start_dir = luv.cwd()
 local runtime_set = 'set runtimepath^=./build/lib/nvim/'
@@ -82,6 +81,13 @@ if prepend_argv then
 end
 
 local session, loop_running, last_error, method_error
+
+if not is_os('win') then
+  local sigpipe_handler = luv.new_signal()
+  luv.signal_start(sigpipe_handler, "sigpipe", function()
+    print("warning: got SIGPIPE signal. Likely related to a crash in nvim")
+  end)
+end
 
 function module.get_session()
   return session
@@ -265,7 +271,7 @@ function module.nvim_prog_abs()
   end
 end
 
--- Executes an ex-command. VimL errors manifest as client (lua) errors, but
+-- Executes an ex-command. Vimscript errors manifest as client (lua) errors, but
 -- v:errmsg will not be updated.
 function module.command(cmd)
   module.request('nvim_command', cmd)
@@ -289,26 +295,26 @@ function module.expect_exit(fn_or_timeout, ...)
   end
 end
 
--- Evaluates a VimL expression.
--- Fails on VimL error, but does not update v:errmsg.
+-- Evaluates a Vimscript expression.
+-- Fails on Vimscript error, but does not update v:errmsg.
 function module.eval(expr)
   return module.request('nvim_eval', expr)
 end
 
--- Executes a VimL function via RPC.
--- Fails on VimL error, but does not update v:errmsg.
+-- Executes a Vimscript function via RPC.
+-- Fails on Vimscript error, but does not update v:errmsg.
 function module.call(name, ...)
   return module.request('nvim_call_function', name, {...})
 end
 
--- Executes a VimL function via Lua.
--- Fails on VimL error, but does not update v:errmsg.
+-- Executes a Vimscript function via Lua.
+-- Fails on Vimscript error, but does not update v:errmsg.
 function module.call_lua(name, ...)
   return module.exec_lua([[return vim.call(...)]], name, ...)
 end
 
 -- Sends user input to Nvim.
--- Does not fail on VimL error, but v:errmsg will be updated.
+-- Does not fail on Vimscript error, but v:errmsg will be updated.
 local function nvim_feed(input)
   while #input > 0 do
     local written = module.request('nvim_input', input)
@@ -518,7 +524,7 @@ function module.insert(...)
   nvim_feed('<ESC>')
 end
 
--- Executes an ex-command by user input. Because nvim_input() is used, VimL
+-- Executes an ex-command by user input. Because nvim_input() is used, Vimscript
 -- errors will not manifest as client (lua) errors. Use command() for that.
 function module.feed_command(...)
   for _, v in ipairs({...}) do
@@ -827,6 +833,8 @@ function module.exec_capture(code)
   return module.meths.exec2(code, { output = true }).output
 end
 
+--- @param code string
+--- @return any
 function module.exec_lua(code, ...)
   return module.meths.exec_lua(code, {...})
 end
@@ -848,6 +856,11 @@ end
 function module.testprg(name)
   local ext = module.is_os('win') and '.exe' or ''
   return ('%s/%s%s'):format(module.nvim_dir, name, ext)
+end
+
+function module.is_asan()
+  local version = module.eval('execute("verbose version")')
+  return version:match('-fsanitize=[a-z,]*address')
 end
 
 -- Returns a valid, platform-independent Nvim listen address.
@@ -936,8 +949,10 @@ function module.mkdir_p(path)
     or 'mkdir -p '..path))
 end
 
+--- @class test.functional.helpers: test.helpers
 module = global_helpers.tbl_extend('error', module, global_helpers)
 
+--- @return test.functional.helpers
 return function(after_each)
   if after_each then
     after_each(function()

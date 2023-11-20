@@ -1,15 +1,11 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #ifndef MSWIN
-# include <signal.h>  // for sigset_t
+# include <signal.h>
 #endif
 
 #include "nvim/autocmd.h"
-#include "nvim/buffer_defs.h"
 #include "nvim/eval.h"
 #include "nvim/event/signal.h"
 #include "nvim/globals.h"

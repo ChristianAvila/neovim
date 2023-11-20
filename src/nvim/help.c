@@ -1,9 +1,7 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 // help.c: functions for Vim help
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +14,7 @@
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
+#include "nvim/extmark_defs.h"
 #include "nvim/fileio.h"
 #include "nvim/garray.h"
 #include "nvim/gettext.h"
@@ -28,6 +27,7 @@
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/optionstr.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
@@ -55,8 +55,6 @@ void ex_help(exarg_T *eap)
   char **matches;
   int empty_fnum = 0;
   int alt_fnum = 0;
-  buf_T *buf;
-  int len;
   const bool old_KeyTyped = KeyTyped;
 
   if (eap != NULL) {
@@ -105,7 +103,7 @@ void ex_help(exarg_T *eap)
   if (n != FAIL && lang != NULL) {
     // Find first item with the requested language.
     for (i = 0; i < num_matches; i++) {
-      len = (int)strlen(matches[i]);
+      int len = (int)strlen(matches[i]);
       if (len > 3 && matches[i][len - 3] == '@'
           && STRICMP(matches[i] + len - 2, lang) == 0) {
         break;
@@ -148,7 +146,7 @@ void ex_help(exarg_T *eap)
       // There is no help window yet.
       // Try to open the file specified by the "helpfile" option.
       if ((helpfd = os_fopen(p_hf, READBIN)) == NULL) {
-        smsg(_("Sorry, help file \"%s\" not found"), p_hf);
+        smsg(0, _("Sorry, help file \"%s\" not found"), p_hf);
         goto erret;
       }
       fclose(helpfd);
@@ -196,7 +194,7 @@ void ex_help(exarg_T *eap)
   // may have jumped to another window, check that the buffer is not in a
   // window.
   if (empty_fnum != 0 && curbuf->b_fnum != empty_fnum) {
-    buf = buflist_findnr(empty_fnum);
+    buf_T *buf = buflist_findnr(empty_fnum);
     if (buf != NULL && buf->b_nwindows == 0) {
       wipe_buffer(buf, true);
     }
@@ -458,7 +456,7 @@ int find_help_tags(const char *arg, int *num_matches, char ***matches, bool keep
         // Replace "^x" by "CTRL-X". Don't do this for "^_" to make
         // ":help i_^_CTRL-D" work.
         // Insert '-' before and after "CTRL-X" when applicable.
-        if (*s < ' '
+        if ((uint8_t)(*s) < ' '
             || (*s == '^' && s[1]
                 && (ASCII_ISALPHA(s[1]) || vim_strchr("?@[\\]^", (uint8_t)s[1]) != NULL))) {
           if (d > IObuff && d[-1] != '_' && d[-1] != '\\') {
@@ -647,26 +645,23 @@ void prepare_help_buffer(void)
 /// highlighting is not used.
 void fix_help_buffer(void)
 {
-  linenr_T lnum;
-  char *line;
-
   // Set filetype to "help".
   if (strcmp(curbuf->b_p_ft, "help") != 0) {
     curbuf->b_ro_locked++;
-    set_option_value_give_err("ft", 0L, "help", OPT_LOCAL);
+    set_option_value_give_err("ft", STATIC_CSTR_AS_OPTVAL("help"), OPT_LOCAL);
     curbuf->b_ro_locked--;
   }
 
   if (!syntax_present(curwin)) {
     bool in_example = false;
-    for (lnum = 1; lnum <= curbuf->b_ml.ml_line_count; lnum++) {
-      line = ml_get_buf(curbuf, lnum, false);
+    for (linenr_T lnum = 1; lnum <= curbuf->b_ml.ml_line_count; lnum++) {
+      char *line = ml_get_buf(curbuf, lnum);
       const size_t len = strlen(line);
       if (in_example && len > 0 && !ascii_iswhite(line[0])) {
         // End of example: non-white or '<' in first column.
         if (line[0] == '<') {
           // blank-out a '<' in the first column
-          line = ml_get_buf(curbuf, lnum, true);
+          line = ml_get_buf_mut(curbuf, lnum);
           line[0] = ' ';
         }
         in_example = false;
@@ -674,12 +669,12 @@ void fix_help_buffer(void)
       if (!in_example && len > 0) {
         if (line[len - 1] == '>' && (len == 1 || line[len - 2] == ' ')) {
           // blank-out a '>' in the last column (start of example)
-          line = ml_get_buf(curbuf, lnum, true);
+          line = ml_get_buf_mut(curbuf, lnum);
           line[len - 1] = ' ';
           in_example = true;
         } else if (line[len - 1] == '~') {
           // blank-out a '~' at the end of line (header marker)
-          line = ml_get_buf(curbuf, lnum, true);
+          line = ml_get_buf_mut(curbuf, lnum);
           line[len - 1] = ' ';
         }
       }
@@ -695,8 +690,8 @@ void fix_help_buffer(void)
           && ASCII_ISALPHA(fname[6])
           && TOLOWER_ASC(fname[7]) == 'x'
           && fname[8] == NUL)) {
-    for (lnum = 1; lnum < curbuf->b_ml.ml_line_count; lnum++) {
-      line = ml_get_buf(curbuf, lnum, false);
+    for (linenr_T lnum = 1; lnum < curbuf->b_ml.ml_line_count; lnum++) {
+      char *line = ml_get_buf(curbuf, lnum);
       if (strstr(line, "*local-additions*") == NULL) {
         continue;
       }
@@ -820,7 +815,7 @@ void fix_help_buffer(void)
                 }
                 convert_setup(&vc, NULL, NULL);
 
-                ml_append(lnum, cp, (colnr_T)0, false);
+                ml_append(lnum, cp, 0, false);
                 if (cp != IObuff) {
                   xfree(cp);
                 }
@@ -835,8 +830,8 @@ void fix_help_buffer(void)
       }
       linenr_T appended = lnum - lnum_start;
       if (appended) {
-        mark_adjust(lnum_start + 1, (linenr_T)MAXLNUM, appended, 0L, kExtmarkUndo);
-        changed_lines_buf(curbuf, lnum_start + 1, lnum_start + 1, appended);
+        mark_adjust(lnum_start + 1, (linenr_T)MAXLNUM, appended, 0, kExtmarkUndo);
+        buf_redraw_changed_lines_later(curbuf, lnum_start + 1, lnum_start + 1, appended);
       }
       break;
     }
@@ -870,7 +865,6 @@ static void helptags_one(char *dir, const char *ext, const char *tagfname, bool 
   garray_T ga;
   int filecount;
   char **files;
-  char *p1, *p2;
   char *s;
   TriState utf8 = kNone;
   bool mix = false;             // detected mixed encodings
@@ -975,9 +969,9 @@ static void helptags_one(char *dir, const char *ext, const char *tagfname, bool 
         }
         in_example = false;
       }
-      p1 = vim_strchr(IObuff, '*');       // find first '*'
+      char *p1 = vim_strchr(IObuff, '*');       // find first '*'
       while (p1 != NULL) {
-        p2 = strchr(p1 + 1, '*');  // Find second '*'.
+        char *p2 = strchr(p1 + 1, '*');  // Find second '*'.
         if (p2 != NULL && p2 > p1 + 1) {         // Skip "*" and "**".
           for (s = p1 + 1; s < p2; s++) {
             if (*s == ' ' || *s == '\t' || *s == '|') {
@@ -1024,8 +1018,8 @@ static void helptags_one(char *dir, const char *ext, const char *tagfname, bool 
 
     // Check for duplicates.
     for (int i = 1; i < ga.ga_len; i++) {
-      p1 = ((char **)ga.ga_data)[i - 1];
-      p2 = ((char **)ga.ga_data)[i];
+      char *p1 = ((char **)ga.ga_data)[i - 1];
+      char *p2 = ((char **)ga.ga_data)[i];
       while (*p1 == *p2) {
         if (*p2 == '\t') {
           *p2 = NUL;
@@ -1053,7 +1047,7 @@ static void helptags_one(char *dir, const char *ext, const char *tagfname, bool 
         fputs(s, fd_tags);
       } else {
         fprintf(fd_tags, "%s\t/" "*", s);
-        for (p1 = s; *p1 != '\t'; p1++) {
+        for (char *p1 = s; *p1 != '\t'; p1++) {
           // insert backslash before '\\' and '/'
           if (*p1 == '\\' || *p1 == '/') {
             putc('\\', fd_tags);
@@ -1162,10 +1156,17 @@ static void do_helptags(char *dirname, bool add_help_tags, bool ignore_writeerr)
   FreeWild(filecount, files);
 }
 
-static void helptags_cb(char *fname, void *cookie)
+static bool helptags_cb(int num_fnames, char **fnames, bool all, void *cookie)
   FUNC_ATTR_NONNULL_ALL
 {
-  do_helptags(fname, *(bool *)cookie, true);
+  for (int i = 0; i < num_fnames; i++) {
+    do_helptags(fnames[i], *(bool *)cookie, true);
+    if (!all) {
+      return true;
+    }
+  }
+
+  return num_fnames > 0;
 }
 
 /// ":helptags"
@@ -1181,7 +1182,7 @@ void ex_helptags(exarg_T *eap)
   }
 
   if (strcmp(eap->arg, "ALL") == 0) {
-    do_in_path(p_rtp, "doc", DIP_ALL + DIP_DIR, helptags_cb, &add_help_tags);
+    do_in_path(p_rtp, "", "doc", DIP_ALL + DIP_DIR, helptags_cb, &add_help_tags);
   } else {
     ExpandInit(&xpc);
     xpc.xp_context = EXPAND_DIRECTORIES;

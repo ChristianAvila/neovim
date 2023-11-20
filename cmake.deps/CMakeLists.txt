@@ -9,10 +9,12 @@ endif()
 # Point CMake at any custom modules we may ship
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" "${PROJECT_SOURCE_DIR}/../cmake")
 
-include(ExternalProject)
 include(CheckCCompilerFlag)
+include(ExternalProject)
+include(FindPackageHandleStandardArgs)
 
 include(Deps)
+include(Find)
 include(Util)
 
 set_default_buildtype()
@@ -54,16 +56,7 @@ else()
   option(USE_BUNDLED_LIBICONV "Use the bundled version of libiconv." OFF)
 endif()
 
-if(WIN32)
-  option(USE_BUNDLED_NVIMQT "Bundle neovim-qt" ON)
-endif()
-
 option(USE_EXISTING_SRC_DIR "Skip download of deps sources in case of existing source directory." OFF)
-
-find_package(Git)
-if(NOT Git_FOUND)
-  message(FATAL_ERROR "Git is required to apply patches.")
-endif()
 
 # If the macOS deployment target is not set manually (via $MACOSX_DEPLOYMENT_TARGET),
 # fall back to local system version. Needs to be done here and in top-level CMakeLists.txt.
@@ -157,12 +150,6 @@ if(WIN32)
   GetExecutable(TARGET cat)
   GetExecutable(TARGET tee)
   GetExecutable(TARGET xxd)
-
-  if(USE_BUNDLED_NVIMQT)
-    GetBinaryDep(TARGET wingui
-      INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory bin ${DEPS_BIN_DIR}
-      COMMAND ${CMAKE_COMMAND} -E copy_directory share ${DEPS_INSTALL_DIR}/share)
-  endif()
 
   GetBinaryDep(TARGET win32yank_X86_64
     INSTALL_COMMAND ${CMAKE_COMMAND} -E copy win32yank.exe ${DEPS_BIN_DIR})

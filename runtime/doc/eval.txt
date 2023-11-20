@@ -39,7 +39,7 @@ List		An ordered sequence of items, see |List| for details.
 
 Dictionary	An associative, unordered array: Each entry has a key and a
 		value. |Dictionary|
-		Examples:
+		Examples: >
 			{"blue": "#0000ff", "red": "#ff0000"}
 			#{blue: "#0000ff", red: "#ff0000"}
 
@@ -841,19 +841,19 @@ Expression syntax summary, from least to most significant:
 
 |expr9|	number			number constant
 	"string"		string constant, backslash is special
-	'string'		string constant, ' is doubled
+	`'string'`		string constant, ' is doubled
 	[expr1, ...]		|List|
-	{expr1: expr1, ...}	|Dictionary|
+	`{expr1: expr1, ...}`	|Dictionary|
 	#{key: expr1, ...}	|Dictionary|
 	&option			option value
 	(expr1)			nested expression
 	variable		internal variable
 	va{ria}ble		internal variable with curly braces
 	$VAR			environment variable
-	@r			contents of register 'r'
+	@r			contents of register "r"
 	function(expr1, ...)	function call
 	func{ti}on(expr1, ...)	function call with curly braces
-	{args -> expr1}		lambda expression
+	`{args -> expr1}`	lambda expression
 
 
 "..." indicates that the operations in this level can be concatenated.
@@ -1547,7 +1547,7 @@ See below |functions|.
 ------------------------------------------------------------------------------
 lambda expression				*expr-lambda* *lambda*
 
-{args -> expr1}		lambda expression			*E451*
+`{args -> expr1}`	lambda expression			*E451*
 
 A lambda expression creates a new unnamed function which returns the result of
 evaluating |expr1|.  Lambda expressions differ from |user-function|s in
@@ -1846,7 +1846,7 @@ v:ctype		The current locale setting for characters of the runtime
 v:dying		Normally zero.  When a deadly signal is caught it's set to
 		one.  When multiple signals are caught the number increases.
 		Can be used in an autocommand to check if Vim didn't
-		terminate normally. {only works on Unix}
+		terminate normally.
 		Example: >
 	:au VimLeave * if v:dying | echo "\nAAAAaaaarrrggghhhh!!!\n" | endif
 <		Note: if another deadly signal is caught when v:dying is one,
@@ -2276,12 +2276,13 @@ v:stderr	|channel-id| corresponding to stderr. The value is always 2;
 			:call chansend(v:stderr, "error: toaster empty\n")
 <
 					*v:swapname* *swapname-variable*
-v:swapname	Only valid when executing |SwapExists| autocommands: Name of
-		the swap file found.  Read-only.
+v:swapname	Name of the swapfile found.
+		Only valid during |SwapExists| event.
+		Read-only.
 
 					*v:swapchoice* *swapchoice-variable*
 v:swapchoice	|SwapExists| autocommands can set this to the selected choice
-		for handling an existing swap file:
+		for handling an existing swapfile:
 			'o'	Open read-only
 			'e'	Edit anyway
 			'r'	Recover
@@ -2317,18 +2318,10 @@ v:t_string	Value of |String| type.  Read-only.  See: |type()|
 v:t_blob	Value of |Blob| type.  Read-only.  See: |type()|
 
 				*v:termresponse* *termresponse-variable*
-v:termresponse	The escape sequence returned by the terminal for the DA
-		(request primary device attributes) control sequence.  It is
-		set when Vim receives an escape sequence that starts with ESC
-		[ or CSI and ends in a 'c', with only digits, ';' and '.' in
-		between.
-		When this option is set, the TermResponse autocommand event is
-		fired, so that you can react to the response from the
-		terminal.
-		The response from a new xterm is: "<Esc>[ Pp ; Pv ; Pc c".  Pp
-		is the terminal type: 0 for vt100 and 1 for vt220.  Pv is the
-		patch level (since this was introduced in patch 95, it's
-		always 95 or bigger).  Pc is always zero.
+v:termresponse	The value of the most recent OSC or DCS escape sequence
+		received by Nvim from the terminal. This can be read in a
+		|TermResponse| event handler after querying the terminal using
+		another escape sequence.
 
 					*v:testing* *testing-variable*
 v:testing	Must be set before using `test_garbagecollect_now()`.
@@ -2493,7 +2486,7 @@ This does NOT work: >
 			*:let/=* *:let%=* *:let.=* *:let..=* *E734*
 :let {var} += {expr1}	Like ":let {var} = {var} + {expr1}".
 :let {var} -= {expr1}	Like ":let {var} = {var} - {expr1}".
-:let {var} *= {expr1}	Like ":let {var} = {var} * {expr1}".
+`:let {var} *= {expr1}`	Like ":let {var} = {var} * {expr1}".
 :let {var} /= {expr1}	Like ":let {var} = {var} / {expr1}".
 :let {var} %= {expr1}	Like ":let {var} = {var} % {expr1}".
 :let {var} .= {expr1}	Like ":let {var} = {var} . {expr1}".
@@ -2799,7 +2792,7 @@ text...
 				let mylist = [1, 2, 3]
 				lockvar 0 mylist
 				let mylist[0] = 77	" OK
-				call add(mylist, 4]	" OK
+				call add(mylist, 4)	" OK
 				let mylist = [7, 8, 9]  " Error!
 <								*E743*
 			For unlimited depth use [!] and omit [depth].
@@ -4351,6 +4344,33 @@ This is not allowed when the textlock is active:
 	- editing another file
 	- closing a window or quitting Vim
 	- etc.
+
+==============================================================================
+Vim script library					*vim-script-library*
+
+Vim comes bundled with a Vim script library, that can be used by runtime,
+script authors.  Currently, it only includes very few functions, but it may
+grow over time.
+
+								*dist#vim*
+The functions make use of the autoloaded prefix "dist#vim".
+
+The following functions are available:
+
+dist#vim#IsSafeExecutable(filetype, executable) ~
+
+This function takes a filetype and an executable and checks whether it is safe
+to execute the given executable.  For security reasons users may not want to
+have Vim execute random executables or may have forbidden to do so for
+specific filetypes by setting the "<filetype>_exec" variable (|plugin_exec|).
+
+It returns |TRUE| or |FALSE| to indicate whether the plugin should run the given
+exectuable.  It takes the following arguments:
+
+	argument	type ~
+
+	filetype	string
+	executable	string
 
 ==============================================================================
 Command-line expressions highlighting		*expr-highlight*

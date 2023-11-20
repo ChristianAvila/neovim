@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -11,7 +8,6 @@
 #include "nvim/api/private/defs.h"
 #include "nvim/ascii.h"
 #include "nvim/autocmd.h"
-#include "nvim/buffer_defs.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
 #include "nvim/event/rstream.h"
@@ -24,8 +20,9 @@
 #include "nvim/macros.h"
 #include "nvim/main.h"
 #include "nvim/msgpack_rpc/channel.h"
-#include "nvim/option_defs.h"
+#include "nvim/option_vars.h"
 #include "nvim/os/input.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/os/time.h"
 #include "nvim/profile.h"
 #include "nvim/rbuffer.h"
@@ -242,8 +239,8 @@ bool os_isatty(int fd)
 
 size_t input_enqueue(String keys)
 {
-  char *ptr = keys.data;
-  char *end = ptr + keys.size;
+  const char *ptr = keys.data;
+  const char *end = ptr + keys.size;
 
   while (rbuffer_space(input_buffer) >= 19 && ptr < end) {
     // A "<x>" form occupies at least 1 characters, and produces up
@@ -254,8 +251,7 @@ size_t input_enqueue(String keys)
     uint8_t buf[19] = { 0 };
     // Do not simplify the keys here. Simplification will be done later.
     unsigned new_size
-      = trans_special((const char **)&ptr, (size_t)(end - ptr), (char *)buf, FSK_KEYCODE, true,
-                      NULL);
+      = trans_special(&ptr, (size_t)(end - ptr), (char *)buf, FSK_KEYCODE, true, NULL);
 
     if (new_size) {
       new_size = handle_mouse_event(&ptr, buf, new_size);
@@ -264,7 +260,7 @@ size_t input_enqueue(String keys)
     }
 
     if (*ptr == '<') {
-      char *old_ptr = ptr;
+      const char *old_ptr = ptr;
       // Invalid or incomplete key sequence, skip until the next '>' or *end.
       do {
         ptr++;
@@ -346,7 +342,7 @@ static uint8_t check_multiclick(int code, int grid, int row, int col)
 
 // Mouse event handling code(Extract row/col if available and detect multiple
 // clicks)
-static unsigned handle_mouse_event(char **ptr, uint8_t *buf, unsigned bufsize)
+static unsigned handle_mouse_event(const char **ptr, uint8_t *buf, unsigned bufsize)
 {
   int mouse_code = 0;
   int type = 0;

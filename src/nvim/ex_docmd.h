@@ -1,10 +1,11 @@
-#ifndef NVIM_EX_DOCMD_H
-#define NVIM_EX_DOCMD_H
+#pragma once
 
 #include <stdbool.h>
 
 #include "nvim/buffer_defs.h"
+#include "nvim/cmdexpand_defs.h"
 #include "nvim/ex_cmds_defs.h"
+#include "nvim/getchar_defs.h"
 #include "nvim/globals.h"
 
 // flags for do_cmdline()
@@ -30,7 +31,7 @@ typedef struct {
   bool save_msg_didout;
   int save_State;
   bool save_finish_op;
-  long save_opcount;
+  int save_opcount;
   int save_reg_executing;
   bool save_pending_end_reg_executing;
   tasave_T tabuf;
@@ -39,4 +40,3 @@ typedef struct {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "ex_docmd.h.generated.h"
 #endif
-#endif  // NVIM_EX_DOCMD_H

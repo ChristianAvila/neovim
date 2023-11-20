@@ -1,5 +1,4 @@
-#ifndef NVIM_VIM_H
-#define NVIM_VIM_H
+#pragma once
 
 #include "nvim/pos.h"
 #include "nvim/types.h"
@@ -12,6 +11,14 @@
 
 #include "auto/config.h"
 #define HAVE_PATHDEF
+
+// Some file names are stored in pathdef.c, which is generated from the
+// Makefile to make their value depend on the Makefile.
+#ifdef HAVE_PATHDEF
+extern char *default_vim_dir;
+extern char *default_vimruntime_dir;
+extern char *default_lib_dir;
+#endif
 
 // Check if configure correctly managed to find sizeof(int).  If this failed,
 // it becomes zero.  This is likely a problem of not being able to run the
@@ -88,83 +95,10 @@ typedef enum {
 #define FAIL                    0
 #define NOTDONE                 2   // not OK or FAIL but skipped
 
-// Type values for type().
-#define VAR_TYPE_NUMBER     0
-#define VAR_TYPE_STRING     1
-#define VAR_TYPE_FUNC       2
-#define VAR_TYPE_LIST       3
-#define VAR_TYPE_DICT       4
-#define VAR_TYPE_FLOAT      5
-#define VAR_TYPE_BOOL       6
-#define VAR_TYPE_SPECIAL    7
-#define VAR_TYPE_BLOB      10
-
-// values for xp_context when doing command line completion
-
-enum {
-  EXPAND_UNSUCCESSFUL = -2,
-  EXPAND_OK = -1,
-  EXPAND_NOTHING = 0,
-  EXPAND_COMMANDS,
-  EXPAND_FILES,
-  EXPAND_DIRECTORIES,
-  EXPAND_SETTINGS,
-  EXPAND_BOOL_SETTINGS,
-  EXPAND_TAGS,
-  EXPAND_OLD_SETTING,
-  EXPAND_HELP,
-  EXPAND_BUFFERS,
-  EXPAND_EVENTS,
-  EXPAND_MENUS,
-  EXPAND_SYNTAX,
-  EXPAND_HIGHLIGHT,
-  EXPAND_AUGROUP,
-  EXPAND_USER_VARS,
-  EXPAND_MAPPINGS,
-  EXPAND_TAGS_LISTFILES,
-  EXPAND_FUNCTIONS,
-  EXPAND_USER_FUNC,
-  EXPAND_EXPRESSION,
-  EXPAND_MENUNAMES,
-  EXPAND_USER_COMMANDS,
-  EXPAND_USER_CMD_FLAGS,
-  EXPAND_USER_NARGS,
-  EXPAND_USER_COMPLETE,
-  EXPAND_ENV_VARS,
-  EXPAND_LANGUAGE,
-  EXPAND_COLORS,
-  EXPAND_COMPILER,
-  EXPAND_USER_DEFINED,
-  EXPAND_USER_LIST,
-  EXPAND_USER_LUA,
-  EXPAND_SHELLCMD,
-  EXPAND_SIGN,
-  EXPAND_PROFILE,
-  EXPAND_FILETYPE,
-  EXPAND_FILES_IN_PATH,
-  EXPAND_OWNSYNTAX,
-  EXPAND_LOCALES,
-  EXPAND_HISTORY,
-  EXPAND_USER,
-  EXPAND_SYNTIME,
-  EXPAND_USER_ADDR_TYPE,
-  EXPAND_PACKADD,
-  EXPAND_MESSAGES,
-  EXPAND_MAPCLEAR,
-  EXPAND_ARGLIST,
-  EXPAND_DIFF_BUFFERS,
-  EXPAND_BREAKPOINT,
-  EXPAND_SCRIPTNAMES,
-  EXPAND_RUNTIME,
-  EXPAND_CHECKHEALTH,
-  EXPAND_LUA,
-};
-
 // Minimal size for block 0 of a swap file.
 // NOTE: This depends on size of struct block0! It's not done with a sizeof(),
 // because struct block0 is defined in memline.c (Sorry).
 // The maximal block size is arbitrary.
-
 #define MIN_SWAP_PAGE_SIZE 1048
 #define MAX_SWAP_PAGE_SIZE 50000
 
@@ -268,5 +202,3 @@ enum { FOLD_TEXT_LEN = 51, };  //!< buffer size for get_foldtext()
 // Replacement for nchar used by nv_replace().
 #define REPLACE_CR_NCHAR    (-1)
 #define REPLACE_NL_NCHAR    (-2)
-
-#endif  // NVIM_VIM_H

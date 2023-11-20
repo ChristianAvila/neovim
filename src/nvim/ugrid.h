@@ -1,5 +1,4 @@
-#ifndef NVIM_UGRID_H
-#define NVIM_UGRID_H
+#pragma once
 
 #include "nvim/globals.h"
 #include "nvim/grid_defs.h"
@@ -11,10 +10,8 @@ struct ugrid;
 typedef struct ucell UCell;
 typedef struct ugrid UGrid;
 
-#define CELLBYTES (sizeof(schar_T))
-
 struct ucell {
-  char data[CELLBYTES + 1];
+  schar_T data;
   sattr_T attr;
 };
 
@@ -23,8 +20,6 @@ struct ugrid {
   int width, height;
   UCell **cells;
 };
-
-// -V:UGRID_FOREACH_CELL:625
 
 #define UGRID_FOREACH_CELL(grid, row, startcol, endcol, code) \
   do { \
@@ -39,4 +34,3 @@ struct ugrid {
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "ugrid.h.generated.h"
 #endif
-#endif  // NVIM_UGRID_H

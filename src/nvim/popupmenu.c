@@ -1,12 +1,8 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /// @file popupmenu.c
 ///
 /// Popup menu (PUM)
 
 #include <assert.h>
-#include <limits.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -17,9 +13,9 @@
 #include "nvim/charset.h"
 #include "nvim/drawscreen.h"
 #include "nvim/eval/typval.h"
-#include "nvim/eval/typval_defs.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/getchar.h"
+#include "nvim/gettext.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/highlight.h"
@@ -32,6 +28,7 @@
 #include "nvim/message.h"
 #include "nvim/move.h"
 #include "nvim/option.h"
+#include "nvim/option_vars.h"
 #include "nvim/popupmenu.h"
 #include "nvim/pos.h"
 #include "nvim/strings.h"
@@ -423,11 +420,7 @@ void pum_redraw(void)
   int row = 0;
   int attr_scroll = win_hl_attr(curwin, HLF_PSB);
   int attr_thumb = win_hl_attr(curwin, HLF_PST);
-  int i;
-  char *s;
   char *p = NULL;
-  int width;
-  int w;
   int thumb_pos = 0;
   int thumb_height = 1;
   int n;
@@ -502,19 +495,19 @@ void pum_redraw(void)
                 / (pum_size - pum_height);
   }
 
-  for (i = 0; i < pum_height; i++) {
+  for (int i = 0; i < pum_height; i++) {
     int idx = i + pum_first;
     const int *const attrs = (idx == pum_selected) ? attrsSel : attrsNorm;
     int attr = attrs[0];  // start with "word" highlight
 
-    grid_puts_line_start(&pum_grid, row);
+    grid_line_start(&pum_grid, row);
 
     // prepend a space if there is room
     if (extra_space) {
       if (pum_rl) {
-        grid_putchar(&pum_grid, ' ', row, col_off + 1, attr);
+        grid_line_puts(col_off + 1, " ", 1, attr);
       } else {
-        grid_putchar(&pum_grid, ' ', row, col_off - 1, attr);
+        grid_line_puts(col_off - 1, " ", 1, attr);
       }
     }
 
@@ -528,8 +521,8 @@ void pum_redraw(void)
 
     for (int round = 0; round < 3; round++) {
       attr = attrs[round];
-      width = 0;
-      s = NULL;
+      int width = 0;
+      char *s = NULL;
 
       switch (round) {
       case 0:
@@ -545,7 +538,7 @@ void pum_redraw(void)
           if (s == NULL) {
             s = p;
           }
-          w = ptr2cells(p);
+          int w = ptr2cells(p);
 
           if ((*p == NUL) || (*p == TAB) || (totwidth + w > pum_width)) {
             // Display the text that fits or comes before a Tab.
@@ -580,13 +573,13 @@ void pum_redraw(void)
                   size++;
                 }
               }
-              grid_puts_len(&pum_grid, rt, (int)strlen(rt), row, grid_col - size + 1, attr);
+              grid_line_puts(grid_col - size + 1, rt, -1, attr);
               xfree(rt_start);
               xfree(st);
               grid_col -= width;
             } else {
-              // use grid_puts_len() to truncate the text
-              grid_puts(&pum_grid, st, row, grid_col, attr);
+              // use grid_line_puts() to truncate the text
+              grid_line_puts(grid_col, st, -1, attr);
               xfree(st);
               grid_col += width;
             }
@@ -597,11 +590,10 @@ void pum_redraw(void)
 
             // Display two spaces for a Tab.
             if (pum_rl) {
-              grid_puts_len(&pum_grid, "  ", 2, row, grid_col - 1,
-                            attr);
+              grid_line_puts(grid_col - 1, "  ", 2, attr);
               grid_col -= 2;
             } else {
-              grid_puts_len(&pum_grid, "  ", 2, row, grid_col, attr);
+              grid_line_puts(grid_col, "  ", 2, attr);
               grid_col += 2;
             }
             totwidth += 2;
@@ -632,37 +624,31 @@ void pum_redraw(void)
       }
 
       if (pum_rl) {
-        grid_fill(&pum_grid, row, row + 1, col_off - pum_base_width - n + 1,
-                  grid_col + 1, ' ', ' ', attr);
+        grid_line_fill(col_off - pum_base_width - n + 1, grid_col + 1, ' ', attr);
         grid_col = col_off - pum_base_width - n + 1;
       } else {
-        grid_fill(&pum_grid, row, row + 1, grid_col,
-                  col_off + pum_base_width + n, ' ', ' ', attr);
+        grid_line_fill(grid_col, col_off + pum_base_width + n, ' ', attr);
         grid_col = col_off + pum_base_width + n;
       }
       totwidth = pum_base_width + n;
     }
 
     if (pum_rl) {
-      grid_fill(&pum_grid, row, row + 1, col_off - pum_width + 1, grid_col + 1,
-                ' ', ' ', attr);
+      grid_line_fill(col_off - pum_width + 1, grid_col + 1, ' ', attr);
     } else {
-      grid_fill(&pum_grid, row, row + 1, grid_col, col_off + pum_width, ' ', ' ',
-                attr);
+      grid_line_fill(grid_col, col_off + pum_width, ' ', attr);
     }
 
     if (pum_scrollbar > 0) {
       if (pum_rl) {
-        grid_putchar(&pum_grid, ' ', row, col_off - pum_width,
-                     i >= thumb_pos && i < thumb_pos + thumb_height
-                     ? attr_thumb : attr_scroll);
+        grid_line_puts(col_off - pum_width, " ", 1,
+                       i >= thumb_pos && i < thumb_pos + thumb_height ? attr_thumb : attr_scroll);
       } else {
-        grid_putchar(&pum_grid, ' ', row, col_off + pum_width,
-                     i >= thumb_pos && i < thumb_pos + thumb_height
-                     ? attr_thumb : attr_scroll);
+        grid_line_puts(col_off + pum_width, " ", 1,
+                       i >= thumb_pos && i < thumb_pos + thumb_height ? attr_thumb : attr_scroll);
       }
     }
-    grid_puts_line_flush(false);
+    grid_line_flush();
     row++;
   }
 }
@@ -769,7 +755,7 @@ static bool pum_set_selected(int n, int repeat)
             && (curbuf->b_p_bh[0] == 'w')) {
           // Already a "wipeout" buffer, make it empty.
           while (!buf_is_empty(curbuf)) {
-            ml_delete((linenr_T)1, false);
+            ml_delete(1, false);
           }
         } else {
           // Don't want to sync undo in the current buffer.
@@ -780,20 +766,19 @@ static bool pum_set_selected(int n, int repeat)
           if (res == OK) {
             // Edit a new, empty buffer. Set options for a "wipeout"
             // buffer.
-            set_option_value_give_err("swf", 0L, NULL, OPT_LOCAL);
-            set_option_value_give_err("bl", 0L, NULL, OPT_LOCAL);
-            set_option_value_give_err("bt", 0L, "nofile", OPT_LOCAL);
-            set_option_value_give_err("bh", 0L, "wipe", OPT_LOCAL);
-            set_option_value_give_err("diff", 0L, NULL, OPT_LOCAL);
+            set_option_value_give_err("swf", BOOLEAN_OPTVAL(false), OPT_LOCAL);
+            set_option_value_give_err("bl", BOOLEAN_OPTVAL(false), OPT_LOCAL);
+            set_option_value_give_err("bt", STATIC_CSTR_AS_OPTVAL("nofile"), OPT_LOCAL);
+            set_option_value_give_err("bh", STATIC_CSTR_AS_OPTVAL("wipe"), OPT_LOCAL);
+            set_option_value_give_err("diff", BOOLEAN_OPTVAL(false), OPT_LOCAL);
           }
         }
 
         if (res == OK) {
-          char *p, *e;
           linenr_T lnum = 0;
 
-          for (p = pum_array[pum_selected].pum_info; *p != NUL;) {
-            e = vim_strchr(p, '\n');
+          for (char *p = pum_array[pum_selected].pum_info; *p != NUL;) {
+            char *e = vim_strchr(p, '\n');
             if (e == NULL) {
               ml_append(lnum++, p, 0, false);
               break;
