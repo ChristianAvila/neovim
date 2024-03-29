@@ -4,12 +4,12 @@ local ms = require('vim.lsp.protocol').Methods
 local api = vim.api
 local M = {}
 
----@class lsp.inlay_hint.bufstate
+---@class (private) vim.lsp.inlay_hint.bufstate
 ---@field version? integer
----@field client_hint? table<integer, table<integer, lsp.InlayHint[]>> client_id -> (lnum -> hints)
+---@field client_hints? table<integer, table<integer, lsp.InlayHint[]>> client_id -> (lnum -> hints)
 ---@field applied table<integer, integer> Last version of hints applied to this line
 ---@field enabled boolean Whether inlay hints are enabled for this buffer
----@type table<integer, lsp.inlay_hint.bufstate>
+---@type table<integer, vim.lsp.inlay_hint.bufstate>
 local bufstates = {}
 
 local namespace = api.nvim_create_namespace('vim_lsp_inlayhint')
@@ -17,13 +17,15 @@ local augroup = api.nvim_create_augroup('vim_lsp_inlayhint', {})
 
 --- |lsp-handler| for the method `textDocument/inlayHint`
 --- Store hints for a specific buffer and client
+---@param result lsp.InlayHint[]?
+---@param ctx lsp.HandlerContext
 ---@private
 function M.on_inlayhint(err, result, ctx, _)
   if err then
-    local _ = log.error() and log.error('inlayhint', err)
+    log.error('inlayhint', err)
     return
   end
-  local bufnr = ctx.bufnr
+  local bufnr = assert(ctx.bufnr)
   if util.buf_versions[bufnr] ~= ctx.version then
     return
   end
@@ -35,12 +37,12 @@ function M.on_inlayhint(err, result, ctx, _)
   if not bufstate or not bufstate.enabled then
     return
   end
-  if not (bufstate.client_hint and bufstate.version) then
-    bufstate.client_hint = vim.defaulttable()
+  if not (bufstate.client_hints and bufstate.version) then
+    bufstate.client_hints = vim.defaulttable()
     bufstate.version = ctx.version
   end
-  local hints_by_client = bufstate.client_hint
-  local client = vim.lsp.get_client_by_id(client_id)
+  local hints_by_client = bufstate.client_hints
+  local client = assert(vim.lsp.get_client_by_id(client_id))
 
   local new_hints_by_lnum = vim.defaulttable()
   local num_unprocessed = #result
@@ -52,6 +54,8 @@ function M.on_inlayhint(err, result, ctx, _)
   end
 
   local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  ---@param position lsp.Position
+  ---@return integer
   local function pos_to_byte(position)
     local col = position.character
     if col > 0 then
@@ -78,6 +82,7 @@ function M.on_inlayhint(err, result, ctx, _)
 end
 
 --- |lsp-handler| for the method `textDocument/inlayHint/refresh`
+---@param ctx lsp.HandlerContext
 ---@private
 function M.on_refresh(err, _, ctx, _)
   if err then
@@ -98,16 +103,19 @@ function M.on_refresh(err, _, ctx, _)
   return vim.NIL
 end
 
---- @class vim.lsp.inlay_hint.get.filter
+--- Optional filters |kwargs|:
+--- @class vim.lsp.inlay_hint.get.Filter
+--- @inlinedoc
 --- @field bufnr integer?
 --- @field range lsp.Range?
----
+
 --- @class vim.lsp.inlay_hint.get.ret
+--- @inlinedoc
 --- @field bufnr integer
 --- @field client_id integer
 --- @field inlay_hint lsp.InlayHint
 
---- Get the list of inlay hints, (optionally) restricted by buffer, client, or range.
+--- Get the list of inlay hints, (optionally) restricted by buffer or range.
 ---
 --- Example usage:
 ---
@@ -125,16 +133,9 @@ end
 --- })
 --- ```
 ---
---- @param filter vim.lsp.inlay_hint.get.filter?
---- Optional filters |kwargs|:
---- - bufnr (integer?): 0 for current buffer
---- - range (lsp.Range?)
----
+--- @param filter vim.lsp.inlay_hint.get.Filter?
 --- @return vim.lsp.inlay_hint.get.ret[]
---- Each list item is a table with the following fields:
----  - bufnr (integer)
----  - client_id (integer)
----  - inlay_hint (lsp.InlayHint)
+--- @since 12
 function M.get(filter)
   vim.validate({ filter = { filter, 'table', true } })
   filter = filter or {}
@@ -153,7 +154,7 @@ function M.get(filter)
   end
 
   local bufstate = bufstates[bufnr]
-  if not (bufstate and bufstate.client_hint) then
+  if not (bufstate and bufstate.client_hints) then
     return {}
   end
 
@@ -176,7 +177,7 @@ function M.get(filter)
   --- @type vim.lsp.inlay_hint.get.ret[]
   local hints = {}
   for _, client in pairs(clients) do
-    local hints_by_lnum = bufstate.client_hint[client.id]
+    local hints_by_lnum = bufstate.client_hints[client.id]
     if hints_by_lnum then
       for lnum = range.start.line, range['end'].line do
         local line_hints = hints_by_lnum[lnum] or {}
@@ -209,11 +210,11 @@ local function clear(bufnr)
     return
   end
   local bufstate = bufstates[bufnr]
-  local client_lens = (bufstate or {}).client_hint or {}
-  local client_ids = vim.tbl_keys(client_lens)
+  local client_lens = (bufstate or {}).client_hints or {}
+  local client_ids = vim.tbl_keys(client_lens) --- @type integer[]
   for _, iter_client_id in ipairs(client_ids) do
     if bufstate then
-      bufstate.client_hint[iter_client_id] = {}
+      bufstate.client_hints[iter_client_id] = {}
     end
   end
   api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
@@ -234,7 +235,7 @@ end
 
 --- Refresh inlay hints, only if we have attached clients that support it
 ---@param bufnr (integer) Buffer handle, or 0 for current
----@param opts? table Additional options to pass to util._refresh
+---@param opts? vim.lsp.util._refresh.Opts Additional options to pass to util._refresh
 ---@private
 local function _refresh(bufnr, opts)
   opts = opts or {}
@@ -310,7 +311,7 @@ api.nvim_set_decoration_provider(namespace, {
     if bufstate.version ~= util.buf_versions[bufnr] then
       return
     end
-    local hints_by_client = bufstate.client_hint
+    local hints_by_client = assert(bufstate.client_hints)
 
     for lnum = topline, botline do
       if bufstate.applied[lnum] ~= bufstate.version then
@@ -319,14 +320,15 @@ api.nvim_set_decoration_provider(namespace, {
           local line_hints = hints_by_lnum[lnum] or {}
           for _, hint in pairs(line_hints) do
             local text = ''
-            if type(hint.label) == 'string' then
-              text = hint.label
+            local label = hint.label
+            if type(label) == 'string' then
+              text = label
             else
-              for _, part in ipairs(hint.label) do
+              for _, part in ipairs(label) do
                 text = text .. part.value
               end
             end
-            local vt = {}
+            local vt = {} --- @type {[1]: string, [2]: string?}[]
             if hint.paddingLeft then
               vt[#vt + 1] = { ' ' }
             end
@@ -349,6 +351,7 @@ api.nvim_set_decoration_provider(namespace, {
 
 --- @param bufnr (integer|nil) Buffer handle, or 0 or nil for current
 --- @return boolean
+--- @since 12
 function M.is_enabled(bufnr)
   vim.validate({ bufnr = { bufnr, 'number', true } })
   if bufnr == nil or bufnr == 0 then
@@ -357,10 +360,17 @@ function M.is_enabled(bufnr)
   return bufstates[bufnr] and bufstates[bufnr].enabled or false
 end
 
---- Enable/disable/toggle inlay hints for a buffer
+--- Enables or disables inlay hints for a buffer.
+---
+--- To "toggle", pass the inverse of `is_enabled()`:
+---
+--- ```lua
+--- vim.lsp.inlay_hint.enable(0, not vim.lsp.inlay_hint.is_enabled())
+--- ```
 ---
 --- @param bufnr (integer|nil) Buffer handle, or 0 or nil for current
 --- @param enable (boolean|nil) true/nil to enable, false to disable
+--- @since 12
 function M.enable(bufnr, enable)
   vim.validate({ enable = { enable, 'boolean', true }, bufnr = { bufnr, 'number', true } })
   if enable == false then

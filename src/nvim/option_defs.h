@@ -6,15 +6,25 @@
 #include "nvim/api/private/defs.h"
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/regexp_defs.h"
-#include "nvim/types.h"
 
-/// Option value type
+#ifdef INCLUDE_GENERATED_DECLARATIONS
+# include "options_enum.generated.h"
+#endif
+
+/// Option value type.
+/// These types are also used as type flags by using the type value as an index for the type_flags
+/// bit field (@see option_has_type()).
 typedef enum {
-  kOptValTypeNil = 0,
+  kOptValTypeNil = -1,  // Make sure Nil can't be bitshifted and used as an option type flag.
   kOptValTypeBoolean,
   kOptValTypeNumber,
   kOptValTypeString,
 } OptValType;
+
+/// Always update this whenever a new option type is added.
+#define kOptValTypeSize (kOptValTypeString + 1)
+
+typedef uint32_t OptTypeFlags;
 
 typedef union {
   // boolean options are actually tri-states because they have a third "None" value.
@@ -43,10 +53,11 @@ typedef struct {
   /// Pointer to the option variable.  The variable can be an OptInt (numeric
   /// option), an int (boolean option) or a char pointer (string option).
   void *os_varp;
-  int os_idx;
+  OptIndex os_idx;
   int os_flags;
 
   /// Old value of the option.
+  /// TODO(famiu): Convert `os_oldval` and `os_newval` to `OptVal` to accommodate multitype options.
   OptValData os_oldval;
   /// New value of the option.
   OptValData os_newval;
@@ -66,6 +77,7 @@ typedef struct {
   /// is parameterized, then the "os_errbuf" buffer is used to store the error
   /// message (when it is not NULL).
   char *os_errbuf;
+  /// length of the error buffer
   size_t os_errbuflen;
 
   void *os_win;
@@ -114,3 +126,10 @@ typedef struct {
 /// Note: If returned FAIL or *numMatches is 0, *matches will NOT be freed by
 /// caller.
 typedef int (*opt_expand_cb_T)(optexpand_T *args, int *numMatches, char ***matches);
+
+/// Requested option scopes for various functions in option.c
+typedef enum {
+  kOptReqGlobal = 0,  ///< Request global option value
+  kOptReqWin    = 1,  ///< Request window-local option value
+  kOptReqBuf    = 2,  ///< Request buffer-local option value
+} OptReqScope;

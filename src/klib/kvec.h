@@ -105,11 +105,12 @@
   } while (0)
 
 #define kv_concat_len(v, data, len) \
-  do { \
+  if (len > 0) { \
     kv_ensure_space(v, len); \
+    assert((v).items); \
     memcpy((v).items + (v).size, data, sizeof((v).items[0]) * len); \
     (v).size = (v).size + len; \
-  } while (0)
+  }
 
 #define kv_concat(v, str) kv_concat_len(v, str, strlen(str))
 #define kv_splice(v1, v0) kv_concat_len(v1, (v0).items, (v0).size)
@@ -160,10 +161,12 @@
    (v).size = 0, \
    (v).items = (v).init_array)
 
+static inline void *_memcpy_free(void *restrict dest, void *restrict src, size_t size)
+  REAL_FATTR_NONNULL_ALL REAL_FATTR_NONNULL_RET REAL_FATTR_ALWAYS_INLINE;
+
 /// Move data to a new destination and free source
 static inline void *_memcpy_free(void *const restrict dest, void *const restrict src,
                                  const size_t size)
-  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_NONNULL_RET FUNC_ATTR_ALWAYS_INLINE
 {
   memcpy(dest, src, size);
   XFREE_CLEAR(src);

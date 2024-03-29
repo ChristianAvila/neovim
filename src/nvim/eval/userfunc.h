@@ -3,16 +3,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#include "nvim/cmdexpand_defs.h"
-#include "nvim/eval.h"
+#include "nvim/cmdexpand_defs.h"  // IWYU pragma: keep
 #include "nvim/eval/typval_defs.h"
-#include "nvim/ex_cmds_defs.h"
-#include "nvim/garray.h"
-#include "nvim/hashtab.h"
-#include "nvim/pos.h"
-#include "nvim/types.h"
-
-struct funccal_entry;
+#include "nvim/eval_defs.h"  // IWYU pragma: keep
+#include "nvim/ex_cmds_defs.h"  // IWYU pragma: keep
+#include "nvim/hashtab_defs.h"  // IWYU pragma: keep
+#include "nvim/pos_defs.h"
+#include "nvim/types_defs.h"  // IWYU pragma: keep
 
 // From user function to hashitem and back.
 #define UF2HIKEY(fp) ((fp)->uf_name)

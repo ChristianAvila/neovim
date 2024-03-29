@@ -10,12 +10,14 @@
 #include "klib/kvec.h"
 #include "lua.h"
 #include "nvim/api/buffer.h"
-#include "nvim/api/keysets.h"
+#include "nvim/api/keysets_defs.h"
 #include "nvim/api/private/defs.h"
+#include "nvim/api/private/dispatch.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/private/validate.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
+#include "nvim/autocmd_defs.h"
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/buffer_updates.h"
@@ -24,26 +26,32 @@
 #include "nvim/drawscreen.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/extmark.h"
+#include "nvim/extmark_defs.h"
 #include "nvim/globals.h"
 #include "nvim/lua/executor.h"
 #include "nvim/mapping.h"
 #include "nvim/mark.h"
+#include "nvim/mark_defs.h"
+#include "nvim/marktree_defs.h"
 #include "nvim/memline.h"
+#include "nvim/memline_defs.h"
 #include "nvim/memory.h"
+#include "nvim/memory_defs.h"
 #include "nvim/move.h"
 #include "nvim/ops.h"
-#include "nvim/pos.h"
-#include "nvim/types.h"
+#include "nvim/pos_defs.h"
+#include "nvim/state_defs.h"
+#include "nvim/types_defs.h"
 #include "nvim/undo.h"
-#include "nvim/vim.h"
+#include "nvim/undo_defs.h"
+#include "nvim/vim_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "api/buffer.c.generated.h"
 #endif
 
-/// \defgroup api-buffer
-///
-/// \brief For more information on buffers, see |buffers|
+/// @brief <pre>help
+/// For more information on buffers, see |buffers|.
 ///
 /// Unloaded Buffers: ~
 ///
@@ -55,6 +63,7 @@
 ///
 /// You can use |nvim_buf_is_loaded()| or |nvim_buf_line_count()| to check
 /// whether a buffer is loaded.
+/// </pre>
 
 /// Returns the number of lines in the given buffer.
 ///
@@ -103,7 +112,7 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 ///        Not for Lua callbacks.
 /// @param  opts  Optional parameters.
 ///             - on_lines: Lua callback invoked on change.
-///               Return `true` to detach. Args:
+///               Return a truthy value (not `false` or `nil`) to detach. Args:
 ///               - the string "lines"
 ///               - buffer handle
 ///               - b:changedtick
@@ -116,8 +125,7 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 ///             - on_bytes: Lua callback invoked on change.
 ///               This callback receives more granular information about the
 ///               change compared to on_lines.
-///               Return `true` to detach.
-///               Args:
+///               Return a truthy value (not `false` or `nil`) to detach. Args:
 ///               - the string "bytes"
 ///               - buffer handle
 ///               - b:changedtick
@@ -125,11 +133,13 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 ///               - start column of the changed text
 ///               - byte offset of the changed text (from the start of
 ///                   the buffer)
-///               - old end row of the changed text
+///               - old end row of the changed text (offset from start row)
 ///               - old end column of the changed text
+///                 (if old end row = 0, offset from start column)
 ///               - old end byte length of the changed text
-///               - new end row of the changed text
+///               - new end row of the changed text (offset from start row)
 ///               - new end column of the changed text
+///                 (if new end row = 0, offset from start column)
 ///               - new end byte length of the changed text
 ///             - on_changedtick: Lua callback invoked on changedtick
 ///               increment without text change. Args:
@@ -151,7 +161,7 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 /// @return False if attach failed (invalid parameter, or buffer isn't loaded);
 ///         otherwise True. TODO: LUA_API_NO_EVAL
 Boolean nvim_buf_attach(uint64_t channel_id, Buffer buffer, Boolean send_buffer,
-                        DictionaryOf(LuaRef) opts, Error *err)
+                        Dict(buf_attach) *opts, Error *err)
   FUNC_API_SINCE(4)
 {
   buf_T *buf = find_buffer_by_handle(buffer, err);
@@ -160,64 +170,40 @@ Boolean nvim_buf_attach(uint64_t channel_id, Buffer buffer, Boolean send_buffer,
     return false;
   }
 
-  bool is_lua = (channel_id == LUA_INTERNAL_CALL);
   BufUpdateCallbacks cb = BUF_UPDATE_CALLBACKS_INIT;
-  struct {
-    const char *name;
-    LuaRef *dest;
-  } cbs[] = {
-    { "on_lines", &cb.on_lines },
-    { "on_bytes", &cb.on_bytes },
-    { "on_changedtick", &cb.on_changedtick },
-    { "on_detach", &cb.on_detach },
-    { "on_reload", &cb.on_reload },
-    { NULL, NULL },
-  };
 
-  for (size_t i = 0; i < opts.size; i++) {
-    String k = opts.items[i].key;
-    Object *v = &opts.items[i].value;
-    bool key_used = false;
-    if (is_lua) {
-      for (size_t j = 0; cbs[j].name; j++) {
-        if (strequal(cbs[j].name, k.data)) {
-          VALIDATE_T(cbs[j].name, kObjectTypeLuaRef, v->type, {
-            goto error;
-          });
-          *(cbs[j].dest) = v->data.luaref;
-          v->data.luaref = LUA_NOREF;
-          key_used = true;
-          break;
-        }
-      }
-
-      if (key_used) {
-        continue;
-      } else if (strequal("utf_sizes", k.data)) {
-        VALIDATE_T("utf_sizes", kObjectTypeBoolean, v->type, {
-          goto error;
-        });
-        cb.utf_sizes = v->data.boolean;
-        key_used = true;
-      } else if (strequal("preview", k.data)) {
-        VALIDATE_T("preview", kObjectTypeBoolean, v->type, {
-          goto error;
-        });
-        cb.preview = v->data.boolean;
-        key_used = true;
-      }
+  if (channel_id == LUA_INTERNAL_CALL) {
+    if (HAS_KEY(opts, buf_attach, on_lines)) {
+      cb.on_lines = opts->on_lines;
+      opts->on_lines = LUA_NOREF;
     }
 
-    VALIDATE_S(key_used, "'opts' key", k.data, {
-      goto error;
-    });
+    if (HAS_KEY(opts, buf_attach, on_bytes)) {
+      cb.on_bytes = opts->on_bytes;
+      opts->on_bytes = LUA_NOREF;
+    }
+
+    if (HAS_KEY(opts, buf_attach, on_changedtick)) {
+      cb.on_changedtick = opts->on_changedtick;
+      opts->on_changedtick = LUA_NOREF;
+    }
+
+    if (HAS_KEY(opts, buf_attach, on_detach)) {
+      cb.on_detach = opts->on_detach;
+      opts->on_detach = LUA_NOREF;
+    }
+
+    if (HAS_KEY(opts, buf_attach, on_reload)) {
+      cb.on_reload = opts->on_reload;
+      opts->on_reload = LUA_NOREF;
+    }
+
+    cb.utf_sizes = opts->utf_sizes;
+
+    cb.preview = opts->preview;
   }
 
   return buf_updates_register(buf, channel_id, cb, send_buffer);
-
-error:
-  buffer_update_callbacks_free(cb);
-  return false;
 }
 
 /// Deactivates buffer-update events on the channel.
@@ -243,6 +229,7 @@ Boolean nvim_buf_detach(uint64_t channel_id, Buffer buffer, Error *err)
   return true;
 }
 
+/// @nodoc
 void nvim__buf_redraw_range(Buffer buffer, Integer first, Integer last, Error *err)
 {
   buf_T *buf = find_buffer_by_handle(buffer, err);
@@ -277,6 +264,7 @@ ArrayOf(String) nvim_buf_get_lines(uint64_t channel_id,
                                    Integer start,
                                    Integer end,
                                    Boolean strict_indexing,
+                                   Arena *arena,
                                    lua_State *lstate,
                                    Error *err)
   FUNC_API_SINCE(1)
@@ -308,18 +296,10 @@ ArrayOf(String) nvim_buf_get_lines(uint64_t channel_id,
 
   size_t size = (size_t)(end - start);
 
-  init_line_array(lstate, &rv, size);
+  init_line_array(lstate, &rv, size, arena);
 
-  if (!buf_collect_lines(buf, size, (linenr_T)start, 0, (channel_id != VIML_INTERNAL_CALL), &rv,
-                         lstate, err)) {
-    goto end;
-  }
-
-end:
-  if (ERROR_SET(err)) {
-    api_free_array(rv);
-    rv.items = NULL;
-  }
+  buf_collect_lines(buf, size, (linenr_T)start, 0, (channel_id != VIML_INTERNAL_CALL), &rv,
+                    lstate, arena);
 
   return rv;
 }
@@ -346,7 +326,8 @@ end:
 /// @param replacement      Array of lines to use as replacement
 /// @param[out] err         Error details, if any
 void nvim_buf_set_lines(uint64_t channel_id, Buffer buffer, Integer start, Integer end,
-                        Boolean strict_indexing, ArrayOf(String) replacement, Error *err)
+                        Boolean strict_indexing, ArrayOf(String) replacement, Arena *arena,
+                        Error *err)
   FUNC_API_SINCE(1)
   FUNC_API_TEXTLOCK_ALLOW_CMDWIN
 {
@@ -356,12 +337,10 @@ void nvim_buf_set_lines(uint64_t channel_id, Buffer buffer, Integer start, Integ
     return;
   }
 
-  // load buffer first if it's not loaded
-  if (buf->b_ml.ml_mfp == NULL) {
-    if (!buf_ensure_loaded(buf)) {
-      api_set_error(err, kErrorTypeException, "Failed to load buffer");
-      return;
-    }
+  // Load buffer if necessary. #22670
+  if (!buf_ensure_loaded(buf)) {
+    api_set_error(err, kErrorTypeException, "Failed to load buffer");
+    return;
   }
 
   bool oob = false;
@@ -383,14 +362,14 @@ void nvim_buf_set_lines(uint64_t channel_id, Buffer buffer, Integer start, Integ
   size_t new_len = replacement.size;
   size_t old_len = (size_t)(end - start);
   ptrdiff_t extra = 0;  // lines added to text, can be negative
-  char **lines = (new_len != 0) ? xcalloc(new_len, sizeof(char *)) : NULL;
+  char **lines = (new_len != 0) ? arena_alloc(arena, new_len * sizeof(char *), true) : NULL;
 
   for (size_t i = 0; i < new_len; i++) {
     const String l = replacement.items[i].data.string;
 
     // Fill lines[i] with l's contents. Convert NULs to newlines as required by
     // NL-used-for-NUL.
-    lines[i] = xmemdupz(l.data, l.size);
+    lines[i] = arena_memdupz(arena, l.data, l.size);
     memchrsub(lines[i], NUL, NL, l.size);
   }
 
@@ -435,15 +414,12 @@ void nvim_buf_set_lines(uint64_t channel_id, Buffer buffer, Integer start, Integ
       goto end;
     });
 
-    if (ml_replace_buf(buf, (linenr_T)lnum, lines[i], false) == FAIL) {
+    if (ml_replace_buf(buf, (linenr_T)lnum, lines[i], false, true) == FAIL) {
       api_set_error(err, kErrorTypeException, "Failed to replace line");
       goto end;
     }
 
     inserted_bytes += (bcount_t)strlen(lines[i]) + 1;
-    // Mark lines that haven't been passed to the buffer as they need
-    // to be freed later
-    lines[i] = NULL;
   }
 
   // Now we may need to insert the remaining new old_len
@@ -461,9 +437,6 @@ void nvim_buf_set_lines(uint64_t channel_id, Buffer buffer, Integer start, Integ
 
     inserted_bytes += (bcount_t)strlen(lines[i]) + 1;
 
-    // Same as with replacing, but we also need to free lines
-    xfree(lines[i]);
-    lines[i] = NULL;
     extra++;
   }
 
@@ -486,11 +459,6 @@ void nvim_buf_set_lines(uint64_t channel_id, Buffer buffer, Integer start, Integ
   }
 
 end:
-  for (size_t i = 0; i < new_len; i++) {
-    xfree(lines[i]);
-  }
-
-  xfree(lines);
   try_end(err);
 }
 
@@ -523,7 +491,8 @@ end:
 /// @param replacement      Array of lines to use as replacement
 /// @param[out] err         Error details, if any
 void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, Integer start_col,
-                       Integer end_row, Integer end_col, ArrayOf(String) replacement, Error *err)
+                       Integer end_row, Integer end_col, ArrayOf(String) replacement, Arena *arena,
+                       Error *err)
   FUNC_API_SINCE(7)
   FUNC_API_TEXTLOCK_ALLOW_CMDWIN
 {
@@ -538,12 +507,10 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
     return;
   }
 
-  // load buffer first if it's not loaded
-  if (buf->b_ml.ml_mfp == NULL) {
-    if (!buf_ensure_loaded(buf)) {
-      api_set_error(err, kErrorTypeException, "Failed to load buffer");
-      return;
-    }
+  // Load buffer if necessary. #22670
+  if (!buf_ensure_loaded(buf)) {
+    api_set_error(err, kErrorTypeException, "Failed to load buffer");
+    return;
   }
 
   bool oob = false;
@@ -560,33 +527,31 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
     return;
   });
 
-  char *str_at_start = NULL;
-  char *str_at_end = NULL;
-
-  // Another call to ml_get_buf() may free the line, so make a copy.
-  str_at_start = xstrdup(ml_get_buf(buf, (linenr_T)start_row));
-  size_t len_at_start = strlen(str_at_start);
-  start_col = start_col < 0 ? (int64_t)len_at_start + start_col + 1 : start_col;
-  VALIDATE_RANGE((start_col >= 0 && (size_t)start_col <= len_at_start), "start_col", {
-    goto early_end;
+  // Another call to ml_get_buf() may free the lines, so we make copies
+  char *str_at_start = ml_get_buf(buf, (linenr_T)start_row);
+  colnr_T len_at_start = ml_get_buf_len(buf, (linenr_T)start_row);
+  str_at_start = arena_memdupz(arena, str_at_start, (size_t)len_at_start);
+  start_col = start_col < 0 ? len_at_start + start_col + 1 : start_col;
+  VALIDATE_RANGE((start_col >= 0 && start_col <= len_at_start), "start_col", {
+    return;
   });
 
-  // Another call to ml_get_buf() may free the line, so make a copy.
-  str_at_end = xstrdup(ml_get_buf(buf, (linenr_T)end_row));
-  size_t len_at_end = strlen(str_at_end);
-  end_col = end_col < 0 ? (int64_t)len_at_end + end_col + 1 : end_col;
-  VALIDATE_RANGE((end_col >= 0 && (size_t)end_col <= len_at_end), "end_col", {
-    goto early_end;
+  char *str_at_end = ml_get_buf(buf, (linenr_T)end_row);
+  colnr_T len_at_end = ml_get_buf_len(buf, (linenr_T)end_row);
+  str_at_end = arena_memdupz(arena, str_at_end, (size_t)len_at_end);
+  end_col = end_col < 0 ? len_at_end + end_col + 1 : end_col;
+  VALIDATE_RANGE((end_col >= 0 && end_col <= len_at_end), "end_col", {
+    return;
   });
 
   VALIDATE((start_row <= end_row && !(end_row == start_row && start_col > end_col)),
            "%s", "'start' is higher than 'end'", {
-    goto early_end;
+    return;
   });
 
   bool disallow_nl = (channel_id != VIML_INTERNAL_CALL);
   if (!check_string_array(replacement, "replacement string", disallow_nl, err)) {
-    goto early_end;
+    return;
   }
 
   size_t new_len = replacement.size;
@@ -598,12 +563,10 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
   if (start_row == end_row) {
     old_byte = (bcount_t)end_col - start_col;
   } else {
-    old_byte += (bcount_t)len_at_start - start_col;
+    old_byte += len_at_start - start_col;
     for (int64_t i = 1; i < end_row - start_row; i++) {
       int64_t lnum = start_row + i;
-
-      const char *bufline = ml_get_buf(buf, (linenr_T)lnum);
-      old_byte += (bcount_t)(strlen(bufline)) + 1;
+      old_byte += ml_get_buf_len(buf, (linenr_T)lnum) + 1;
     }
     old_byte += (bcount_t)end_col + 1;
   }
@@ -612,11 +575,11 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
   String last_item = replacement.items[replacement.size - 1].data.string;
 
   size_t firstlen = (size_t)start_col + first_item.size;
-  size_t last_part_len = len_at_end - (size_t)end_col;
+  size_t last_part_len = (size_t)len_at_end - (size_t)end_col;
   if (replacement.size == 1) {
     firstlen += last_part_len;
   }
-  char *first = xmallocz(firstlen);
+  char *first = arena_allocz(arena, firstlen);
   char *last = NULL;
   memcpy(first, str_at_start, (size_t)start_col);
   memcpy(first + start_col, first_item.data, first_item.size);
@@ -624,13 +587,13 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
   if (replacement.size == 1) {
     memcpy(first + start_col + first_item.size, str_at_end + end_col, last_part_len);
   } else {
-    last = xmallocz(last_item.size + last_part_len);
+    last = arena_allocz(arena, last_item.size + last_part_len);
     memcpy(last, last_item.data, last_item.size);
     memchrsub(last, NUL, NL, last_item.size);
     memcpy(last + last_item.size, str_at_end + end_col, last_part_len);
   }
 
-  char **lines = xcalloc(new_len, sizeof(char *));
+  char **lines = arena_alloc(arena, new_len * sizeof(char *), true);
   lines[0] = first;
   new_byte += (bcount_t)(first_item.size);
   for (size_t i = 1; i < new_len - 1; i++) {
@@ -638,7 +601,7 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
 
     // Fill lines[i] with l's contents. Convert NULs to newlines as required by
     // NL-used-for-NUL.
-    lines[i] = xmemdupz(l.data, l.size);
+    lines[i] = arena_memdupz(arena, l.data, l.size);
     memchrsub(lines[i], NUL, NL, l.size);
     new_byte += (bcount_t)(l.size) + 1;
   }
@@ -690,13 +653,10 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
       goto end;
     });
 
-    if (ml_replace_buf(buf, (linenr_T)lnum, lines[i], false) == FAIL) {
+    if (ml_replace_buf(buf, (linenr_T)lnum, lines[i], false, true) == FAIL) {
       api_set_error(err, kErrorTypeException, "Failed to replace line");
       goto end;
     }
-    // Mark lines that haven't been passed to the buffer as they need
-    // to be freed later
-    lines[i] = NULL;
   }
 
   // Now we may need to insert the remaining new old_len
@@ -712,9 +672,6 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
       goto end;
     }
 
-    // Same as with replacing, but we also need to free lines
-    xfree(lines[i]);
-    lines[i] = NULL;
     extra++;
   }
 
@@ -747,15 +704,7 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
   }
 
 end:
-  for (size_t i = 0; i < new_len; i++) {
-    xfree(lines[i]);
-  }
-  xfree(lines);
   try_end(err);
-
-early_end:
-  xfree(str_at_start);
-  xfree(str_at_end);
 }
 
 /// Gets a range from the buffer.
@@ -780,15 +729,11 @@ early_end:
 ArrayOf(String) nvim_buf_get_text(uint64_t channel_id, Buffer buffer,
                                   Integer start_row, Integer start_col,
                                   Integer end_row, Integer end_col,
-                                  Dictionary opts, lua_State *lstate,
-                                  Error *err)
+                                  Dict(empty) *opts,
+                                  Arena *arena, lua_State *lstate, Error *err)
   FUNC_API_SINCE(9)
 {
   Array rv = ARRAY_DICT_INIT;
-
-  VALIDATE((opts.size == 0), "%s", "opts dict isn't empty", {
-    return rv;
-  });
 
   buf_T *buf = find_buffer_by_handle(buffer, err);
 
@@ -820,44 +765,38 @@ ArrayOf(String) nvim_buf_get_text(uint64_t channel_id, Buffer buffer,
 
   size_t size = (size_t)(end_row - start_row) + 1;
 
-  init_line_array(lstate, &rv, size);
+  init_line_array(lstate, &rv, size, arena);
 
   if (start_row == end_row) {
     String line = buf_get_text(buf, start_row, start_col, end_col, err);
     if (ERROR_SET(err)) {
       goto end;
     }
-    push_linestr(lstate, &rv, line.data, line.size, 0, replace_nl);
+    push_linestr(lstate, &rv, line.data, line.size, 0, replace_nl, arena);
     return rv;
   }
 
   String str = buf_get_text(buf, start_row, start_col, MAXCOL - 1, err);
-
-  push_linestr(lstate, &rv, str.data, str.size, 0, replace_nl);
-
   if (ERROR_SET(err)) {
     goto end;
   }
 
+  push_linestr(lstate, &rv, str.data, str.size, 0, replace_nl, arena);
+
   if (size > 2) {
-    if (!buf_collect_lines(buf, size - 2, (linenr_T)start_row + 1, 1, replace_nl, &rv, lstate,
-                           err)) {
-      goto end;
-    }
+    buf_collect_lines(buf, size - 2, (linenr_T)start_row + 1, 1, replace_nl, &rv, lstate, arena);
   }
 
   str = buf_get_text(buf, end_row, 0, end_col, err);
-  push_linestr(lstate, &rv, str.data, str.size, (int)(size - 1), replace_nl);
-
   if (ERROR_SET(err)) {
     goto end;
   }
 
+  push_linestr(lstate, &rv, str.data, str.size, (int)(size - 1), replace_nl, arena);
+
 end:
   if (ERROR_SET(err)) {
-    api_free_array(rv);
-    rv.size = 0;
-    rv.items = NULL;
+    return (Array)ARRAY_DICT_INIT;
   }
 
   return rv;
@@ -903,7 +842,7 @@ Integer nvim_buf_get_offset(Buffer buffer, Integer index, Error *err)
 /// @param name       Variable name
 /// @param[out] err   Error details, if any
 /// @return Variable value
-Object nvim_buf_get_var(Buffer buffer, String name, Error *err)
+Object nvim_buf_get_var(Buffer buffer, String name, Arena *arena, Error *err)
   FUNC_API_SINCE(1)
 {
   buf_T *buf = find_buffer_by_handle(buffer, err);
@@ -912,7 +851,7 @@ Object nvim_buf_get_var(Buffer buffer, String name, Error *err)
     return (Object)OBJECT_INIT;
   }
 
-  return dict_get_value(buf->b_vars, name, err);
+  return dict_get_value(buf->b_vars, name, arena, err);
 }
 
 /// Gets a changed tick of a buffer
@@ -935,12 +874,12 @@ Integer nvim_buf_get_changedtick(Buffer buffer, Error *err)
 
 /// Gets a list of buffer-local |mapping| definitions.
 ///
-/// @param  mode       Mode short-name ("n", "i", "v", ...)
 /// @param  buffer     Buffer handle, or 0 for current buffer
+/// @param  mode       Mode short-name ("n", "i", "v", ...)
 /// @param[out]  err   Error details, if any
 /// @returns Array of |maparg()|-like dictionaries describing mappings.
 ///          The "buffer" key holds the associated buffer handle.
-ArrayOf(Dictionary) nvim_buf_get_keymap(Buffer buffer, String mode, Error *err)
+ArrayOf(Dictionary) nvim_buf_get_keymap(Buffer buffer, String mode, Arena *arena, Error *err)
   FUNC_API_SINCE(3)
 {
   buf_T *buf = find_buffer_by_handle(buffer, err);
@@ -949,7 +888,7 @@ ArrayOf(Dictionary) nvim_buf_get_keymap(Buffer buffer, String mode, Error *err)
     return (Array)ARRAY_DICT_INIT;
   }
 
-  return keymap_array(mode, buf);
+  return keymap_array(mode, buf, arena);
 }
 
 /// Sets a buffer-local |mapping| for the given mode.
@@ -991,7 +930,7 @@ void nvim_buf_set_var(Buffer buffer, String name, Object value, Error *err)
     return;
   }
 
-  dict_set_var(buf->b_vars, name, value, false, false, err);
+  dict_set_var(buf->b_vars, name, value, false, false, NULL, err);
 }
 
 /// Removes a buffer-scoped (b:) variable
@@ -1008,7 +947,7 @@ void nvim_buf_del_var(Buffer buffer, String name, Error *err)
     return;
   }
 
-  dict_set_var(buf->b_vars, name, NIL, true, false, err);
+  dict_set_var(buf->b_vars, name, NIL, true, false, NULL, err);
 }
 
 /// Gets the full file name for the buffer
@@ -1016,7 +955,7 @@ void nvim_buf_del_var(Buffer buffer, String name, Error *err)
 /// @param buffer     Buffer handle, or 0 for current buffer
 /// @param[out] err   Error details, if any
 /// @return Buffer name
-String nvim_buf_get_name(Buffer buffer, Arena *arena, Error *err)
+String nvim_buf_get_name(Buffer buffer, Error *err)
   FUNC_API_SINCE(1)
 {
   String rv = STRING_INIT;
@@ -1029,7 +968,7 @@ String nvim_buf_get_name(Buffer buffer, Arena *arena, Error *err)
   return cstr_as_string(buf->b_ffname);
 }
 
-/// Sets the full file name for a buffer
+/// Sets the full file name for a buffer, like |:file_f|
 ///
 /// @param buffer     Buffer handle, or 0 for current buffer
 /// @param name       Buffer name
@@ -1080,7 +1019,7 @@ Boolean nvim_buf_is_loaded(Buffer buffer)
 /// @param opts  Optional parameters. Keys:
 ///          - force:  Force deletion and ignore unsaved changes.
 ///          - unload: Unloaded only, do not delete. See |:bunload|
-void nvim_buf_delete(Buffer buffer, Dictionary opts, Error *err)
+void nvim_buf_delete(Buffer buffer, Dict(buf_delete) *opts, Error *err)
   FUNC_API_SINCE(7)
   FUNC_API_TEXTLOCK
 {
@@ -1090,25 +1029,9 @@ void nvim_buf_delete(Buffer buffer, Dictionary opts, Error *err)
     return;
   }
 
-  bool force = false;
-  bool unload = false;
-  for (size_t i = 0; i < opts.size; i++) {
-    String k = opts.items[i].key;
-    Object v = opts.items[i].value;
-    if (strequal("force", k.data)) {
-      force = api_object_to_bool(v, "force", false, err);
-    } else if (strequal("unload", k.data)) {
-      unload = api_object_to_bool(v, "unload", false, err);
-    } else {
-      VALIDATE_S(false, "'opts' key", k.data, {
-        return;
-      });
-    }
-  }
+  bool force = opts->force;
 
-  if (ERROR_SET(err)) {
-    return;
-  }
+  bool unload = opts->unload;
 
   int result = do_buffer(unload ? DOBUF_UNLOAD : DOBUF_WIPE,
                          DOBUF_FIRST,
@@ -1192,7 +1115,7 @@ Boolean nvim_buf_del_mark(Buffer buffer, String name, Error *err)
 /// @return true if the mark was set, else false.
 /// @see |nvim_buf_del_mark()|
 /// @see |nvim_buf_get_mark()|
-Boolean nvim_buf_set_mark(Buffer buffer, String name, Integer line, Integer col, Dictionary opts,
+Boolean nvim_buf_set_mark(Buffer buffer, String name, Integer line, Integer col, Dict(empty) *opts,
                           Error *err)
   FUNC_API_SINCE(8)
 {
@@ -1225,7 +1148,7 @@ Boolean nvim_buf_set_mark(Buffer buffer, String name, Integer line, Integer col,
 /// uppercase/file mark set in another buffer.
 /// @see |nvim_buf_set_mark()|
 /// @see |nvim_buf_del_mark()|
-ArrayOf(Integer, 2) nvim_buf_get_mark(Buffer buffer, String name, Error *err)
+ArrayOf(Integer, 2) nvim_buf_get_mark(Buffer buffer, String name, Arena *arena, Error *err)
   FUNC_API_SINCE(1)
 {
   Array rv = ARRAY_DICT_INIT;
@@ -1255,8 +1178,9 @@ ArrayOf(Integer, 2) nvim_buf_get_mark(Buffer buffer, String name, Error *err)
     pos = fm->mark;
   }
 
-  ADD(rv, INTEGER_OBJ(pos.lnum));
-  ADD(rv, INTEGER_OBJ(pos.col));
+  rv = arena_array(arena, 2);
+  ADD_C(rv, INTEGER_OBJ(pos.lnum));
+  ADD_C(rv, INTEGER_OBJ(pos.col));
 
   return rv;
 }
@@ -1277,8 +1201,7 @@ ArrayOf(Integer, 2) nvim_buf_get_mark(Buffer buffer, String name, Error *err)
 /// @param fun        Function to call inside the buffer (currently Lua callable
 ///                   only)
 /// @param[out] err   Error details, if any
-/// @return           Return value of function. NB: will deepcopy Lua values
-///                   currently, use upvalues to send Lua references in and out.
+/// @return           Return value of function.
 Object nvim_buf_call(Buffer buffer, LuaRef fun, Error *err)
   FUNC_API_SINCE(7)
   FUNC_API_LUA_ONLY
@@ -1292,35 +1215,35 @@ Object nvim_buf_call(Buffer buffer, LuaRef fun, Error *err)
   aucmd_prepbuf(&aco, buf);
 
   Array args = ARRAY_DICT_INIT;
-  Object res = nlua_call_ref(fun, NULL, args, true, err);
+  Object res = nlua_call_ref(fun, NULL, args, kRetLuaref, NULL, err);
 
   aucmd_restbuf(&aco);
   try_end(err);
   return res;
 }
 
-Dictionary nvim__buf_stats(Buffer buffer, Error *err)
+/// @nodoc
+Dictionary nvim__buf_stats(Buffer buffer, Arena *arena, Error *err)
 {
-  Dictionary rv = ARRAY_DICT_INIT;
-
   buf_T *buf = find_buffer_by_handle(buffer, err);
   if (!buf) {
-    return rv;
+    return (Dictionary)ARRAY_DICT_INIT;
   }
 
+  Dictionary rv = arena_dict(arena, 7);
   // Number of times the cached line was flushed.
   // This should generally not increase while editing the same
   // line in the same mode.
-  PUT(rv, "flush_count", INTEGER_OBJ(buf->flush_count));
+  PUT_C(rv, "flush_count", INTEGER_OBJ(buf->flush_count));
   // lnum of current line
-  PUT(rv, "current_lnum", INTEGER_OBJ(buf->b_ml.ml_line_lnum));
+  PUT_C(rv, "current_lnum", INTEGER_OBJ(buf->b_ml.ml_line_lnum));
   // whether the line has unflushed changes.
-  PUT(rv, "line_dirty", BOOLEAN_OBJ(buf->b_ml.ml_flags & ML_LINE_DIRTY));
+  PUT_C(rv, "line_dirty", BOOLEAN_OBJ(buf->b_ml.ml_flags & ML_LINE_DIRTY));
   // NB: this should be zero at any time API functions are called,
   // this exists to debug issues
-  PUT(rv, "dirty_bytes", INTEGER_OBJ((Integer)buf->deleted_bytes));
-  PUT(rv, "dirty_bytes2", INTEGER_OBJ((Integer)buf->deleted_bytes2));
-  PUT(rv, "virt_blocks", INTEGER_OBJ((Integer)buf->b_virt_line_blocks));
+  PUT_C(rv, "dirty_bytes", INTEGER_OBJ((Integer)buf->deleted_bytes));
+  PUT_C(rv, "dirty_bytes2", INTEGER_OBJ((Integer)buf->deleted_bytes2));
+  PUT_C(rv, "virt_blocks", INTEGER_OBJ((Integer)buf_meta_total(buf, kMTMetaLines)));
 
   u_header_T *uhp = NULL;
   if (buf->b_u_curhead != NULL) {
@@ -1329,7 +1252,7 @@ Dictionary nvim__buf_stats(Buffer buffer, Error *err)
     uhp = buf->b_u_newhead;
   }
   if (uhp) {
-    PUT(rv, "uhp_extmark_size", INTEGER_OBJ((Integer)kv_size(uhp->uh_extmark)));
+    PUT_C(rv, "uhp_extmark_size", INTEGER_OBJ((Integer)kv_size(uhp->uh_extmark)));
   }
 
   return rv;
@@ -1346,10 +1269,13 @@ static void fix_cursor(win_T *win, linenr_T lo, linenr_T hi, linenr_T extra)
     } else if (extra < 0) {
       check_cursor_lnum(win);
     }
-    check_cursor_col_win(win);
+    check_cursor_col(win);
     changed_cline_bef_curs(win);
+    win->w_valid &= ~(VALID_BOTLINE_AP);
+    update_topline(win);
+  } else {
+    invalidate_botline(win);
   }
-  invalidate_botline(win);
 }
 
 /// Fix cursor position after replacing text
@@ -1384,7 +1310,7 @@ static void fix_cursor_cols(win_T *win, linenr_T start_row, colnr_T start_col, l
 
     // it's easier to work with a single value here.
     // col and coladd are fixed by a later call
-    // to check_cursor_col_win when necessary
+    // to check_cursor_col when necessary
     win->w_cursor.col += win->w_cursor.coladd;
     win->w_cursor.coladd = 0;
 
@@ -1399,7 +1325,7 @@ static void fix_cursor_cols(win_T *win, linenr_T start_row, colnr_T start_col, l
       // it already (in case virtualedit is active)
       // column might be additionally adjusted below
       // to keep it inside col range if needed
-      colnr_T len = (colnr_T)strlen(ml_get_buf(win->w_buffer, new_end_row));
+      colnr_T len = ml_get_buf_len(win->w_buffer, new_end_row);
       if (win->w_cursor.col < len) {
         win->w_cursor.col = len;
       }
@@ -1420,7 +1346,7 @@ static void fix_cursor_cols(win_T *win, linenr_T start_row, colnr_T start_col, l
     }
   }
 
-  check_cursor_col_win(win);
+  check_cursor_col(win);
   changed_cline_bef_curs(win);
   invalidate_botline(win);
 }
@@ -1432,13 +1358,12 @@ static void fix_cursor_cols(win_T *win, linenr_T start_row, colnr_T start_col, l
 /// @param lstate  Lua state. When NULL the Array is initialized instead.
 /// @param a       Array to initialize
 /// @param size    Size of array
-static inline void init_line_array(lua_State *lstate, Array *a, size_t size)
+static inline void init_line_array(lua_State *lstate, Array *a, size_t size, Arena *arena)
 {
   if (lstate) {
     lua_createtable(lstate, (int)size, 0);
   } else {
-    a->size = size;
-    a->items = xcalloc(a->size, sizeof(Object));
+    *a = arena_array(arena, size);
   }
 }
 
@@ -1451,14 +1376,15 @@ static inline void init_line_array(lua_State *lstate, Array *a, size_t size)
 /// @param a           Array to push onto when not using Lua
 /// @param s           String to push
 /// @param len         Size of string
-/// @param idx         0-based index to place s
+/// @param idx         0-based index to place s (only used for Lua)
 /// @param replace_nl  Replace newlines ('\n') with null ('\0')
 static void push_linestr(lua_State *lstate, Array *a, const char *s, size_t len, int idx,
-                         bool replace_nl)
+                         bool replace_nl, Arena *arena)
 {
   if (lstate) {
     // Vim represents NULs as NLs
     if (s && replace_nl && strchr(s, '\n')) {
+      // TODO(bfredl): could manage scratch space in the arena, for the NUL case
       char *tmp = xmemdupz(s, len);
       strchrsub(tmp, '\n', '\0');
       lua_pushlstring(lstate, tmp, len);
@@ -1469,15 +1395,15 @@ static void push_linestr(lua_State *lstate, Array *a, const char *s, size_t len,
     lua_rawseti(lstate, -2, idx + 1);
   } else {
     String str = STRING_INIT;
-    if (s) {
-      str = cbuf_to_string(s, len);
+    if (len > 0) {
+      str = CBUF_TO_ARENA_STR(arena, s, len);
       if (replace_nl) {
         // Vim represents NULs as NLs, but this may confuse clients.
         strchrsub(str.data, '\n', '\0');
       }
     }
 
-    a->items[idx] = STRING_OBJ(str);
+    ADD_C(*a, STRING_OBJ(str));
   }
 }
 
@@ -1488,27 +1414,18 @@ static void push_linestr(lua_State *lstate, Array *a, const char *s, size_t len,
 /// @param n Number of lines to collect
 /// @param replace_nl Replace newlines ("\n") with NUL
 /// @param start Line number to start from
-/// @param start_idx First index to push to
+/// @param start_idx First index to push to (only used for Lua)
 /// @param[out] l If not NULL, Lines are copied here
 /// @param[out] lstate If not NULL, Lines are pushed into a table onto the stack
 /// @param err[out] Error, if any
 /// @return true unless `err` was set
-bool buf_collect_lines(buf_T *buf, size_t n, linenr_T start, int start_idx, bool replace_nl,
-                       Array *l, lua_State *lstate, Error *err)
+void buf_collect_lines(buf_T *buf, size_t n, linenr_T start, int start_idx, bool replace_nl,
+                       Array *l, lua_State *lstate, Arena *arena)
 {
   for (size_t i = 0; i < n; i++) {
     linenr_T lnum = start + (linenr_T)i;
-
-    if (lnum >= MAXLNUM) {
-      if (err != NULL) {
-        api_set_error(err, kErrorTypeValidation, "Line index is too high");
-      }
-      return false;
-    }
-
     char *bufstr = ml_get_buf(buf, lnum);
-    push_linestr(lstate, l, bufstr, strlen(bufstr), start_idx + (int)i, replace_nl);
+    size_t bufstrlen = (size_t)ml_get_buf_len(buf, lnum);
+    push_linestr(lstate, l, bufstr, bufstrlen, start_idx + (int)i, replace_nl, arena);
   }
-
-  return true;
 }

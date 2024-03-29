@@ -802,6 +802,8 @@ complete_info([{what}])                                        *complete_info()*
 				no item is selected when using the <Up> or
 				<Down> keys)
 		   inserted	Inserted string. [NOT IMPLEMENTED YET]
+		   preview_winid     Info floating preview window id.
+		   preview_bufnr     Info floating preview buffer id.
 
 							*complete_info_mode*
 		mode values are:
@@ -963,8 +965,8 @@ ctxset({context} [, {index}])                                         *ctxset()*
 ctxsize()                                                            *ctxsize()*
 		Returns the size of the |context-stack|.
 
-cursor({lnum}, {col} [, {off}])
-cursor({list})                                                        *cursor()*
+cursor({lnum}, {col} [, {off}])                                       *cursor()*
+cursor({list})
 		Positions the cursor at the column (byte count) {col} in the
 		line {lnum}.  The first column is one.
 
@@ -1367,6 +1369,7 @@ exists({expr})                                                        *exists()*
 			echo exists("*strftime")
 			echo exists("*s:MyFunc")
 			echo exists("*MyFunc")
+			echo exists("*v:lua.Func")
 			echo exists("bufcount")
 			echo exists(":Make")
 			echo exists("#CursorHold")
@@ -1864,6 +1867,40 @@ foldtextresult({lnum})                                        *foldtextresult()*
 		line, "'m" mark m, etc.
 		Useful when exporting folded text, e.g., to HTML.
 
+foreach({expr1}, {expr2})                                            *foreach()*
+		{expr1} must be a |List|, |String|, |Blob| or |Dictionary|.
+		For each item in {expr1} execute {expr2}. {expr1} is not
+		modified; its values may be, as with |:lockvar| 1. |E741|
+		See |map()| and |filter()| to modify {expr1}.
+
+		{expr2} must be a |string| or |Funcref|.
+
+		If {expr2} is a |string|, inside {expr2} |v:val| has the value
+		of the current item.  For a |Dictionary| |v:key| has the key
+		of the current item and for a |List| |v:key| has the index of
+		the current item.  For a |Blob| |v:key| has the index of the
+		current byte. For a |String| |v:key| has the index of the
+		current character.
+		Examples: >vim
+			call foreach(mylist, 'let used[v:val] = v:true')
+<		This records the items that are in the {expr1} list.
+
+		Note that {expr2} is the result of expression and is then used
+		as a command.  Often it is good to use a |literal-string| to
+		avoid having to double backslashes.
+
+		If {expr2} is a |Funcref| it must take two arguments:
+			1. the key or the index of the current item.
+			2. the value of the current item.
+		With a lambda you don't get an error if it only accepts one
+		argument.
+		If the function returns a value, it is ignored.
+
+		Returns {expr1} in all cases.
+		When an error is encountered while executing {expr2} no
+		further items in {expr1} are processed.
+		When {expr2} is a Funcref errors inside a function are ignored,
+		unless it was defined with the "abort" flag.
 
 fullcommand({name})                                              *fullcommand()*
 		Get the full command name from a short abbreviated command
@@ -2018,8 +2055,8 @@ get({func}, {what})
 			"args"	The list with arguments
 		Returns zero on error.
 
-getbufinfo([{buf}])
-getbufinfo([{dict}])                                              *getbufinfo()*
+getbufinfo([{buf}])                                               *getbufinfo()*
+getbufinfo([{dict}])
 		Get information about buffers as a List of Dictionaries.
 
 		Without an argument information about all the buffers is
@@ -2042,6 +2079,8 @@ getbufinfo([{dict}])                                              *getbufinfo()*
 			bufnr		Buffer number.
 			changed		TRUE if the buffer is modified.
 			changedtick	Number of changes made to the buffer.
+			command		TRUE if the buffer belongs to the
+					command-line window |cmdwin|.
 			hidden		TRUE if the buffer is hidden.
 			lastused	Timestamp in seconds, like
 					|localtime()|, when the buffer was
@@ -2233,7 +2272,7 @@ getcharmod()                                                      *getcharmod()*
 			32	mouse double click
 			64	mouse triple click
 			96	mouse quadruple click (== 32 + 64)
-			128	command (Macintosh only)
+			128	command (Mac) or super
 		Only the modifiers that have not been included in the
 		character itself are obtained.  Thus Shift-a results in "A"
 		without a modifier.  Returns 0 if no modifiers are used.
@@ -2370,6 +2409,7 @@ getcompletion({pat}, {type} [, {filtered}])                    *getcompletion()*
 		help		help subjects
 		highlight	highlight groups
 		history		|:history| suboptions
+		keymap		keyboard mappings
 		locale		locale names (as output of locale -a)
 		mapclear	buffer argument
 		mapping		mapping name
@@ -2877,6 +2917,57 @@ getreginfo([{regname}])                                           *getreginfo()*
 		or not set, an empty Dictionary will be returned.
 		If {regname} is not specified, |v:register| is used.
 		The returned Dictionary can be passed to |setreg()|.
+
+getregion({pos1}, {pos2} [, {opts}])                               *getregion()*
+		Returns the list of strings from {pos1} to {pos2} from a
+		buffer.
+
+		{pos1} and {pos2} must both be |List|s with four numbers.
+		See |getpos()| for the format of the list.  It's possible
+		to specify positions from a different buffer, but please
+		note the limitations at |getregion-notes|.
+
+		The optional argument {opts} is a Dict and supports the
+		following items:
+
+			type		Specify the region's selection type
+					(default: "v"):
+			    "v"		for |charwise| mode
+			    "V"		for |linewise| mode
+			    "<CTRL-V>"	for |blockwise-visual| mode
+
+			exclusive	If |TRUE|, use exclusive selection
+					for the end position
+					(default: follow 'selection')
+
+		You can get the last selection type by |visualmode()|.
+		If Visual mode is active, use |mode()| to get the Visual mode
+		(e.g., in a |:vmap|).
+		This function is useful to get text starting and ending in
+		different columns, such as a |charwise-visual| selection.
+
+							*getregion-notes*
+		Note that:
+		- Order of {pos1} and {pos2} doesn't matter, it will always
+		  return content from the upper left position to the lower
+		  right position.
+		- If 'virtualedit' is enabled and the region is past the end
+		  of the lines, resulting lines are padded with spaces.
+		- If the region is blockwise and it starts or ends in the
+		  middle of a multi-cell character, it is not included but
+		  its selected part is substituted with spaces.
+		- If {pos1} and {pos2} are not in the same buffer, an empty
+		  list is returned.
+		- {pos1} and {pos2} must belong to a |bufloaded()| buffer.
+		- It is evaluated in current window context, which makes a
+		  difference if the buffer is displayed in a window with
+		  different 'virtualedit' or 'list' values.
+
+		Examples: >
+			:xnoremap <CR>
+			\ <Cmd>echom getregion(
+			\ getpos('v'), getpos('.'), #{ type: mode() })<CR>
+<
 
 getregtype([{regname}])                                           *getregtype()*
 		The result is a String, which is type of register {regname}.
@@ -3873,8 +3964,7 @@ json_decode({expr})                                              *json_decode()*
 		Vim value. In the following cases it will output
 		|msgpack-special-dict|:
 		1. Dictionary contains duplicate key.
-		2. Dictionary contains empty key.
-		3. String contains NUL byte.  Two special dictionaries: for
+		2. String contains NUL byte.  Two special dictionaries: for
 		   dictionary and for string will be emitted in case string
 		   with NUL byte was a dictionary key.
 
@@ -4189,8 +4279,8 @@ maparg({name} [, {mode} [, {abbr} [, {dict}]]])                       *maparg()*
 		  "mode_bits" Nvim's internal binary representation of "mode".
 			     |mapset()| ignores this; only "mode" is used.
 			     See |maplist()| for usage examples. The values
-			     are from src/nvim/vim.h and may change in the
-			     future.
+			     are from src/nvim/state_defs.h and may change in
+			     the future.
 
 		The dictionary can be used to restore a mapping with
 		|mapset()|.
@@ -4257,8 +4347,8 @@ maplist([{abbr}])                                                    *maplist()*
 			endfor
 			echo saved_maps->mapnew({_, m -> m.lhs})
 <		The values of the mode_bits are defined in Nvim's
-		src/nvim/vim.h file and they can be discovered at runtime
-		using |:map-commands| and "maplist()". Example: >vim
+		src/nvim/state_defs.h file and they can be discovered at
+		runtime using |:map-commands| and "maplist()". Example: >vim
 			omap xyzzy <Nop>
 			let op_bit = maplist()->filter(
 			    \ {_, m -> m.lhs == 'xyzzy'})[0].mode_bits
@@ -4272,6 +4362,7 @@ mapnew({expr1}, {expr2})                                              *mapnew()*
 		don't want that use |deepcopy()| first.
 
 mapset({mode}, {abbr}, {dict})                                        *mapset()*
+mapset({dict})
 		Restore a mapping from a dictionary, possibly returned by
 		|maparg()| or |maplist()|.  A buffer mapping, when dict.buffer
 		is true, is set on the current buffer; it is up to the caller
@@ -4360,6 +4451,7 @@ match({expr}, {pat} [, {start} [, {count}]])                           *match()*
 		Note that when {count} is added the way {start} works changes,
 		see above.
 
+						*match-pattern*
 		See |pattern| for the patterns that are accepted.
 		The 'ignorecase' option is used to set the ignore-caseness of
 		the pattern.  'smartcase' is NOT used.  The matching is always
@@ -4476,6 +4568,50 @@ matcharg({nr})                                                      *matcharg()*
 		This is useful to save and restore a |:match|.
 		Highlighting matches using the |:match| commands are limited
 		to three matches. |matchadd()| does not have this limitation.
+
+matchbufline({buf}, {pat}, {lnum}, {end}, [, {dict}])           *matchbufline()*
+		Returns the |List| of matches in lines from {lnum} to {end} in
+		buffer {buf} where {pat} matches.
+
+		{lnum} and {end} can either be a line number or the string "$"
+		to refer to the last line in {buf}.
+
+		The {dict} argument supports following items:
+		    submatches	include submatch information (|/\(|)
+
+		For each match, a |Dict| with the following items is returned:
+		    byteidx	starting byte index of the match
+		    lnum	line number where there is a match
+		    text	matched string
+		Note that there can be multiple matches in a single line.
+
+		This function works only for loaded buffers. First call
+		|bufload()| if needed.
+
+		See |match-pattern| for information about the effect of some
+		option settings on the pattern.
+
+		When {buf} is not a valid buffer, the buffer is not loaded or
+		{lnum} or {end} is not valid then an error is given and an
+		empty |List| is returned.
+
+		Examples: >vim
+		    " Assuming line 3 in buffer 5 contains "a"
+		    :echo matchbufline(5, '\<\k\+\>', 3, 3)
+		    [{'lnum': 3, 'byteidx': 0, 'text': 'a'}]
+		    " Assuming line 4 in buffer 10 contains "tik tok"
+		    :echo matchbufline(10, '\<\k\+\>', 1, 4)
+		    [{'lnum': 4, 'byteidx': 0, 'text': 'tik'}, {'lnum': 4, 'byteidx': 4, 'text': 'tok'}]
+<
+		If {submatch} is present and is v:true, then submatches like
+		"\1", "\2", etc. are also returned.  Example: >vim
+		    " Assuming line 2 in buffer 2 contains "acd"
+		    :echo matchbufline(2, '\(a\)\?\(b\)\?\(c\)\?\(.*\)', 2, 2
+						\ {'submatches': v:true})
+		    [{'lnum': 2, 'byteidx': 0, 'text': 'acd', 'submatches': ['a', '', 'c', 'd', '', '', '', '', '']}]
+<		The "submatches" List always contains 9 items.  If a submatch
+		is not found, then an empty string is returned for that
+		submatch.
 
 matchdelete({id} [, {win}])                            *matchdelete()* *E802* *E803*
 		Deletes a match with ID {id} previously defined by |matchadd()|
@@ -4614,6 +4750,39 @@ matchstr({expr}, {pat} [, {start} [, {count}]])                     *matchstr()*
 		When {expr} is a |List| then the matching item is returned.
 		The type isn't changed, it's not necessarily a String.
 
+matchstrlist({list}, {pat} [, {dict}])                          *matchstrlist()*
+		Returns the |List| of matches in {list} where {pat} matches.
+		{list} is a |List| of strings.  {pat} is matched against each
+		string in {list}.
+
+		The {dict} argument supports following items:
+		    submatches	include submatch information (|/\(|)
+
+		For each match, a |Dict| with the following items is returned:
+		    byteidx	starting byte index of the match.
+		    idx		index in {list} of the match.
+		    text	matched string
+		    submatches	a List of submatches.  Present only if
+				"submatches" is set to v:true in {dict}.
+
+		See |match-pattern| for information about the effect of some
+		option settings on the pattern.
+
+		Example: >vim
+		    :echo matchstrlist(['tik tok'], '\<\k\+\>')
+		    [{'idx': 0, 'byteidx': 0, 'text': 'tik'}, {'idx': 0, 'byteidx': 4, 'text': 'tok'}]
+		    :echo matchstrlist(['a', 'b'], '\<\k\+\>')
+		    [{'idx': 0, 'byteidx': 0, 'text': 'a'}, {'idx': 1, 'byteidx': 0, 'text': 'b'}]
+<
+		If "submatches" is present and is v:true, then submatches like
+		"\1", "\2", etc. are also returned.  Example: >vim
+		    :echo matchstrlist(['acd'], '\(a\)\?\(b\)\?\(c\)\?\(.*\)',
+						\ #{submatches: v:true})
+		    [{'idx': 0, 'byteidx': 0, 'text': 'acd', 'submatches': ['a', '', 'c', 'd', '', '', '', '', '']}]
+<		The "submatches" List always contains 9 items.  If a submatch
+		is not found, then an empty string is returned for that
+		submatch.
+
 matchstrpos({expr}, {pat} [, {start} [, {count}]])               *matchstrpos()*
 		Same as |matchstr()|, but return the matched string, the start
 		position and the end position of the match.  Example: >vim
@@ -4640,7 +4809,7 @@ max({expr})                                                              *max()*
 		it returns the maximum of all values in the Dictionary.
 		If {expr} is neither a List nor a Dictionary, or one of the
 		items in {expr} cannot be used as a Number this results in
-		                an error.  An empty |List| or |Dictionary| results in zero.
+		an error.  An empty |List| or |Dictionary| results in zero.
 
 menu_get({path} [, {modes}])                                        *menu_get()*
 		Returns a |List| of |Dictionaries| describing |menus| (defined
@@ -4850,7 +5019,9 @@ mode([expr])                                                            *mode()*
 		   Rvc	    Virtual Replace mode completion |compl-generic|
 		   Rvx	    Virtual Replace mode |i_CTRL-X| completion
 		   c	    Command-line editing
+		   cr	    Command-line editing overstrike mode |c_<Insert>|
 		   cv	    Vim Ex mode |gQ|
+		   cvr	    Vim Ex mode while in overstrike mode |c_<Insert>|
 		   r	    Hit-enter prompt
 		   rm	    The -- more -- prompt
 		   r?	    A |:confirm| query of some sort
@@ -4952,7 +5123,6 @@ msgpackparse({data})                                            *msgpackparse()*
 			   are binary strings).
 			2. String with NUL byte inside.
 			3. Duplicate key.
-			4. Empty key.
 		ext	|List| with two values: first is a signed integer
 			representing extension type. Second is
 			|readfile()|-style list of strings.
@@ -5171,9 +5341,9 @@ printf({fmt}, {expr1} ...)                                            *printf()*
 <		This limits the length of the text used from "line" to
 		"width" bytes.
 
-		If the argument to be formatted is specified using a posional
-		argument specifier, and a '*' is used to indicate that a
-		number argument is to be used to specify the width or
+		If the argument to be formatted is specified using a
+		positional argument specifier, and a '*' is used to indicate
+		that a number argument is to be used to specify the width or
 		precision, the argument(s) to be used must also be specified
 		using a {n$} positional argument specifier. See |printf-$|.
 
@@ -5276,96 +5446,99 @@ printf({fmt}, {expr1} ...)                                            *printf()*
 		having a different word order, positional arguments may be
 		used to indicate this. For instance: >vim
 
-			#, c-format
-			msgid "%s returning %s"
-			msgstr "waarde %2$s komt terug van %1$s"
+		    #, c-format
+		    msgid "%s returning %s"
+		    msgstr "waarde %2$s komt terug van %1$s"
 <
-		In this example, the sentence has its 2 string arguments reversed
-		in the output. >vim
+		In this example, the sentence has its 2 string arguments
+		reversed in the output. >vim
 
-			echo printf(
-				"In The Netherlands, vim's creator's name is: %1$s %2$s",
-				"Bram", "Moolenaar")
-<			In The Netherlands, vim's creator's name is: Bram Moolenaar >vim
+		    echo printf(
+			"In The Netherlands, vim's creator's name is: %1$s %2$s",
+			"Bram", "Moolenaar")
+<		    In The Netherlands, vim's creator's name is: Bram Moolenaar >vim
 
-			echo printf(
-				"In Belgium, vim's creator's name is: %2$s %1$s",
-				"Bram", "Moolenaar")
-<			In Belgium, vim's creator's name is: Moolenaar Bram
+		    echo printf(
+			"In Belgium, vim's creator's name is: %2$s %1$s",
+			"Bram", "Moolenaar")
+<		    In Belgium, vim's creator's name is: Moolenaar Bram
 
 		Width (and precision) can be specified using the '*' specifier.
 		In this case, you must specify the field width position in the
 		argument list. >vim
 
-			echo printf("%1$*2$.*3$d", 1, 2, 3)
-<			001 >vim
-			echo printf("%2$*3$.*1$d", 1, 2, 3)
-<			  2 >vim
-			echo printf("%3$*1$.*2$d", 1, 2, 3)
-<			03 >vim
-			echo printf("%1$*2$.*3$g", 1.4142, 2, 3)
-<			1.414
+		    echo printf("%1$*2$.*3$d", 1, 2, 3)
+<		    001 >vim
+		    echo printf("%2$*3$.*1$d", 1, 2, 3)
+<		      2 >vim
+		    echo printf("%3$*1$.*2$d", 1, 2, 3)
+<		    03 >vim
+		    echo printf("%1$*2$.*3$g", 1.4142, 2, 3)
+<		    1.414
 
 		You can mix specifying the width and/or precision directly
 		and via positional arguments: >vim
 
-			echo printf("%1$4.*2$f", 1.4142135, 6)
-<			1.414214 >vim
-			echo printf("%1$*2$.4f", 1.4142135, 6)
-<			1.4142 >vim
-			echo printf("%1$*2$.*3$f", 1.4142135, 6, 2)
-<			  1.41
+		    echo printf("%1$4.*2$f", 1.4142135, 6)
+<		    1.414214 >vim
+		    echo printf("%1$*2$.4f", 1.4142135, 6)
+<		    1.4142 >vim
+		    echo printf("%1$*2$.*3$f", 1.4142135, 6, 2)
+<		      1.41
+
+		You will get an overflow error |E1510|, when the field-width
+		or precision will result in a string longer than 6400 chars.
 
 							*E1500*
 		You cannot mix positional and non-positional arguments: >vim
-			echo printf("%s%1$s", "One", "Two")
-<			E1500: Cannot mix positional and non-positional
-			arguments: %s%1$s
+		    echo printf("%s%1$s", "One", "Two")
+<		    E1500: Cannot mix positional and non-positional arguments:
+		    %s%1$s
 
 							*E1501*
 		You cannot skip a positional argument in a format string: >vim
-			echo printf("%3$s%1$s", "One", "Two", "Three")
-<			E1501: format argument 2 unused in $-style
-			format: %3$s%1$s
+		    echo printf("%3$s%1$s", "One", "Two", "Three")
+<		    E1501: format argument 2 unused in $-style format:
+		    %3$s%1$s
 
 							*E1502*
 		You can re-use a [field-width] (or [precision]) argument: >vim
-			echo printf("%1$d at width %2$d is: %01$*2$d", 1, 2)
-<			1 at width 2 is: 01
+		    echo printf("%1$d at width %2$d is: %01$*2$d", 1, 2)
+<		    1 at width 2 is: 01
 
 		However, you can't use it as a different type: >vim
-			echo printf("%1$d at width %2$ld is: %01$*2$d", 1, 2)
-<			E1502: Positional argument 2 used as field
-			width reused as different type: long int/int
+		    echo printf("%1$d at width %2$ld is: %01$*2$d", 1, 2)
+<		    E1502: Positional argument 2 used as field width reused as
+		    different type: long int/int
 
 							*E1503*
 		When a positional argument is used, but not the correct number
 		or arguments is given, an error is raised: >vim
-			echo printf("%1$d at width %2$d is: %01$*2$.*3$d", 1, 2)
-<			E1503: Positional argument 3 out of bounds:
-			%1$d at width %2$d is: %01$*2$.*3$d
+		    echo printf("%1$d at width %2$d is: %01$*2$.*3$d", 1, 2)
+<		    E1503: Positional argument 3 out of bounds: %1$d at width
+		    %2$d is: %01$*2$.*3$d
 
 		Only the first error is reported: >vim
-			echo printf("%01$*2$.*3$d %4$d", 1, 2)
-<			E1503: Positional argument 3 out of bounds:
-			%01$*2$.*3$d %4$d
+		    echo printf("%01$*2$.*3$d %4$d", 1, 2)
+<		    E1503: Positional argument 3 out of bounds: %01$*2$.*3$d
+		    %4$d
 
 							*E1504*
 		A positional argument can be used more than once: >vim
-			echo printf("%1$s %2$s %1$s", "One", "Two")
-<			One Two One
+		    echo printf("%1$s %2$s %1$s", "One", "Two")
+<		    One Two One
 
 		However, you can't use a different type the second time: >vim
-			echo printf("%1$s %2$s %1$d", "One", "Two")
-<			E1504: Positional argument 1 type used
-			inconsistently: int/string
+		    echo printf("%1$s %2$s %1$d", "One", "Two")
+<		    E1504: Positional argument 1 type used inconsistently:
+		    int/string
 
 							*E1505*
 		Various other errors that lead to a format string being
 		wrongly formatted lead to: >vim
-			echo printf("%1$d at width %2$d is: %01$*2$.3$d", 1, 2)
-<			E1505: Invalid format specifier:
-			%1$d at width %2$d is: %01$*2$.3$d
+		    echo printf("%1$d at width %2$d is: %01$*2$.3$d", 1, 2)
+<		    E1505: Invalid format specifier: %1$d at width %2$d is:
+		    %01$*2$.3$d
 
 							*E1507*
 		This internal error indicates that the logic to parse a
@@ -5628,9 +5801,9 @@ reg_recording()                                                *reg_recording()*
 		Returns the single letter name of the register being recorded.
 		Returns an empty string when not recording.  See |q|.
 
-reltime()
+reltime()                                                            *reltime()*
 reltime({start})
-reltime({start}, {end})                                              *reltime()*
+reltime({start}, {end})
 		Return an item that represents a time value.  The item is a
 		list with items that depend on the system.
 		The item can be passed to |reltimestr()| to convert it to a
@@ -5675,8 +5848,8 @@ reltimestr({time})                                                *reltimestr()*
 <		Also see |profiling|.
 		If there is an error an empty string is returned
 
-remove({list}, {idx})
-remove({list}, {idx}, {end})                                          *remove()*
+remove({list}, {idx})                                                 *remove()*
+remove({list}, {idx}, {end})
 		Without {end}: Remove the item at {idx} from |List| {list} and
 		return the item.
 		With {end}: Remove items from {idx} to {end} (inclusive) and
@@ -5884,6 +6057,7 @@ search({pattern} [, {flags} [, {stopline} [, {timeout} [, {skip}]]]]) *search()*
 		When a match has been found its line number is returned.
 		If there is no match a 0 is returned and the cursor doesn't
 		move.  No error message is given.
+		To get the matched string, use |matchbufline()|.
 
 		{flags} is a String, which can contain these character flags:
 		'b'	search Backward instead of forward
@@ -6405,8 +6579,8 @@ setcmdpos({pos})                                                   *setcmdpos()*
 		Returns 0 when successful, 1 when not editing the command
 		line.
 
-setcursorcharpos({lnum}, {col} [, {off}])
-setcursorcharpos({list})                                    *setcursorcharpos()*
+setcursorcharpos({lnum}, {col} [, {off}])                   *setcursorcharpos()*
+setcursorcharpos({list})
 		Same as |cursor()| but uses the specified column number as the
 		character index instead of the byte index in the line.
 
@@ -6832,8 +7006,8 @@ shiftwidth([{col}])                                               *shiftwidth()*
 		'vartabstop' feature. If no {col} argument is given, column 1
 		will be assumed.
 
-sign_define({name} [, {dict}])
-sign_define({list})                                              *sign_define()*
+sign_define({name} [, {dict}])                                   *sign_define()*
+sign_define({list})
 		Define a new sign named {name} or modify the attributes of an
 		existing sign.  This is similar to the |:sign-define| command.
 
@@ -7100,8 +7274,8 @@ sign_placelist({list})                                        *sign_placelist()*
 				\ ])
 <
 
-sign_undefine([{name}])
-sign_undefine({list})                                          *sign_undefine()*
+sign_undefine([{name}])                                        *sign_undefine()*
+sign_undefine({list})
 		Deletes a previously defined sign {name}. This is similar to
 		the |:sign-undefine| command. If {name} is not supplied, then
 		deletes all the defined signs.
@@ -7237,7 +7411,8 @@ slice({expr}, {start} [, {end}])                                       *slice()*
 		Similar to using a |slice| "expr[start : end]", but "end" is
 		used exclusive.  And for a string the indexes are used as
 		character indexes instead of byte indexes.
-		Also, composing characters are not counted.
+		Also, composing characters are treated as a part of the
+		preceding base character.
 		When {end} is omitted the slice continues to the last item.
 		When {end} is -1 the last item is omitted.
 		Returns an empty value if {start} or {end} are invalid.
@@ -7584,8 +7759,8 @@ strcharpart({src}, {start} [, {len} [, {skipcc}]])               *strcharpart()*
 		of byte index and length.
 		When {skipcc} is omitted or zero, composing characters are
 		counted separately.
-		When {skipcc} set to 1, Composing characters are ignored,
-		similar to  |slice()|.
+		When {skipcc} set to 1, composing characters are treated as a
+		part of the preceding base character, similar to |slice()|.
 		When a character index is used where a character does not
 		exist it is omitted and counted as one character.  For
 		example: >vim
@@ -7599,7 +7774,7 @@ strchars({string} [, {skipcc}])                                     *strchars()*
 		in String {string}.
 		When {skipcc} is omitted or zero, composing characters are
 		counted separately.
-		When {skipcc} set to 1, Composing characters are ignored.
+		When {skipcc} set to 1, composing characters are ignored.
 		|strcharlen()| always does this.
 
 		Returns zero on error.
@@ -8253,7 +8428,6 @@ test_garbagecollect_now()                            *test_garbagecollect_now()*
 		internally, and |v:testing| must have been set before calling
 		any function.
 
-
 timer_info([{id}])                                                *timer_info()*
 		Return a list with information about timers.
 		When {id} is given only information about this timer is
@@ -8728,14 +8902,13 @@ win_screenpos({nr})                                            *win_screenpos()*
 		[1, 1], unless there is a tabline, then it is [2, 1].
 		{nr} can be the window number or the |window-ID|.  Use zero
 		for the current window.
-		Returns [0, 0] if the window cannot be found in the current
-		tabpage.
+		Returns [0, 0] if the window cannot be found.
 
 win_splitmove({nr}, {target} [, {options}])                    *win_splitmove()*
-		Move the window {nr} to a new split of the window {target}.
-		This is similar to moving to {target}, creating a new window
-		using |:split| but having the same contents as window {nr}, and
-		then closing {nr}.
+		Temporarily switch to window {target}, then move window {nr}
+		to a new split adjacent to {target}.
+		Unlike commands such as |:split|, no new windows are created
+		(the |window-ID| of window {nr} is unchanged after the move).
 
 		Both {nr} and {target} can be window numbers or |window-ID|s.
 		Both must be in the current tab page.
@@ -8838,7 +9011,9 @@ winnr([{arg}])                                                         *winnr()*
 			#	the number of the last accessed window (where
 				|CTRL-W_p| goes to).  If there is no previous
 				window or it is in another tab page 0 is
-				returned.
+				returned.  May refer to the current window in
+				some cases (e.g. when evaluating 'statusline'
+				expressions).
 			{N}j	the number of the Nth window below the
 				current window (where |CTRL-W_j| goes to).
 			{N}k	the number of the Nth window above the current

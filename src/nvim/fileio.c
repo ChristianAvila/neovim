@@ -11,11 +11,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <time.h>
 #include <uv.h>
 
 #include "auto/config.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
+#include "nvim/autocmd_defs.h"
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/buffer_updates.h"
@@ -30,36 +33,46 @@
 #include "nvim/fileio.h"
 #include "nvim/fold.h"
 #include "nvim/garray.h"
+#include "nvim/garray_defs.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
-#include "nvim/iconv.h"
+#include "nvim/iconv_defs.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
+#include "nvim/mbyte_defs.h"
 #include "nvim/memfile.h"
+#include "nvim/memfile_defs.h"
 #include "nvim/memline.h"
+#include "nvim/memline_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/move.h"
 #include "nvim/option.h"
+#include "nvim/option_defs.h"
 #include "nvim/option_vars.h"
 #include "nvim/optionstr.h"
+#include "nvim/os/fs.h"
 #include "nvim/os/fs_defs.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
 #include "nvim/os/time.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/regexp.h"
+#include "nvim/regexp_defs.h"
 #include "nvim/sha256.h"
 #include "nvim/shada.h"
+#include "nvim/state_defs.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 #include "nvim/ui.h"
 #include "nvim/undo.h"
-#include "nvim/vim.h"
+#include "nvim/undo_defs.h"
+#include "nvim/vim_defs.h"
 
 #ifdef BACKSLASH_IN_FILENAME
 # include "nvim/charset.h"
@@ -152,14 +165,12 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
 {
   int retval = FAIL;  // jump to "theend" instead of returning
   int fd = stdin_fd >= 0 ? stdin_fd : 0;
-  int newfile = (flags & READ_NEW);
-  int check_readonly;
-  int filtering = (flags & READ_FILTER);
-  int read_stdin = (flags & READ_STDIN);
-  int read_buffer = (flags & READ_BUFFER);
-  int read_fifo = (flags & READ_FIFO);
-  int set_options = newfile || read_buffer
-                    || (eap != NULL && eap->read_edit);
+  bool newfile = (flags & READ_NEW);
+  bool filtering = (flags & READ_FILTER);
+  bool read_stdin = (flags & READ_STDIN);
+  bool read_buffer = (flags & READ_BUFFER);
+  bool read_fifo = (flags & READ_FIFO);
+  bool set_options = newfile || read_buffer || (eap != NULL && eap->read_edit);
   linenr_T read_buf_lnum = 1;           // next line to read from curbuf
   colnr_T read_buf_col = 0;             // next char to read from this line
   char c;
@@ -175,7 +186,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
   off_T filesize = 0;
   bool skip_read = false;
   context_sha256_T sha_ctx;
-  int read_undo_file = false;
+  bool read_undo_file = false;
   int split = 0;  // number of split lines
   linenr_T linecnt;
   bool error = false;                   // errors encountered
@@ -194,7 +205,6 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
   linenr_T read_no_eol_lnum = 0;        // non-zero lnum when last line of
                                         // last read was missing the eol
   bool file_rewind = false;
-  int can_retry;
   linenr_T conv_error = 0;              // line nr with conversion error
   linenr_T illegal_byte = 0;            // line nr with illegal byte
   bool keep_dest_enc = false;           // don't retry when char doesn't fit
@@ -382,7 +392,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
   // Default is r/w, can be set to r/o below.
   // Don't reset it when in readonly mode
   // Only set/reset b_p_ro when BF_CHECK_RO is set.
-  check_readonly = (newfile && (curbuf->b_flags & BF_CHECK_RO));
+  bool check_readonly = (newfile && (curbuf->b_flags & BF_CHECK_RO));
   if (check_readonly && !readonlymode) {
     curbuf->b_p_ro = false;
   }
@@ -553,7 +563,7 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
         }
       }
 
-      (void)os_setperm(swap_fname, swap_mode);
+      os_setperm(swap_fname, swap_mode);
     }
 #endif
   }
@@ -847,7 +857,7 @@ retry:
   // Set "can_retry" when it's possible to rewind the file and try with
   // another "fenc" value.  It's false when no other "fenc" to try, reading
   // stdin or fixed at a specific encoding.
-  can_retry = (*fenc != NUL && !read_stdin && !keep_dest_enc && !read_fifo);
+  bool can_retry = (*fenc != NUL && !read_stdin && !keep_dest_enc && !read_fifo);
 
   if (!skip_read) {
     linerest = 0;
@@ -947,7 +957,7 @@ retry:
             int tlen = 0;
             while (true) {
               p = (uint8_t *)ml_get(read_buf_lnum) + read_buf_col;
-              int n = (int)strlen((char *)p);
+              int n = ml_get_len(read_buf_lnum) - read_buf_col;
               if (tlen + n + 1 > size) {
                 // Filled up to "size", append partial line.
                 // Change NL to NUL to reverse the effect done
@@ -1145,7 +1155,6 @@ retry:
 
       if (fio_flags != 0) {
         unsigned u8c;
-        char *dest;
         char *tail = NULL;
 
         // Convert Unicode or Latin1 to UTF-8.
@@ -1153,7 +1162,7 @@ retry:
         // of bytes may increase.
         // "dest" points to after where the UTF-8 bytes go, "p" points
         // to after the next character to convert.
-        dest = ptr + real_size;
+        char *dest = ptr + real_size;
         if (fio_flags == FIO_LATIN1 || fio_flags == FIO_UTF8) {
           p = (uint8_t *)ptr + size;
           if (fio_flags == FIO_UTF8) {
@@ -1309,7 +1318,7 @@ retry:
           assert(u8c <= INT_MAX);
           // produce UTF-8
           dest -= utf_char2len((int)u8c);
-          (void)utf_char2bytes((int)u8c, dest);
+          utf_char2bytes((int)u8c, dest);
         }
 
         // move the linerest to before the converted characters
@@ -1526,8 +1535,7 @@ rewind_retry:
                 // Otherwise give an error message later.
                 if (try_unix
                     && !read_stdin
-                    && (read_buffer
-                        || vim_lseek(fd, 0, SEEK_SET) == 0)) {
+                    && (read_buffer || vim_lseek(fd, 0, SEEK_SET) == 0)) {
                   fileformat = EOL_UNIX;
                   if (set_options) {
                     set_fileformat(EOL_UNIX, OPT_LOCAL);
@@ -1612,7 +1620,7 @@ failed:
     save_file_ff(curbuf);
     // If editing a new file: set 'fenc' for the current buffer.
     // Also for ":read ++edit file".
-    set_string_option_direct("fenc", -1, fenc, OPT_FREE | OPT_LOCAL, 0);
+    set_option_direct(kOptFileencoding, CSTR_AS_OPTVAL(fenc), OPT_LOCAL, 0);
   }
   if (fenc_alloced) {
     xfree(fenc);
@@ -1624,7 +1632,7 @@ failed:
   if (!read_buffer && !read_stdin) {
     close(fd);  // errors are ignored
   } else {
-    (void)os_set_cloexec(fd);
+    os_set_cloexec(fd);
   }
   xfree(buffer);
 
@@ -1932,7 +1940,7 @@ void prep_exarg(exarg_T *eap, const buf_T *buf)
 }
 
 /// Set default or forced 'fileformat' and 'binary'.
-void set_file_options(int set_options, exarg_T *eap)
+void set_file_options(bool set_options, exarg_T *eap)
 {
   // set default 'fileformat'
   if (set_options) {
@@ -1960,7 +1968,7 @@ void set_forced_fenc(exarg_T *eap)
   }
 
   char *fenc = enc_canonize(eap->cmd + eap->force_enc);
-  set_string_option_direct("fenc", -1, fenc, OPT_FREE|OPT_LOCAL, 0);
+  set_option_direct(kOptFileencoding, CSTR_AS_OPTVAL(fenc), OPT_LOCAL, 0);
   xfree(fenc);
 }
 
@@ -2092,7 +2100,7 @@ int set_rw_fname(char *fname, char *sfname)
   // Do filetype detection now if 'filetype' is empty.
   if (*curbuf->b_p_ft == NUL) {
     if (augroup_exists("filetypedetect")) {
-      (void)do_doautocmd("filetypedetect BufRead", false, NULL);
+      do_doautocmd("filetypedetect BufRead", false, NULL);
     }
     do_modelines(0);
   }
@@ -2193,7 +2201,7 @@ bool time_differs(const FileInfo *file_info, int64_t mtime, int64_t mtime_ns)
 bool need_conversion(const char *fenc)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  int same_encoding;
+  bool same_encoding;
   int fenc_flags;
 
   if (*fenc == NUL || strcmp(p_enc, fenc) == 0) {
@@ -2621,7 +2629,7 @@ static int rename_with_tmp(const char *const from, const char *const to)
   STRCPY(tempname, from);
   for (int n = 123; n < 99999; n++) {
     char *tail = path_tail(tempname);
-    snprintf(tail, (size_t)((MAXPATHL + 1) - (tail - tempname - 1)), "%d", n);
+    snprintf(tail, (size_t)((MAXPATHL + 1) - (tail - tempname)), "%d", n);
 
     if (!os_path_exists(tempname)) {
       if (os_rename(from, tempname) == OK) {
@@ -2630,7 +2638,7 @@ static int rename_with_tmp(const char *const from, const char *const to)
         }
         // Strange, the second step failed.  Try moving the
         // file back and return failure.
-        (void)os_rename(tempname, from);
+        os_rename(tempname, from);
         return -1;
       }
       // If it fails for one temp name it will most likely fail
@@ -2749,7 +2757,7 @@ int vim_rename(const char *from, const char *to)
   return 0;
 }
 
-static int already_warned = false;
+static bool already_warned = false;
 
 /// Check if any not hidden buffer has been changed.
 /// Postpone the check if there are characters in the stuff buffer, a global
@@ -3041,7 +3049,7 @@ int buf_check_timestamp(buf_T *buf)
           msg_puts_attr(mesg2, HL_ATTR(HLF_W) + MSG_HIST);
         }
         msg_clr_eos();
-        (void)msg_end();
+        msg_end();
         if (emsg_silent == 0 && !in_assert_fails) {
           ui_flush();
           // give the user some time to think about it
@@ -3072,7 +3080,7 @@ int buf_check_timestamp(buf_T *buf)
 
   // Trigger FileChangedShell when the file was changed in any way.
   if (bufref_valid(&bufref) && retval != 0) {
-    (void)apply_autocmds(EVENT_FILECHANGEDSHELLPOST, buf->b_fname, buf->b_fname, false, buf);
+    apply_autocmds(EVENT_FILECHANGEDSHELLPOST, buf->b_fname, buf->b_fname, false, buf);
   }
   return retval;
 }
@@ -3145,7 +3153,7 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
     curbuf->b_flags |= BF_CHECK_RO;           // check for RO again
     keep_filetype = true;                     // don't detect 'filetype'
     if (readfile(buf->b_ffname, buf->b_fname, 0, 0,
-                 (linenr_T)MAXLNUM, &ea, flags, false) != OK) {
+                 (linenr_T)MAXLNUM, &ea, flags, shortmess(SHM_FILEINFO)) != OK) {
       if (!aborting()) {
         semsg(_("E321: Could not reload \"%s\""), buf->b_fname);
       }
@@ -3157,14 +3165,13 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
             break;
           }
         }
-        (void)move_lines(savebuf, buf);
+        move_lines(savebuf, buf);
       }
     } else if (buf == curbuf) {  // "buf" still valid.
       // Mark the buffer as unmodified and free undo info.
       unchanged(buf, true, true);
       if ((flags & READ_KEEP_UNDO) == 0) {
-        u_blockfree(buf);
-        u_clearall(buf);
+        u_clearallandblockfree(buf);
       } else {
         // Mark all undo states as changed.
         u_unchanged(curbuf);
@@ -3190,7 +3197,7 @@ void buf_reload(buf_T *buf, int orig_mode, bool reload_options)
     curwin->w_topline = old_topline;
   }
   curwin->w_cursor = old_cursor;
-  check_cursor();
+  check_cursor(curwin);
   update_topline(curwin);
   keep_filetype = false;
 
@@ -3272,7 +3279,7 @@ static void vim_mktempdir(void)
   char user[40] = { 0 };
   char appname[40] = { 0 };
 
-  (void)os_get_username(user, sizeof(user));
+  os_get_username(user, sizeof(user));
   // Usernames may contain slashes! #19240
   memchrsub(user, '/', '_', sizeof(user));
   memchrsub(user, '\\', '_', sizeof(user));
@@ -3298,7 +3305,7 @@ static void vim_mktempdir(void)
     xstrlcat(tmp, appname, sizeof(tmp));
     xstrlcat(tmp, ".", sizeof(tmp));
     xstrlcat(tmp, user, sizeof(tmp));
-    (void)os_mkdir(tmp, 0700);  // Always create, to avoid a race.
+    os_mkdir(tmp, 0700);  // Always create, to avoid a race.
     bool owned = os_file_owned(tmp);
     bool isdir = os_isdir(tmp);
 #ifdef UNIX
@@ -3340,7 +3347,7 @@ static void vim_mktempdir(void)
     // Couldn't set `vim_tempdir` to `path` so remove created directory.
     os_rmdir(path);
   }
-  (void)umask(umask_save);
+  umask(umask_save);
 }
 
 /// Core part of "readdir()" function.

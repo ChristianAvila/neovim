@@ -6,7 +6,7 @@
 
 #include "klib/kvec.h"
 #include "nvim/func_attr.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 
 #define ARRAY_DICT_INIT KV_INITIAL_VALUE
 #define STRING_INIT { .data = NULL, .size = 0 }
@@ -105,6 +105,14 @@ typedef enum {
   kObjectTypeTabpage,
 } ObjectType;
 
+/// Value by which objects represented as EXT type are shifted
+///
+/// Subtracted when packing, added when unpacking. Used to allow moving
+/// buffer/window/tabpage block inside ObjectType enum. This block yet cannot be
+/// split or reordered.
+#define EXT_OBJECT_TYPE_SHIFT kObjectTypeBuffer
+#define EXT_OBJECT_TYPE_MAX (kObjectTypeTabpage - EXT_OBJECT_TYPE_SHIFT)
+
 struct object {
   ObjectType type;
   union {
@@ -124,6 +132,7 @@ struct key_value_pair {
 };
 
 typedef uint64_t OptionalKeys;
+typedef Integer HLGroupID;
 
 // this is the prefix of all keysets with optional keys
 typedef struct {
@@ -135,6 +144,7 @@ typedef struct {
   size_t ptr_off;
   ObjectType type;  // kObjectTypeNil == untyped
   int opt_index;
+  bool is_hlgroup;
 } KeySetLink;
 
 typedef KeySetLink *(*FieldHashfn)(const char *str, size_t len);

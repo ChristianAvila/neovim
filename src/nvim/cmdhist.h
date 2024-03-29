@@ -1,9 +1,10 @@
 #pragma once
 
-#include "nvim/cmdexpand_defs.h"
+#include "nvim/cmdexpand_defs.h"  // IWYU pragma: keep
 #include "nvim/eval/typval_defs.h"
-#include "nvim/ex_cmds_defs.h"
-#include "nvim/os/time.h"
+#include "nvim/ex_cmds_defs.h"  // IWYU pragma: keep
+#include "nvim/os/time_defs.h"
+#include "nvim/types_defs.h"  // IWYU pragma: keep
 
 /// Present history tables
 typedef enum {
@@ -16,11 +17,10 @@ typedef enum {
   HIST_DEBUG,         ///< Debug commands.
 } HistoryType;
 
-/// Number of history tables
-#define HIST_COUNT      (HIST_DEBUG + 1)
+enum { HIST_COUNT = HIST_DEBUG + 1, };  ///< Number of history tables
 
 /// History entry definition
-typedef struct hist_entry {
+typedef struct {
   int hisnum;           ///< Entry identifier number.
   char *hisstr;         ///< Actual entry, separator char after the NUL.
   Timestamp timestamp;  ///< Time when entry was added.

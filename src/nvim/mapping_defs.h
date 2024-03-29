@@ -3,7 +3,8 @@
 #include <stdbool.h>
 
 #include "nvim/eval/typval_defs.h"
-#include "nvim/types.h"
+
+enum { MAXMAPLEN = 50, };  ///< Maximum length of key sequence to be mapped.
 
 /// Structure used for mappings and abbreviations.
 typedef struct mapblock mapblock_T;

@@ -197,14 +197,14 @@ func Test_syntax_completion()
   " Check that clearing "Aap" avoids it showing up before Boolean.
   hi @Aap ctermfg=blue
   call feedkeys(":syn list \<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_match('^"syn list @Aap @boolean @character ', @:)
+  call assert_match('^"syn list @Aap @attribute @attribute.builtin @boolean @character ', @:)
   hi clear @Aap
 
   call feedkeys(":syn list \<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_match('^"syn list @boolean @character ', @:)
+  call assert_match('^"syn list @attribute @attribute.builtin @boolean @character ', @:)
 
   call feedkeys(":syn match \<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_match('^"syn match @boolean @character ', @:)
+  call assert_match('^"syn match @attribute @attribute.builtin @boolean @character ', @:)
 
   syn cluster Aax contains=Aap
   call feedkeys(":syn list @A\<C-A>\<C-B>\"\<CR>", 'tx')
@@ -214,7 +214,7 @@ endfunc
 func Test_echohl_completion()
   call feedkeys(":echohl no\<C-A>\<C-B>\"\<CR>", 'tx')
   " call assert_equal('"echohl NonText Normal none', @:)
-  call assert_equal('"echohl NonText Normal NormalFloat none', @:)
+  call assert_equal('"echohl NonText Normal NormalFloat NormalNC none', @:)
 endfunc
 
 func Test_syntax_arg_skipped()

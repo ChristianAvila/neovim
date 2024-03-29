@@ -740,6 +740,27 @@ func Test_WinClosed_switch_tab()
   %bwipe!
 endfunc
 
+" This used to trigger WinClosed twice for the same window, and the window's
+" buffer was NULL in the second autocommand.
+func Test_WinClosed_BufUnload_close_other()
+  tabnew
+  let g:tab = tabpagenr()
+  let g:buf = bufnr()
+  new
+  setlocal bufhidden=wipe
+  augroup test-WinClosed
+    autocmd BufUnload * ++once exe g:buf .. 'bwipe!'
+    autocmd WinClosed * call tabpagebuflist(g:tab)
+  augroup END
+  close
+
+  unlet g:tab
+  unlet g:buf
+  autocmd! test-WinClosed
+  augroup! test-WinClosed
+  %bwipe!
+endfunc
+
 func s:AddAnAutocmd()
   augroup vimBarTest
     au BufReadCmd * echo 'hello'
@@ -2533,7 +2554,25 @@ func Test_TextChangedI_with_setline()
   call assert_equal('', getline(1))
   call assert_equal('', getline(2))
 
-  call test_override('starting', 0)
+  call test_override('char_avail', 0)
+  bwipe!
+endfunc
+
+func Test_TextChanged_with_norm()
+  " For unknown reason this fails on MS-Windows
+  CheckNotMSWindows
+  CheckFeature terminal
+  let buf = term_start([GetVimProg(), '--clean', '-c', 'set noswapfile'], {'term_rows': 3})
+  call assert_equal('running', term_getstatus(buf))
+  call term_sendkeys(buf, ":let g:a=0\<cr>")
+  call term_wait(buf, 50)
+  call term_sendkeys(buf, ":au! TextChanged * :let g:a+=1\<cr>")
+  call term_wait(buf, 50)
+  call term_sendkeys(buf, ":norm! ia\<cr>")
+  call term_wait(buf, 50)
+  call term_sendkeys(buf, ":echo g:a\<cr>")
+  call term_wait(buf, 50)
+  call WaitForAssert({-> assert_match('^1.*$', term_getline(buf, 3))})
   bwipe!
 endfunc
 
@@ -3656,8 +3695,6 @@ func Test_mode_changes()
   call assert_equal(len(g:mode_seq) - 1, g:index)
   call assert_equal(2, g:n_to_c)
   call assert_equal(2, g:c_to_n)
-  unlet g:n_to_c
-  unlet g:c_to_n
 
   let g:n_to_v = 0
   au ModeChanged n:v let g:n_to_v += 1
@@ -3668,8 +3705,10 @@ func Test_mode_changes()
   call assert_equal(len(g:mode_seq) - 1, g:index)
   call assert_equal(1, g:n_to_v)
   call assert_equal(1, g:v_to_n)
-  unlet g:n_to_v
-  unlet g:v_to_n
+
+  let g:mode_seq += ['c', 'cr', 'c', 'cr', 'n']
+  call feedkeys(":\<Insert>\<Insert>\<Insert>\<CR>", 'tnix')
+  call assert_equal(len(g:mode_seq) - 1, g:index)
 
   au! ModeChanged
   delfunc TestMode
@@ -3684,6 +3723,10 @@ func Test_mode_changes()
   unlet! g:i_to_n
   unlet! g:nori_to_any
   unlet! g:i_to_any
+  unlet! g:n_to_c
+  unlet! g:c_to_n
+  unlet! g:n_to_v
+  unlet! g:v_to_n
 endfunc
 
 func Test_recursive_ModeChanged()
@@ -3816,6 +3859,102 @@ func Test_autocmd_shortmess()
   call assert_equal(3, bytes->len())
 
   delfunc SetupVimTest_shm
+endfunc
+
+func Test_autocmd_invalidates_undo_on_textchanged()
+  CheckRunVimInTerminal
+  let script =<< trim END
+    set hidden
+    " create quickfix list (at least 2 lines to move line)
+    vimgrep /u/j %
+
+    " enter quickfix window
+    cwindow
+
+    " set modifiable
+    setlocal modifiable
+
+    " set autocmd to clear quickfix list
+
+    autocmd! TextChanged <buffer> call setqflist([])
+    " move line
+    move+1
+  END
+  call writefile(script, 'XTest_autocmd_invalidates_undo_on_textchanged', 'D')
+  let buf = RunVimInTerminal('XTest_autocmd_invalidates_undo_on_textchanged', {'rows': 20})
+  call term_sendkeys(buf, ":so %\<cr>")
+  call term_sendkeys(buf, "G")
+  call WaitForAssert({-> assert_match('^XTest_autocmd_invalidates_undo_on_textchanged\s*$', term_getline(buf, 20))}, 1000)
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_autocmd_creates_new_buffer_on_bufleave()
+  e a.txt
+  e b.txt
+  setlocal bufhidden=wipe
+  autocmd BufLeave <buffer> diffsplit c.txt
+  bn
+  call assert_equal(1, winnr('$'))
+  call assert_equal('a.txt', bufname('%'))
+  bw a.txt
+  bw c.txt
+endfunc
+
+" Ensure `expected` was just recently written as a Vim session
+func s:assert_session_path(expected)
+  call assert_equal(a:expected, v:this_session)
+endfunc
+
+" Check for `expected` after a session is written to-disk.
+func s:watch_for_session_path(expected)
+  execute 'autocmd SessionWritePost * ++once execute "call s:assert_session_path(\"'
+        \ . a:expected
+        \ . '\")"'
+endfunc
+
+" Ensure v:this_session gets the full session path, if explicitly stated
+func Test_explicit_session_absolute_path()
+  %bwipeout!
+
+  let directory = getcwd()
+
+  let v:this_session = ""
+  let name = "some_file.vim"
+  let expected = fnamemodify(name, ":p")
+  call s:watch_for_session_path(expected)
+  execute "mksession! " .. expected
+
+  call delete(expected)
+endfunc
+
+" Ensure v:this_session gets the full session path, if explicitly stated
+func Test_explicit_session_relative_path()
+  %bwipeout!
+
+  let directory = getcwd()
+
+  let v:this_session = ""
+  let name = "some_file.vim"
+  let expected = fnamemodify(name, ":p")
+  call s:watch_for_session_path(expected)
+  execute "mksession! " .. name
+
+  call delete(expected)
+endfunc
+
+" Ensure v:this_session gets the full session path, if not specified
+func Test_implicit_session()
+  %bwipeout!
+
+  let directory = getcwd()
+
+  let v:this_session = ""
+  let expected = fnamemodify("Session.vim", ":p")
+  call s:watch_for_session_path(expected)
+  mksession!
+
+  call delete(expected)
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

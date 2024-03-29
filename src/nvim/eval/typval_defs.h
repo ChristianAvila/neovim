@@ -2,19 +2,22 @@
 
 #include <inttypes.h>
 #include <limits.h>
+#include <stdbool.h>
 
-#include "nvim/garray.h"
-#include "nvim/hashtab.h"
-#include "nvim/lib/queue.h"
-#include "nvim/pos.h"
-#include "nvim/types.h"
+#include "nvim/garray_defs.h"
+#include "nvim/hashtab_defs.h"
+#include "nvim/lib/queue_defs.h"
+#include "nvim/pos_defs.h"
+#include "nvim/types_defs.h"
 
 /// Type used for Vimscript VAR_NUMBER values
 typedef int64_t varnumber_T;
 typedef uint64_t uvarnumber_T;
 
-/// Refcount for dict or list that should not be freed
-enum { DO_NOT_FREE_CNT = (INT_MAX / 2), };
+enum {
+  /// Refcount for dict or list that should not be freed
+  DO_NOT_FREE_CNT = (INT_MAX / 2),
+};
 
 /// Additional values for tv_list_alloc() len argument
 enum ListLenSpecials {
@@ -72,7 +75,7 @@ typedef struct {
 #define CALLBACK_NONE ((Callback)CALLBACK_INIT)
 
 /// Structure holding dictionary watcher
-typedef struct dict_watcher {
+typedef struct {
   Callback callback;
   char *key_pattern;
   size_t key_pattern_len;
@@ -291,12 +294,9 @@ typedef struct {
   uint64_t channel_id;     /// Only used when script_id is SID_API_CLIENT.
 } LastSet;
 
-/// Maximum number of function arguments
-enum { MAX_FUNC_ARGS = 20, };
-/// Short variable name length
-enum { VAR_SHORT_LEN = 20, };
-/// Number of fixed variables used for arguments
-enum { FIXVAR_CNT = 12, };
+enum { MAX_FUNC_ARGS = 20, };  ///< Maximum number of function arguments
+enum { VAR_SHORT_LEN = 20, };  ///< Short variable name length
+enum { FIXVAR_CNT = 12, };     ///< Number of fixed variables used for arguments
 
 /// Structure to hold info for a function that is currently being executed.
 typedef struct funccall_S funccall_T;

@@ -2,27 +2,27 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <lauxlib.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "auto/config.h"
-#include "lauxlib.h"
-#include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/eval.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/garray.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
 #include "nvim/keycodes.h"
 #include "nvim/lua/executor.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mapping.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
@@ -33,7 +33,7 @@
 #include "nvim/runtime.h"
 #include "nvim/strings.h"
 #include "nvim/usercmd.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 #include "nvim/window.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -76,6 +76,7 @@ static const char *command_complete[] = {
   [EXPAND_HELP] = "help",
   [EXPAND_HIGHLIGHT] = "highlight",
   [EXPAND_HISTORY] = "history",
+  [EXPAND_KEYMAP] = "keymap",
 #ifdef HAVE_WORKING_LIBINTL
   [EXPAND_LOCALES] = "locale",
 #endif
@@ -583,7 +584,7 @@ static void uc_list(char *name, size_t name_len)
       msg_outtrans(IObuff, 0);
 
       if (cmd->uc_luaref != LUA_NOREF) {
-        char *fn = nlua_funcref_str(cmd->uc_luaref);
+        char *fn = nlua_funcref_str(cmd->uc_luaref, NULL);
         msg_puts_attr(fn, HL_ATTR(HLF_8));
         xfree(fn);
         // put the description on a new line
@@ -873,7 +874,7 @@ int uc_add_command(char *name, size_t name_len, const char *rep, uint32_t argt, 
   char *rep_buf = NULL;
   garray_T *gap;
 
-  replace_termcodes(rep, strlen(rep), &rep_buf, 0, 0, NULL, CPO_TO_CPO_FLAGS);
+  replace_termcodes(rep, strlen(rep), &rep_buf, 0, 0, NULL, p_cpo);
   if (rep_buf == NULL) {
     // Can't replace termcodes - try using the string as is
     rep_buf = xstrdup(rep);
@@ -1133,6 +1134,20 @@ bool uc_split_args_iter(const char *arg, size_t arglen, size_t *end, char *buf, 
 
   *len = l;
   return true;
+}
+
+size_t uc_nargs_upper_bound(const char *arg, size_t arglen)
+{
+  bool was_white = true;  // space before first arg
+  size_t nargs = 0;
+  for (size_t i = 0; i < arglen; i++) {
+    bool is_white = ascii_iswhite(arg[i]);
+    if (was_white && !is_white) {
+      nargs++;
+    }
+    was_white = is_white;
+  }
+  return nargs;
 }
 
 /// split and quote args for <f-args>
@@ -1709,8 +1724,8 @@ int do_ucmd(exarg_T *eap, bool preview)
     save_current_sctx = current_sctx;
     current_sctx.sc_sid = cmd->uc_script_ctx.sc_sid;
   }
-  (void)do_cmdline(buf, eap->getline, eap->cookie,
-                   DOCMD_VERBOSE|DOCMD_NOWAIT|DOCMD_KEYTYPED);
+  do_cmdline(buf, eap->getline, eap->cookie,
+             DOCMD_VERBOSE|DOCMD_NOWAIT|DOCMD_KEYTYPED);
 
   // Careful: Do not use "cmd" here, it may have become invalid if a user
   // command was added.
@@ -1729,25 +1744,24 @@ int do_ucmd(exarg_T *eap, bool preview)
 /// @param buf  Buffer to inspect, or NULL to get global commands.
 ///
 /// @return Map of maps describing commands
-Dictionary commands_array(buf_T *buf)
+Dictionary commands_array(buf_T *buf, Arena *arena)
 {
-  Dictionary rv = ARRAY_DICT_INIT;
-  char str[20];
   garray_T *gap = (buf == NULL) ? &ucmds : &buf->b_ucmds;
 
+  Dictionary rv = arena_dict(arena, (size_t)gap->ga_len);
   for (int i = 0; i < gap->ga_len; i++) {
     char arg[2] = { 0, 0 };
-    Dictionary d = ARRAY_DICT_INIT;
+    Dictionary d = arena_dict(arena, 14);
     ucmd_T *cmd = USER_CMD_GA(gap, i);
 
-    PUT(d, "name", CSTR_TO_OBJ(cmd->uc_name));
-    PUT(d, "definition", CSTR_TO_OBJ(cmd->uc_rep));
-    PUT(d, "script_id", INTEGER_OBJ(cmd->uc_script_ctx.sc_sid));
-    PUT(d, "bang", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_BANG)));
-    PUT(d, "bar", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_TRLBAR)));
-    PUT(d, "register", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_REGSTR)));
-    PUT(d, "keepscript", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_KEEPSCRIPT)));
-    PUT(d, "preview", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_PREVIEW)));
+    PUT_C(d, "name", CSTR_AS_OBJ(cmd->uc_name));
+    PUT_C(d, "definition", CSTR_AS_OBJ(cmd->uc_rep));
+    PUT_C(d, "script_id", INTEGER_OBJ(cmd->uc_script_ctx.sc_sid));
+    PUT_C(d, "bang", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_BANG)));
+    PUT_C(d, "bar", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_TRLBAR)));
+    PUT_C(d, "register", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_REGSTR)));
+    PUT_C(d, "keepscript", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_KEEPSCRIPT)));
+    PUT_C(d, "preview", BOOLEAN_OBJ(!!(cmd->uc_argt & EX_PREVIEW)));
 
     switch (cmd->uc_argt & (EX_EXTRA | EX_NOSPC | EX_NEEDARG)) {
     case 0:
@@ -1761,49 +1775,47 @@ Dictionary commands_array(buf_T *buf)
     case (EX_EXTRA | EX_NOSPC | EX_NEEDARG):
       arg[0] = '1'; break;
     }
-    PUT(d, "nargs", CSTR_TO_OBJ(arg));
+    PUT_C(d, "nargs", CSTR_TO_ARENA_OBJ(arena, arg));
 
     char *cmd_compl = get_command_complete(cmd->uc_compl);
-    PUT(d, "complete", (cmd_compl == NULL
-                        ? NIL : CSTR_TO_OBJ(cmd_compl)));
-    PUT(d, "complete_arg", cmd->uc_compl_arg == NULL
-        ? NIL : CSTR_TO_OBJ(cmd->uc_compl_arg));
+    PUT_C(d, "complete", (cmd_compl == NULL
+                          ? NIL : CSTR_AS_OBJ(cmd_compl)));
+    PUT_C(d, "complete_arg", cmd->uc_compl_arg == NULL
+          ? NIL : CSTR_AS_OBJ(cmd->uc_compl_arg));
 
     Object obj = NIL;
     if (cmd->uc_argt & EX_COUNT) {
       if (cmd->uc_def >= 0) {
-        snprintf(str, sizeof(str), "%" PRId64, cmd->uc_def);
-        obj = CSTR_TO_OBJ(str);    // -count=N
+        obj = STRING_OBJ(arena_printf(arena, "%" PRId64, cmd->uc_def));    // -count=N
       } else {
-        obj = CSTR_TO_OBJ("0");    // -count
+        obj = CSTR_AS_OBJ("0");    // -count
       }
     }
-    PUT(d, "count", obj);
+    PUT_C(d, "count", obj);
 
     obj = NIL;
     if (cmd->uc_argt & EX_RANGE) {
       if (cmd->uc_argt & EX_DFLALL) {
-        obj = CSTR_TO_OBJ("%");    // -range=%
+        obj = STATIC_CSTR_AS_OBJ("%");    // -range=%
       } else if (cmd->uc_def >= 0) {
-        snprintf(str, sizeof(str), "%" PRId64, cmd->uc_def);
-        obj = CSTR_TO_OBJ(str);    // -range=N
+        obj = STRING_OBJ(arena_printf(arena, "%" PRId64, cmd->uc_def));    // -range=N
       } else {
-        obj = CSTR_TO_OBJ(".");    // -range
+        obj = STATIC_CSTR_AS_OBJ(".");    // -range
       }
     }
-    PUT(d, "range", obj);
+    PUT_C(d, "range", obj);
 
     obj = NIL;
     for (int j = 0; addr_type_complete[j].expand != ADDR_NONE; j++) {
       if (addr_type_complete[j].expand != ADDR_LINES
           && addr_type_complete[j].expand == cmd->uc_addr_type) {
-        obj = CSTR_TO_OBJ(addr_type_complete[j].name);
+        obj = CSTR_AS_OBJ(addr_type_complete[j].name);
         break;
       }
     }
-    PUT(d, "addr", obj);
+    PUT_C(d, "addr", obj);
 
-    PUT(rv, cmd->uc_name, DICTIONARY_OBJ(d));
+    PUT_C(rv, cmd->uc_name, DICTIONARY_OBJ(d));
   }
   return rv;
 }

@@ -3,13 +3,15 @@
 #include <assert.h>
 #include <ctype.h>
 #include <inttypes.h>
+#include <lauxlib.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "lauxlib.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
+#include "nvim/autocmd_defs.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/debugger.h"
@@ -22,16 +24,19 @@
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
+#include "nvim/ex_eval_defs.h"
 #include "nvim/ex_getln.h"
 #include "nvim/garray.h"
+#include "nvim/garray_defs.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/getchar_defs.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/hashtab.h"
 #include "nvim/insexpand.h"
 #include "nvim/keycodes.h"
 #include "nvim/lua/executor.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
@@ -40,12 +45,14 @@
 #include "nvim/path.h"
 #include "nvim/profile.h"
 #include "nvim/regexp.h"
+#include "nvim/regexp_defs.h"
 #include "nvim/runtime.h"
 #include "nvim/search.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 #include "nvim/ui.h"
-#include "nvim/vim.h"
+#include "nvim/ui_defs.h"
+#include "nvim/vim_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "eval/userfunc.c.generated.h"
@@ -104,8 +111,6 @@ static int get_function_args(char **argp, char endchar, garray_T *newargs, int *
   bool mustend = false;
   char *arg = *argp;
   char *p = arg;
-  uint8_t c;
-  int i;
 
   if (newargs != NULL) {
     ga_init(newargs, (int)sizeof(char *), 3);
@@ -142,12 +147,12 @@ static int get_function_args(char **argp, char endchar, garray_T *newargs, int *
       }
       if (newargs != NULL) {
         ga_grow(newargs, 1);
-        c = (uint8_t)(*p);
+        uint8_t c = (uint8_t)(*p);
         *p = NUL;
         arg = xstrdup(arg);
 
         // Check for duplicate argument name.
-        for (i = 0; i < newargs->ga_len; i++) {
+        for (int i = 0; i < newargs->ga_len; i++) {
           if (strcmp(((char **)(newargs->ga_data))[i], arg) == 0) {
             semsg(_("E853: Duplicate argument name: %s"), arg);
             xfree(arg);
@@ -173,7 +178,7 @@ static int get_function_args(char **argp, char endchar, garray_T *newargs, int *
           while (p > expr && ascii_iswhite(p[-1])) {
             p--;
           }
-          c = (uint8_t)(*p);
+          uint8_t c = (uint8_t)(*p);
           *p = NUL;
           expr = xstrdup(expr);
           ((char **)(default_args->ga_data))[default_args->ga_len] = expr;
@@ -325,7 +330,6 @@ int get_lambda_tv(char **arg, typval_T *rettv, evalarg_T *evalarg)
 
   if (evaluate) {
     int flags = 0;
-    char *p;
     garray_T newlines;
 
     char *name = get_lambda_name();
@@ -338,7 +342,7 @@ int get_lambda_tv(char **arg, typval_T *rettv, evalarg_T *evalarg)
 
     // Add "return " before the expression.
     size_t len = (size_t)(7 + end - start + 1);
-    p = xmalloc(len);
+    char *p = xmalloc(len);
     ((char **)(newlines.ga_data))[newlines.ga_len++] = p;
     STRCPY(p, "return ");
     xstrlcpy(p + 7, start, (size_t)(end - start) + 1);
@@ -671,9 +675,7 @@ static void cat_func_name(char *buf, size_t buflen, ufunc_T *fp)
 /// Add a number variable "name" to dict "dp" with value "nr".
 static void add_nr_var(dict_T *dp, dictitem_T *v, char *name, varnumber_T nr)
 {
-#ifndef __clang_analyzer__
   STRCPY(v->di_key, name);
-#endif
   v->di_flags = DI_FLAGS_RO | DI_FLAGS_FIX;
   hash_add(&dp->dv_hashtab, v->di_key);
   v->di_tv.v_type = VAR_NUMBER;
@@ -920,11 +922,9 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
   FUNC_ATTR_NONNULL_ARG(1, 3, 4)
 {
   bool using_sandbox = false;
-  int save_did_emsg;
   static int depth = 0;
   dictitem_T *v;
   int fixvar_idx = 0;           // index in fc_fixvar[]
-  int ai;
   bool islambda = false;
   char numbuf[NUMBUFLEN];
   char *name;
@@ -932,7 +932,7 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
   int tv_to_free_len = 0;
   proftime_T wait_start;
   proftime_T call_start;
-  int started_profiling = false;
+  bool started_profiling = false;
   bool did_save_redo = false;
   save_redo_T save_redo;
 
@@ -976,10 +976,8 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
     // Set l:self to "selfdict".  Use "name" to avoid a warning from
     // some compiler that checks the destination size.
     v = (dictitem_T *)&fc->fc_fixvar[fixvar_idx++];
-#ifndef __clang_analyzer__
     name = (char *)v->di_key;
     STRCPY(name, "self");
-#endif
     v->di_flags = DI_FLAGS_RO | DI_FLAGS_FIX;
     hash_add(&fc->fc_l_vars.dv_hashtab, v->di_key);
     v->di_tv.v_type = VAR_DICT;
@@ -1002,10 +1000,8 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
     // Use "name" to avoid a warning from some compiler that checks the
     // destination size.
     v = (dictitem_T *)&fc->fc_fixvar[fixvar_idx++];
-#ifndef __clang_analyzer__
     name = (char *)v->di_key;
     STRCPY(name, "000");
-#endif
     v->di_flags = DI_FLAGS_RO | DI_FLAGS_FIX;
     hash_add(&fc->fc_l_avars.dv_hashtab, v->di_key);
     v->di_tv.v_type = VAR_LIST;
@@ -1031,7 +1027,7 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
     bool isdefault = false;
     typval_T def_rettv;
 
-    ai = i - fp->uf_args.ga_len;
+    int ai = i - fp->uf_args.ga_len;
     if (ai < 0) {
       // named argument a:name
       name = FUNCARG(fp, i);
@@ -1174,7 +1170,7 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
 
   const sctx_T save_current_sctx = current_sctx;
   current_sctx = fp->uf_script_ctx;
-  save_did_emsg = did_emsg;
+  int save_did_emsg = did_emsg;
   did_emsg = false;
 
   if (default_arg_err && (fp->uf_flags & FC_ABORT)) {
@@ -1185,7 +1181,7 @@ void call_user_func(ufunc_T *fp, int argcount, typval_T *argvars, typval_T *rett
     // A Lambda always has the command "return {expr}".  It is much faster
     // to evaluate {expr} directly.
     ex_nesting_level++;
-    (void)eval1(&p, rettv, &EVALARG_EVALUATE);
+    eval1(&p, rettv, &EVALARG_EVALUATE);
     ex_nesting_level--;
   } else {
     // call do_cmdline() to execute the lines
@@ -2079,7 +2075,7 @@ char *save_function_name(char **name, bool skip, int flags, funcdict_T *fudi)
 
   if (strncmp(p, "<lambda>", 8) == 0) {
     p += 8;
-    (void)getdigits(&p, false, 0);
+    getdigits(&p, false, 0);
     saved = xmemdupz(*name, (size_t)(p - *name));
     if (fudi != NULL) {
       CLEAR_POINTER(fudi);
@@ -2298,17 +2294,28 @@ void ex_function(exarg_T *eap)
       arg = fudi.fd_newkey;
     }
     if (arg != NULL && (fudi.fd_di == NULL || !tv_is_func(fudi.fd_di->di_tv))) {
-      int j = ((uint8_t)(*arg) == K_SPECIAL) ? 3 : 0;
-      while (arg[j] != NUL && (j == 0 ? eval_isnamec1(arg[j]) : eval_isnamec(arg[j]))) {
-        j++;
+      char *name_base = arg;
+      if ((uint8_t)(*arg) == K_SPECIAL) {
+        name_base = vim_strchr(arg, '_');
+        if (name_base == NULL) {
+          name_base = arg + 3;
+        } else {
+          name_base++;
+        }
       }
-      if (arg[j] != NUL) {
+      int i;
+      for (i = 0; name_base[i] != NUL && (i == 0
+                                          ? eval_isnamec1(name_base[i])
+                                          : eval_isnamec(name_base[i])); i++) {}
+      if (name_base[i] != NUL) {
         emsg_funcname(e_invarg2, arg);
+        goto ret_free;
       }
     }
     // Disallow using the g: dict.
     if (fudi.fd_dict != NULL && fudi.fd_dict->dv_scope == VAR_DEF_SCOPE) {
       emsg(_("E862: Cannot use g: here"));
+      goto ret_free;
     }
   }
 
@@ -3043,7 +3050,7 @@ static inline bool fc_referenced(const funccall_T *const fc)
 
 /// @return true if items in "fc" do not have "copyID".  That means they are not
 /// referenced from anywhere that is in use.
-static int can_free_funccal(funccall_T *fc, int copyID)
+static bool can_free_funccal(funccall_T *fc, int copyID)
 {
   return fc->fc_l_varlist.lv_copyID != copyID
          && fc->fc_l_vars.dv_copyID != copyID
@@ -3056,7 +3063,7 @@ void ex_return(exarg_T *eap)
 {
   char *arg = eap->arg;
   typval_T rettv;
-  int returning = false;
+  bool returning = false;
 
   if (current_funccal == NULL) {
     emsg(_("E133: :return not inside a function"));
@@ -3403,7 +3410,7 @@ end:
 ///
 /// @return  true when the return can be carried out,
 ///          false when the return gets pending.
-int do_return(exarg_T *eap, int reanimate, int is_cmd, void *rettv)
+bool do_return(exarg_T *eap, bool reanimate, bool is_cmd, void *rettv)
 {
   cstack_T *const cstack = eap->cstack;
 
@@ -3668,7 +3675,7 @@ bool free_unref_funccal(int copyID, int testing)
   if (did_free_funccal) {
     // When a funccal was freed some more items might be garbage
     // collected, so run again.
-    (void)garbage_collect(testing);
+    garbage_collect(testing);
   }
   return did_free;
 }
@@ -3824,7 +3831,7 @@ bool set_ref_in_previous_funccal(int copyID)
     fc->fc_copyID = copyID + 1;
     if (set_ref_in_ht(&fc->fc_l_vars.dv_hashtab, copyID + 1, NULL)
         || set_ref_in_ht(&fc->fc_l_avars.dv_hashtab, copyID + 1, NULL)
-        || set_ref_in_list(&fc->fc_l_varlist, copyID + 1, NULL)) {
+        || set_ref_in_list_items(&fc->fc_l_varlist, copyID + 1, NULL)) {
       return true;
     }
   }
@@ -3837,7 +3844,7 @@ static bool set_ref_in_funccal(funccall_T *fc, int copyID)
     fc->fc_copyID = copyID;
     if (set_ref_in_ht(&fc->fc_l_vars.dv_hashtab, copyID, NULL)
         || set_ref_in_ht(&fc->fc_l_avars.dv_hashtab, copyID, NULL)
-        || set_ref_in_list(&fc->fc_l_varlist, copyID, NULL)
+        || set_ref_in_list_items(&fc->fc_l_varlist, copyID, NULL)
         || set_ref_in_func(NULL, fc->fc_func, copyID)) {
       return true;
     }

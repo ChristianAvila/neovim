@@ -1,15 +1,12 @@
 #pragma once
 
-#include <stdbool.h>
-#include <uv.h>
+#include <stdint.h>  // IWYU pragma: keep
 
-#include "nvim/api/private/defs.h"
-#include "nvim/channel.h"
-#include "nvim/event/multiqueue.h"
-#include "nvim/event/process.h"
-#include "nvim/event/socket.h"
-#include "nvim/macros.h"
-#include "nvim/vim.h"
+#include "nvim/api/private/defs.h"  // IWYU pragma: keep
+#include "nvim/event/defs.h"
+#include "nvim/macros_defs.h"
+#include "nvim/memory_defs.h"  // IWYU pragma: keep
+#include "nvim/msgpack_rpc/channel_defs.h"  // IWYU pragma: keep
 
 #define METHOD_MAXLEN 512
 

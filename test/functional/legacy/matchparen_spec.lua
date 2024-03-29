@@ -12,11 +12,6 @@ describe('matchparen', function()
   it('redraws properly after scrolling with scrolloff=1', function()
     local screen = Screen.new(30, 7)
     screen:attach()
-    screen:set_default_attr_ids({
-      [1] = {bold = true},
-      [2] = {background = Screen.colors.LightGrey},
-    })
-
     exec([[
       source $VIMRUNTIME/plugin/matchparen.vim
       set scrolloff=1
@@ -24,15 +19,15 @@ describe('matchparen', function()
       call cursor(5, 1)
     ]])
 
-    feed('V<c-d><c-d>')
+    feed('V<c-d><c-d>3j')
     screen:expect([[
-      {2:{}                             |
-      {2:}}                             |
-      {2:{}                             |
-      {2:f}                             |
+      {17:{}                             |
+      {17:}}                             |
+      {17:{}                             |
+      {17:f}                             |
       ^g                             |
       }                             |
-      {1:-- VISUAL LINE --}             |
+      {5:-- VISUAL LINE --}             |
     ]])
   end)
 
@@ -40,23 +35,19 @@ describe('matchparen', function()
   it('matchparen highlight is cleared when switching buffer', function()
     local screen = Screen.new(20, 5)
     screen:set_default_attr_ids({
-      [0] = {bold = true, foreground = Screen.colors.Blue},
-      [1] = {background = Screen.colors.Cyan},
+      [0] = { bold = true, foreground = Screen.colors.Blue },
+      [1] = { background = Screen.colors.Cyan },
     })
     screen:attach()
 
     local screen1 = [[
       {1:^()}                  |
-      {0:~                   }|
-      {0:~                   }|
-      {0:~                   }|
+      {0:~                   }|*3
                           |
     ]]
     local screen2 = [[
       ^aa                  |
-      {0:~                   }|
-      {0:~                   }|
-      {0:~                   }|
+      {0:~                   }|*3
                           |
     ]]
 
@@ -65,13 +56,15 @@ describe('matchparen', function()
       set hidden
       call setline(1, ['()'])
       normal 0
+
+      func OtherBuffer()
+         enew
+         exe "normal iaa\<Esc>0"
+      endfunc
     ]])
     screen:expect(screen1)
 
-    exec([[
-      enew
-      exe "normal iaa\<Esc>0"
-    ]])
+    exec('call OtherBuffer()')
     screen:expect(screen2)
 
     feed('<C-^>')
@@ -81,17 +74,43 @@ describe('matchparen', function()
     screen:expect(screen2)
   end)
 
+  -- oldtest: Test_matchparen_win_execute()
+  it('matchparen highlight when switching buffer in win_execute()', function()
+    local screen = Screen.new(20, 5)
+    screen:set_default_attr_ids({
+      [1] = { background = Screen.colors.Cyan },
+      [2] = { reverse = true, bold = true },
+      [3] = { reverse = true },
+    })
+    screen:attach()
+
+    exec([[
+      source $VIMRUNTIME/plugin/matchparen.vim
+      let s:win = win_getid()
+      call setline(1, '{}')
+      split
+
+      func SwitchBuf()
+        call win_execute(s:win, 'enew | buffer #')
+      endfunc
+    ]])
+    screen:expect([[
+      {1:^{}}                  |
+      {2:[No Name] [+]       }|
+      {}                  |
+      {3:[No Name] [+]       }|
+                          |
+    ]])
+
+    -- Switching buffer away and back shouldn't change matchparen highlight.
+    exec('call SwitchBuf()')
+    screen:expect_unchanged()
+  end)
+
   -- oldtest: Test_matchparen_pum_clear()
   it('is cleared when completion popup is shown', function()
     local screen = Screen.new(30, 9)
     screen:attach()
-    screen:set_default_attr_ids({
-      [0] = {bold = true, foreground = Screen.colors.Blue};
-      [1] = {background = Screen.colors.Plum1};
-      [2] = {background = Screen.colors.Grey};
-      [3] = {bold = true};
-      [4] = {bold = true, foreground = Screen.colors.SeaGreen};
-    })
 
     exec([[
       source $VIMRUNTIME/plugin/matchparen.vim
@@ -101,16 +120,18 @@ describe('matchparen', function()
     ]])
 
     feed('i<C-X><C-N><C-N>')
-    screen:expect{grid=[[
+    screen:expect {
+      grid = [[
       aa                            |
       aaa                           |
       aaaa                          |
       (aaa^)                         |
-      {1: aa             }{0:              }|
-      {2: aaa            }{0:              }|
-      {1: aaaa           }{0:              }|
-      {0:~                             }|
-      {3:-- }{4:match 2 of 3}               |
-    ]]}
+      {4: aa             }{1:              }|
+      {12: aaa            }{1:              }|
+      {4: aaaa           }{1:              }|
+      {1:~                             }|
+      {5:-- }{6:match 2 of 3}               |
+    ]],
+    }
   end)
 end)

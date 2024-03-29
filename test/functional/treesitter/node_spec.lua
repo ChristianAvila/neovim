@@ -9,7 +9,7 @@ local assert_alive = helpers.assert_alive
 before_each(clear)
 
 local function lua_eval(lua_expr)
-  return exec_lua("return " .. lua_expr)
+  return exec_lua('return ' .. lua_expr)
 end
 
 describe('treesitter node API', function()
@@ -40,6 +40,20 @@ describe('treesitter node API', function()
     assert_alive()
   end)
 
+  it('get_node() with lang given', function()
+    -- this buffer doesn't have filetype set!
+    insert('local foo = function() end')
+    exec_lua([[
+      node = vim.treesitter.get_node({
+        bufnr = 0,
+        pos = { 0, 6 },  -- on "foo"
+        lang = 'lua',
+      })
+    ]])
+    eq('foo', lua_eval('vim.treesitter.get_node_text(node, 0)'))
+    eq('identifier', lua_eval('node:type()'))
+  end)
+
   it('can move between siblings', function()
     insert([[
       int main(int x, int y, int z) {
@@ -48,14 +62,13 @@ describe('treesitter node API', function()
     ]])
 
     exec_lua([[
-      query = require"vim.treesitter.query"
       parser = vim.treesitter.get_parser(0, "c")
       tree = parser:parse()[1]
       root = tree:root()
       lang = vim.treesitter.language.inspect('c')
 
       function node_text(node)
-        return query.get_node_text(node, 0)
+        return vim.treesitter.get_node_text(node, 0)
       end
     ]])
 

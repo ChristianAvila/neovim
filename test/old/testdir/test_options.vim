@@ -439,6 +439,14 @@ func Test_set_completion()
   call assert_equal('"set syntax=sshdconfig', @:)
   call feedkeys(":set syntax=a\<C-A>\<C-B>\"\<CR>", 'xt')
   call assert_equal('"set syntax=' .. getcompletion('a*', 'syntax')->join(), @:)
+
+  if has('keymap')
+    " Expand values for 'keymap'
+    call feedkeys(":set keymap=acc\<Tab>\<C-B>\"\<CR>", 'xt')
+    call assert_equal('"set keymap=accents', @:)
+    call feedkeys(":set keymap=a\<C-A>\<C-B>\"\<CR>", 'xt')
+    call assert_equal('"set keymap=' .. getcompletion('a*', 'keymap')->join(), @:)
+  endif
 endfunc
 
 " Test handling of expanding individual string option values
@@ -813,7 +821,7 @@ func Test_set_option_errors()
   call assert_fails('set winwidth=9 winminwidth=10', 'E592:')
   set winwidth& winminwidth&
   call assert_fails("set showbreak=\x01", 'E595:')
-  call assert_fails('set t_foo=', 'E846:')
+  " call assert_fails('set t_foo=', 'E846:')
   call assert_fails('set tabstop??', 'E488:')
   call assert_fails('set wrapscan!!', 'E488:')
   call assert_fails('set tabstop&&', 'E488:')
@@ -950,8 +958,10 @@ endfunc
 func Test_set_one_column()
   let out_mult = execute('set all')->split("\n")
   let out_one = execute('set! all')->split("\n")
-  " one column should be two to four times as many lines
-  call assert_inrange(len(out_mult) * 2, len(out_mult) * 4, len(out_one))
+  call assert_true(len(out_mult) < len(out_one))
+  call assert_equal(out_one[0], '--- Options ---')
+  let options = out_one[1:]->mapnew({_, line -> line[2:]})
+  call assert_equal(sort(copy(options)), options)
 endfunc
 
 func Test_set_values()
@@ -1273,6 +1283,44 @@ func Test_shortmess_F2()
   " call assert_fails('call test_getvalue("abc")', 'E475:')
 endfunc
 
+func Test_shortmess_F3()
+  call writefile(['foo'], 'X_dummy', 'D')
+
+  set hidden
+  set autoread
+  e X_dummy
+  e Xotherfile
+  call assert_equal(['foo'], getbufline('X_dummy', 1, '$'))
+  set shortmess+=F
+  echo ''
+
+  if has('nanotime')
+    sleep 10m
+  else
+    sleep 2
+  endif
+  call writefile(['bar'], 'X_dummy')
+  bprev
+  call assert_equal('', Screenline(&lines))
+  call assert_equal(['bar'], getbufline('X_dummy', 1, '$'))
+
+  if has('nanotime')
+    sleep 10m
+  else
+    sleep 2
+  endif
+  call writefile(['baz'], 'X_dummy')
+  checktime
+  call assert_equal('', Screenline(&lines))
+  call assert_equal(['baz'], getbufline('X_dummy', 1, '$'))
+
+  set shortmess&
+  set autoread&
+  set hidden&
+  bwipe X_dummy
+  bwipe Xotherfile
+endfunc
+
 func Test_local_scrolloff()
   set so=5
   set siso=7
@@ -1444,8 +1492,10 @@ endfunc
 
 " Test for setting keycodes using set
 func Test_opt_set_keycode()
-  call assert_fails('set <t_k1=l', 'E474:')
-  call assert_fails('set <Home=l', 'E474:')
+  " call assert_fails('set <t_k1=l', 'E474:')
+  " call assert_fails('set <Home=l', 'E474:')
+  call assert_fails('set <t_k1=l', 'E518:')
+  call assert_fails('set <Home=l', 'E518:')
   set <t_k9>=abcd
   " call assert_equal('abcd', &t_k9)
   set <t_k9>&
@@ -2207,6 +2257,36 @@ func Test_set_wrap()
   call assert_equal(2, winline())
 
   set wrap& smoothscroll& scrolloff&
+endfunc
+
+func Test_delcombine()
+  new
+  set backspace=indent,eol,start
+
+  set delcombine
+  call setline(1, 'β̳̈:β̳̈')
+  normal! 0x
+  call assert_equal('β̈:β̳̈', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal('β̈:β̈', getline(1))
+  normal! 0x
+  call assert_equal('β:β̈', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal('β:β', getline(1))
+  normal! 0x
+  call assert_equal(':β', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal(':', getline(1))
+
+  set nodelcombine
+  call setline(1, 'β̳̈:β̳̈')
+  normal! 0x
+  call assert_equal(':β̳̈', getline(1))
+  exe "normal! A\<BS>"
+  call assert_equal(':', getline(1))
+
+  set backspace& delcombine&
+  bwipe!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

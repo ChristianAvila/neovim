@@ -5,17 +5,21 @@
 #include <string.h>
 #include <uv.h>
 
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/charset.h"
+#include "nvim/event/defs.h"
 #include "nvim/event/loop.h"
+#include "nvim/event/multiqueue.h"
 #include "nvim/event/socket.h"
 #include "nvim/event/stream.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/log.h"
 #include "nvim/main.h"
 #include "nvim/memory.h"
-#include "nvim/os/os.h"
+#include "nvim/os/fs.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/path.h"
+#include "nvim/types_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "event/socket.c.generated.h"
@@ -173,8 +177,7 @@ static void connection_event(void **argv)
 static void connection_cb(uv_stream_t *handle, int status)
 {
   SocketWatcher *watcher = handle->data;
-  CREATE_EVENT(watcher->events, connection_event, 2, watcher,
-               (void *)(uintptr_t)status);
+  CREATE_EVENT(watcher->events, connection_event, watcher, (void *)(uintptr_t)status);
 }
 
 static void close_cb(uv_handle_t *handle)

@@ -4,7 +4,7 @@
 #   pitfalls: https://izzys.casa/2019/02/everything-you-never-wanted-to-know-about-cmake/
 
 # Version should match the tested CMAKE_URL in .github/workflows/build.yml.
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.13)
 
 # Can be removed once minimum version is at least 3.15
 if(POLICY CMP0092)
@@ -13,11 +13,12 @@ endif()
 
 project(nvim C)
 
-if(POLICY CMP0075)
-  cmake_policy(SET CMP0075 NEW)
-endif()
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)
+endif()
+
+if(XCODE)
+  message(FATAL_ERROR [[Xcode generator is not supported. Use "Ninja" or "Unix Makefiles" instead]])
 endif()
 
 # Point CMake at any custom modules we may ship
@@ -36,10 +37,16 @@ include(InstallHelpers)
 include(PreventInTreeBuilds)
 include(Util)
 
+#-------------------------------------------------------------------------------
+# Variables
+#-------------------------------------------------------------------------------
+set(FUNCS_DATA ${PROJECT_BINARY_DIR}/funcs_data.mpack)
+set(TOUCHES_DIR ${PROJECT_BINARY_DIR}/touches)
+
+file(GLOB DOCFILES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/runtime/doc/*.txt)
+
 set_directory_properties(PROPERTIES
   EP_PREFIX "${DEPS_BUILD_DIR}")
-
-set(TOUCHES_DIR ${PROJECT_BINARY_DIR}/touches)
 
 find_program(CCACHE_PRG ccache)
 if(CCACHE_PRG)
@@ -48,6 +55,16 @@ endif()
 
 if(NOT CI_BUILD)
   set(CMAKE_INSTALL_MESSAGE NEVER)
+endif()
+
+if(${CMAKE_VERSION} VERSION_LESS 3.20)
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+endif()
+
+if(${CMAKE_VERSION} VERSION_GREATER_EQUAL 3.26)
+  set(COPY_DIRECTORY copy_directory_if_different)
+else()
+  set(COPY_DIRECTORY copy_directory)
 endif()
 
 # Prefer our bundled versions of dependencies.
@@ -112,10 +129,11 @@ if (MINGW)
 else()
   option(ENABLE_LTO "enable link time optimization" ON)
 endif()
+option(ENABLE_LIBINTL "enable libintl" ON)
 
 message(STATUS "CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
 
-set_default_buildtype()
+set_default_buildtype(Debug)
 get_property(isMultiConfig GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(NOT isMultiConfig)
   # Unlike build dependencies in cmake.deps, we assume we want dev dependencies
@@ -216,27 +234,24 @@ endif()
 find_program(SHELLCHECK_PRG shellcheck ${LINT_REQUIRED})
 find_program(STYLUA_PRG stylua ${LINT_REQUIRED})
 
+set(STYLUA_DIRS runtime scripts src test contrib)
+
 add_glob_target(
   TARGET lintlua-luacheck
-  COMMAND $<TARGET_FILE:nvim>
+  COMMAND $<TARGET_FILE:nvim_bin>
   FLAGS -ll ${PROJECT_SOURCE_DIR}/test/lua_runner.lua ${CMAKE_BINARY_DIR}/usr luacheck -q
-  GLOB_DIRS runtime/ scripts/ src/ test/
+  GLOB_DIRS runtime scripts src test
   GLOB_PAT *.lua
-  EXCLUDE
-    runtime/lua/vim/_meta/.*
-    runtime/lua/coxpcall.lua
-  TOUCH_STRATEGY SINGLE)
+  TOUCH_STRATEGY PER_DIR)
 add_dependencies(lintlua-luacheck lua-dev-deps)
 
 add_glob_target(
   TARGET lintlua-stylua
   COMMAND ${STYLUA_PRG}
   FLAGS --color=always --check --respect-ignores
-  GLOB_DIRS runtime/
+  GLOB_DIRS ${STYLUA_DIRS}
   GLOB_PAT *.lua
-  EXCLUDE
-    /runtime/lua/vim/_meta
-  TOUCH_STRATEGY SINGLE)
+  TOUCH_STRATEGY PER_DIR)
 
 add_custom_target(lintlua)
 add_dependencies(lintlua lintlua-luacheck lintlua-stylua)
@@ -247,22 +262,23 @@ add_glob_target(
   FLAGS -x -a
   GLOB_DIRS scripts
   GLOB_PAT *.sh
-  TOUCH_STRATEGY SINGLE)
+  TOUCH_STRATEGY PER_DIR)
 
 add_custom_target(lintcommit
-  COMMAND $<TARGET_FILE:nvim> -u NONE -l ${PROJECT_SOURCE_DIR}/scripts/lintcommit.lua main)
-add_dependencies(lintcommit nvim)
+  COMMAND $<TARGET_FILE:nvim_bin> -u NONE -l ${PROJECT_SOURCE_DIR}/scripts/lintcommit.lua main)
+add_dependencies(lintcommit nvim_bin)
 
 add_custom_target(lint)
-add_dependencies(lint lintc lintlua lintsh lintcommit)
+add_dependencies(lint lintc lintlua lintsh lintcommit lintdoc)
 
 # Format
-add_custom_target(formatlua
-  COMMAND ${CMAKE_COMMAND}
-    -D FORMAT_PRG=${STYLUA_PRG}
-    -D LANG=lua
-    -P ${PROJECT_SOURCE_DIR}/cmake/Format.cmake
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+add_glob_target(
+  TARGET formatlua
+  COMMAND ${STYLUA_PRG}
+  FLAGS --respect-ignores
+  GLOB_DIRS ${STYLUA_DIRS}
+  GLOB_PAT *.lua
+  TOUCH_STRATEGY PER_DIR)
 
 add_custom_target(format)
 add_dependencies(format formatc formatlua)
@@ -270,6 +286,9 @@ add_dependencies(format formatc formatlua)
 install_helper(
   FILES ${CMAKE_SOURCE_DIR}/src/man/nvim.1
   DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
+
+add_custom_target(nvim ALL)
+add_dependencies(nvim nvim_bin nvim_runtime_deps nvim_runtime)
 
 add_subdirectory(src/nvim)
 add_subdirectory(cmake.config)
@@ -286,24 +305,23 @@ endif()
 ExternalProject_Add(uncrustify
   URL https://github.com/uncrustify/uncrustify/archive/uncrustify-0.78.1.tar.gz
   URL_HASH SHA256=ecaf4c0adca14c36dfffa30bc28e69865115ecd602c90eb16a8cddccb41caad2
-  DOWNLOAD_NO_PROGRESS TRUE
   DOWNLOAD_DIR ${DEPS_DOWNLOAD_DIR}/uncrustify
   CMAKE_ARGS ${DEPS_CMAKE_ARGS}
-  CMAKE_CACHE_ARGS ${DEPS_CMAKE_CACHE_ARGS}
-  EXCLUDE_FROM_ALL TRUE)
+  EXCLUDE_FROM_ALL TRUE
+  DOWNLOAD_NO_PROGRESS TRUE)
 
 option(USE_BUNDLED_BUSTED "Use bundled busted" ON)
 if(USE_BUNDLED_BUSTED)
   ExternalProject_Add(lua-dev-deps
     URL https://github.com/neovim/deps/raw/5a1f71cceb24990a0b15fd9a472a5f549f019248/opt/lua-dev-deps.tar.gz
     URL_HASH SHA256=27db2495f5eddc7fc191701ec9b291486853530c6125609d3197d03481e8d5a2
-    DOWNLOAD_NO_PROGRESS TRUE
     DOWNLOAD_DIR ${DEPS_DOWNLOAD_DIR}/lua-dev-deps
     SOURCE_DIR ${DEPS_SHARE_DIR}
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
     INSTALL_COMMAND ""
-    EXCLUDE_FROM_ALL TRUE)
+    EXCLUDE_FROM_ALL TRUE
+    DOWNLOAD_NO_PROGRESS TRUE)
 else()
   add_custom_target(lua-dev-deps)
 endif()

@@ -24,7 +24,7 @@ CREATED_FILES=()
 
 usage() {
   echo "Port Vim patches to Neovim"
-  echo "https://github.com/neovim/neovim/wiki/Merging-patches-from-upstream-vim"
+  echo "https://neovim.io/doc/user/dev_vimpatch.html"
   echo
   echo "Usage:  ${BASENAME} [-h | -l | -p vim-revision | -r pr-number]"
   echo
@@ -174,7 +174,7 @@ assign_commit_details() {
 
   vim_commit_url="https://github.com/vim/vim/commit/${vim_commit}"
   vim_message="$(git -C "${VIM_SOURCE_DIR}" log -1 --pretty='format:%B' "${vim_commit}" \
-      | sed -Ee 's/(#[0-9]{1,})/vim\/vim\1/g')"
+      | sed -Ee 's/([^A-Za-z0-9])(#[0-9]{1,})/\1vim\/vim\2/g')"
   local vim_coauthor0
   vim_coauthor0="$(git -C "${VIM_SOURCE_DIR}" log -1 --pretty='format:Co-authored-by: %an <%ae>' "${vim_commit}")"
   # Extract co-authors from the commit message.
@@ -427,7 +427,7 @@ stage_patch() {
   or "%s -s --draft" to create a draft pull request.
 
   See the wiki for more information:
-    * https://github.com/neovim/neovim/wiki/Merging-patches-from-upstream-vim
+    * https://neovim.io/doc/user/dev_vimpatch.html
 ' "${vim_version}" "${BASENAME}" "${BASENAME}" "${BASENAME}"
   return $ret
 }

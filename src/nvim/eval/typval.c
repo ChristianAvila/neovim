@@ -1,13 +1,14 @@
 #include <assert.h>
+#include <lauxlib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <uv.h>
 
-#include "lauxlib.h"
-#include "nvim/ascii.h"
-#include "nvim/assert.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/assert_defs.h"
 #include "nvim/charset.h"
 #include "nvim/eval.h"
 #include "nvim/eval/encode.h"
@@ -18,21 +19,23 @@
 #include "nvim/eval/userfunc.h"
 #include "nvim/eval/vars.h"
 #include "nvim/garray.h"
-#include "nvim/gettext.h"
+#include "nvim/garray_defs.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/hashtab.h"
-#include "nvim/lib/queue.h"
+#include "nvim/hashtab_defs.h"
+#include "nvim/lib/queue_defs.h"
 #include "nvim/lua/executor.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/mbyte_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/os/input.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
+#include "nvim/vim_defs.h"
 
 /// struct storing information about current sort
 typedef struct {
@@ -620,13 +623,14 @@ tv_list_copy_error:
 listitem_T *tv_list_check_range_index_one(list_T *const l, int *const n1, const bool quiet)
 {
   listitem_T *li = tv_list_find_index(l, n1);
-  if (li == NULL) {
-    if (!quiet) {
-      semsg(_(e_list_index_out_of_range_nr), (int64_t)(*n1));
-    }
-    return NULL;
+  if (li != NULL) {
+    return li;
   }
-  return li;
+
+  if (!quiet) {
+    semsg(_(e_list_index_out_of_range_nr), (int64_t)(*n1));
+  }
+  return NULL;
 }
 
 /// Check that "n2" can be used as the second index in a range of list "l".
@@ -855,7 +859,7 @@ int tv_list_slice_or_index(list_T *list, bool range, varnumber_T n1_arg, varnumb
     // A list index out of range is an error.
     if (!range) {
       if (verbose) {
-        semsg(_(e_list_index_out_of_range_nr), (int64_t)n1);
+        semsg(_(e_list_index_out_of_range_nr), (int64_t)n1_arg);
       }
       return FAIL;
     }
@@ -1631,11 +1635,13 @@ static listitem_T *tv_list_find_index(list_T *const l, int *const idx)
   FUNC_ATTR_WARN_UNUSED_RESULT
 {
   listitem_T *li = tv_list_find(l, *idx);
-  if (li == NULL) {
-    if (*idx < 0) {
-      *idx = 0;
-      li = tv_list_find(l, *idx);
-    }
+  if (li != NULL) {
+    return li;
+  }
+
+  if (*idx < 0) {
+    *idx = 0;
+    li = tv_list_find(l, *idx);
   }
   return li;
 }
@@ -1799,10 +1805,10 @@ void callback_copy(Callback *dest, Callback *src)
 }
 
 /// Generate a string description of a callback
-char *callback_to_string(Callback *cb)
+char *callback_to_string(Callback *cb, Arena *arena)
 {
   if (cb->type == kCallbackLua) {
-    return nlua_funcref_str(cb->data.luaref);
+    return nlua_funcref_str(cb->data.luaref, arena);
   }
 
   const size_t msglen = 100;
@@ -2127,10 +2133,12 @@ void tv_dict_free_dict(dict_T *const d)
 void tv_dict_free(dict_T *const d)
   FUNC_ATTR_NONNULL_ALL
 {
-  if (!tv_in_free_unref_items) {
-    tv_dict_free_contents(d);
-    tv_dict_free_dict(d);
+  if (tv_in_free_unref_items) {
+    return;
   }
+
+  tv_dict_free_contents(d);
+  tv_dict_free_dict(d);
 }
 
 /// Unreference a dictionary
@@ -2908,7 +2916,7 @@ static int tv_blob_index(const blob_T *blob, int len, varnumber_T idx, typval_T 
   return OK;
 }
 
-int tv_blob_slice_or_index(const blob_T *blob, int is_range, varnumber_T n1, varnumber_T n2,
+int tv_blob_slice_or_index(const blob_T *blob, bool is_range, varnumber_T n1, varnumber_T n2,
                            bool exclusive, typval_T *rettv)
 {
   int len = tv_blob_len(rettv->vval.v_blob);
@@ -4341,6 +4349,22 @@ int tv_check_for_string_or_number_arg(const typval_T *const args, const int idx)
     return FAIL;
   }
   return OK;
+}
+
+/// Give an error and return FAIL unless "args[idx]" is a buffer number.
+/// Buffer number can be a number or a string.
+int tv_check_for_buffer_arg(const typval_T *const args, const int idx)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_PURE
+{
+  return tv_check_for_string_or_number_arg(args, idx);
+}
+
+/// Give an error and return FAIL unless "args[idx]" is a line number.
+/// Line number can be a number or a string.
+int tv_check_for_lnum_arg(const typval_T *const args, const int idx)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_PURE
+{
+  return tv_check_for_string_or_number_arg(args, idx);
 }
 
 /// Give an error and return FAIL unless "args[idx]" is a string or a list.

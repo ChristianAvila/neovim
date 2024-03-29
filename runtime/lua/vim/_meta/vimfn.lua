@@ -582,7 +582,7 @@ function vim.fn.bufloaded(buf) end
 ---   echo bufname("file2")  " name of buffer where "file2" matches.
 --- <
 ---
---- @param buf? any
+--- @param buf? integer|string
 --- @return string
 function vim.fn.bufname(buf) end
 
@@ -599,7 +599,7 @@ function vim.fn.bufname(buf) end
 --- number necessarily exist, because ":bwipeout" may have removed
 --- them.  Use bufexists() to test for the existence of a buffer.
 ---
---- @param buf? any
+--- @param buf? integer|string
 --- @param create? any
 --- @return integer
 function vim.fn.bufnr(buf, create) end
@@ -1024,6 +1024,8 @@ function vim.fn.complete_check() end
 ---     no item is selected when using the <Up> or
 ---     <Down> keys)
 ---    inserted  Inserted string. [NOT IMPLEMENTED YET]
+---    preview_winid     Info floating preview window id.
+---    preview_bufnr     Info floating preview buffer id.
 ---
 ---           *complete_info_mode*
 --- mode values are:
@@ -1707,6 +1709,7 @@ function vim.fn.exepath(expr) end
 ---   echo exists("*strftime")
 ---   echo exists("*s:MyFunc")
 ---   echo exists("*MyFunc")
+---   echo exists("*v:lua.Func")
 ---   echo exists("bufcount")
 ---   echo exists(":Make")
 ---   echo exists("#CursorHold")
@@ -1841,7 +1844,13 @@ function vim.fn.exp(expr) end
 ---
 --- @param string string
 --- @param nosuf? boolean
---- @param list? any
+--- @param list? nil|false
+--- @return string
+function vim.fn.expand(string, nosuf, list) end
+
+--- @param string string
+--- @param nosuf boolean
+--- @param list true|number|string|table
 --- @return string|string[]
 function vim.fn.expand(string, nosuf, list) end
 
@@ -2300,6 +2309,45 @@ function vim.fn.foldtext() end
 --- @return string
 function vim.fn.foldtextresult(lnum) end
 
+--- {expr1} must be a |List|, |String|, |Blob| or |Dictionary|.
+--- For each item in {expr1} execute {expr2}. {expr1} is not
+--- modified; its values may be, as with |:lockvar| 1. |E741|
+--- See |map()| and |filter()| to modify {expr1}.
+---
+--- {expr2} must be a |string| or |Funcref|.
+---
+--- If {expr2} is a |string|, inside {expr2} |v:val| has the value
+--- of the current item.  For a |Dictionary| |v:key| has the key
+--- of the current item and for a |List| |v:key| has the index of
+--- the current item.  For a |Blob| |v:key| has the index of the
+--- current byte. For a |String| |v:key| has the index of the
+--- current character.
+--- Examples: >vim
+---   call foreach(mylist, 'let used[v:val] = v:true')
+--- <This records the items that are in the {expr1} list.
+---
+--- Note that {expr2} is the result of expression and is then used
+--- as a command.  Often it is good to use a |literal-string| to
+--- avoid having to double backslashes.
+---
+--- If {expr2} is a |Funcref| it must take two arguments:
+---   1. the key or the index of the current item.
+---   2. the value of the current item.
+--- With a lambda you don't get an error if it only accepts one
+--- argument.
+--- If the function returns a value, it is ignored.
+---
+--- Returns {expr1} in all cases.
+--- When an error is encountered while executing {expr2} no
+--- further items in {expr1} are processed.
+--- When {expr2} is a Funcref errors inside a function are ignored,
+--- unless it was defined with the "abort" flag.
+---
+--- @param expr1 any
+--- @param expr2 any
+--- @return any
+function vim.fn.foreach(expr1, expr2) end
+
 --- Get the full command name from a short abbreviated command
 --- name; see |20.2| for details on command abbreviations.
 ---
@@ -2514,6 +2562,8 @@ function vim.fn.getbufinfo(buf) end
 ---   bufnr    Buffer number.
 ---   changed    TRUE if the buffer is modified.
 ---   changedtick  Number of changes made to the buffer.
+---   command    TRUE if the buffer belongs to the
+---       command-line window |cmdwin|.
 ---   hidden    TRUE if the buffer is hidden.
 ---   lastused  Timestamp in seconds, like
 ---       |localtime()|, when the buffer was
@@ -2729,7 +2779,7 @@ function vim.fn.getchar() end
 ---   32  mouse double click
 ---   64  mouse triple click
 ---   96  mouse quadruple click (== 32 + 64)
----   128  command (Macintosh only)
+---   128  command (Mac) or super
 --- Only the modifiers that have not been included in the
 --- character itself are obtained.  Thus Shift-a results in "A"
 --- without a modifier.  Returns 0 if no modifiers are used.
@@ -2887,6 +2937,7 @@ function vim.fn.getcmdwintype() end
 --- help    help subjects
 --- highlight  highlight groups
 --- history    |:history| suboptions
+--- keymap    keyboard mappings
 --- locale    locale names (as output of locale -a)
 --- mapclear  buffer argument
 --- mapping    mapping name
@@ -3134,8 +3185,13 @@ function vim.fn.getjumplist(winnr, tabnr) end
 --- <To get lines from another buffer see |getbufline()| and
 --- |getbufoneline()|
 ---
+--- @param lnum integer|string
+--- @param end_? nil|false
+--- @return string
+function vim.fn.getline(lnum, end_) end
+
 --- @param lnum integer
---- @param end_? any
+--- @param end_ true|number|string|table
 --- @return string|string[]
 function vim.fn.getline(lnum, end_) end
 
@@ -3433,7 +3489,12 @@ function vim.fn.getqflist(what) end
 --- If {regname} is not specified, |v:register| is used.
 ---
 --- @param regname? string
---- @param list? any
+--- @param list? nil|false
+--- @return string
+function vim.fn.getreg(regname, list) end
+
+--- @param regname string
+--- @param list true|number|string|table
 --- @return string|string[]
 function vim.fn.getreg(regname, list) end
 
@@ -3463,6 +3524,62 @@ function vim.fn.getreg(regname, list) end
 --- @param regname? string
 --- @return table
 function vim.fn.getreginfo(regname) end
+
+--- Returns the list of strings from {pos1} to {pos2} from a
+--- buffer.
+---
+--- {pos1} and {pos2} must both be |List|s with four numbers.
+--- See |getpos()| for the format of the list.  It's possible
+--- to specify positions from a different buffer, but please
+--- note the limitations at |getregion-notes|.
+---
+--- The optional argument {opts} is a Dict and supports the
+--- following items:
+---
+---   type    Specify the region's selection type
+---       (default: "v"):
+---       "v"    for |charwise| mode
+---       "V"    for |linewise| mode
+---       "<CTRL-V>"  for |blockwise-visual| mode
+---
+---   exclusive  If |TRUE|, use exclusive selection
+---       for the end position
+---       (default: follow 'selection')
+---
+--- You can get the last selection type by |visualmode()|.
+--- If Visual mode is active, use |mode()| to get the Visual mode
+--- (e.g., in a |:vmap|).
+--- This function is useful to get text starting and ending in
+--- different columns, such as a |charwise-visual| selection.
+---
+---           *getregion-notes*
+--- Note that:
+--- - Order of {pos1} and {pos2} doesn't matter, it will always
+---   return content from the upper left position to the lower
+---   right position.
+--- - If 'virtualedit' is enabled and the region is past the end
+---   of the lines, resulting lines are padded with spaces.
+--- - If the region is blockwise and it starts or ends in the
+---   middle of a multi-cell character, it is not included but
+---   its selected part is substituted with spaces.
+--- - If {pos1} and {pos2} are not in the same buffer, an empty
+---   list is returned.
+--- - {pos1} and {pos2} must belong to a |bufloaded()| buffer.
+--- - It is evaluated in current window context, which makes a
+---   difference if the buffer is displayed in a window with
+---   different 'virtualedit' or 'list' values.
+---
+--- Examples: >
+---   :xnoremap <CR>
+---   \ <Cmd>echom getregion(
+---   \ getpos('v'), getpos('.'), #{ type: mode() })<CR>
+--- <
+---
+--- @param pos1 table
+--- @param pos2 table
+--- @param opts? table
+--- @return string[]
+function vim.fn.getregion(pos1, pos2, opts) end
 
 --- The result is a String, which is type of register {regname}.
 --- The value will be one of:
@@ -4135,7 +4252,7 @@ function vim.fn.id(expr) end
 --- |getline()|.
 --- When {lnum} is invalid -1 is returned.
 ---
---- @param lnum integer
+--- @param lnum integer|string
 --- @return integer
 function vim.fn.indent(lnum) end
 
@@ -4678,8 +4795,7 @@ function vim.fn.join(list, sep) end
 --- Vim value. In the following cases it will output
 --- |msgpack-special-dict|:
 --- 1. Dictionary contains duplicate key.
---- 2. Dictionary contains empty key.
---- 3. String contains NUL byte.  Two special dictionaries: for
+--- 2. String contains NUL byte.  Two special dictionaries: for
 ---    dictionary and for string will be emitted in case string
 ---    with NUL byte was a dictionary key.
 ---
@@ -5050,8 +5166,8 @@ function vim.fn.map(expr1, expr2) end
 ---   "mode_bits" Nvim's internal binary representation of "mode".
 ---        |mapset()| ignores this; only "mode" is used.
 ---        See |maplist()| for usage examples. The values
----        are from src/nvim/vim.h and may change in the
----        future.
+---        are from src/nvim/state_defs.h and may change in
+---        the future.
 ---
 --- The dictionary can be used to restore a mapping with
 --- |mapset()|.
@@ -5065,7 +5181,14 @@ function vim.fn.map(expr1, expr2) end
 --- @param name string
 --- @param mode? string
 --- @param abbr? boolean
---- @param dict? boolean
+--- @param dict? false
+--- @return string
+function vim.fn.maparg(name, mode, abbr, dict) end
+
+--- @param name string
+--- @param mode string
+--- @param abbr boolean
+--- @param dict true
 --- @return string|table<string,any>
 function vim.fn.maparg(name, mode, abbr, dict) end
 
@@ -5129,8 +5252,8 @@ function vim.fn.mapcheck(name, mode, abbr) end
 ---   endfor
 ---   echo saved_maps->mapnew({_, m -> m.lhs})
 --- <The values of the mode_bits are defined in Nvim's
---- src/nvim/vim.h file and they can be discovered at runtime
---- using |:map-commands| and "maplist()". Example: >vim
+--- src/nvim/state_defs.h file and they can be discovered at
+--- runtime using |:map-commands| and "maplist()". Example: >vim
 ---   omap xyzzy <Nop>
 ---   let op_bit = maplist()->filter(
 ---       \ {_, m -> m.lhs == 'xyzzy'})[0].mode_bits
@@ -5149,6 +5272,12 @@ function vim.fn.maplist() end
 --- @param expr2 any
 --- @return any
 function vim.fn.mapnew(expr1, expr2) end
+
+--- @param mode string
+--- @param abbr? any
+--- @param dict? any
+--- @return any
+function vim.fn.mapset(mode, abbr, dict) end
 
 --- Restore a mapping from a dictionary, possibly returned by
 --- |maparg()| or |maplist()|.  A buffer mapping, when dict.buffer
@@ -5185,11 +5314,9 @@ function vim.fn.mapnew(expr1, expr2) end
 ---       call mapset(d)
 ---   endfor
 ---
---- @param mode string
---- @param abbr? any
---- @param dict? any
+--- @param dict any
 --- @return any
-function vim.fn.mapset(mode, abbr, dict) end
+function vim.fn.mapset(dict) end
 
 --- When {expr} is a |List| then this returns the index of the
 --- first item where {pat} matches.  Each item is used as a
@@ -5243,6 +5370,7 @@ function vim.fn.mapset(mode, abbr, dict) end
 --- Note that when {count} is added the way {start} works changes,
 --- see above.
 ---
+---         *match-pattern*
 --- See |pattern| for the patterns that are accepted.
 --- The 'ignorecase' option is used to set the ignore-caseness of
 --- the pattern.  'smartcase' is NOT used.  The matching is always
@@ -5382,6 +5510,57 @@ function vim.fn.matchaddpos(group, pos, priority, id, dict) end
 --- @param nr integer
 --- @return any
 function vim.fn.matcharg(nr) end
+
+--- Returns the |List| of matches in lines from {lnum} to {end} in
+--- buffer {buf} where {pat} matches.
+---
+--- {lnum} and {end} can either be a line number or the string "$"
+--- to refer to the last line in {buf}.
+---
+--- The {dict} argument supports following items:
+---     submatches  include submatch information (|/\(|)
+---
+--- For each match, a |Dict| with the following items is returned:
+---     byteidx  starting byte index of the match
+---     lnum  line number where there is a match
+---     text  matched string
+--- Note that there can be multiple matches in a single line.
+---
+--- This function works only for loaded buffers. First call
+--- |bufload()| if needed.
+---
+--- See |match-pattern| for information about the effect of some
+--- option settings on the pattern.
+---
+--- When {buf} is not a valid buffer, the buffer is not loaded or
+--- {lnum} or {end} is not valid then an error is given and an
+--- empty |List| is returned.
+---
+--- Examples: >vim
+---     " Assuming line 3 in buffer 5 contains "a"
+---     :echo matchbufline(5, '\<\k\+\>', 3, 3)
+---     [{'lnum': 3, 'byteidx': 0, 'text': 'a'}]
+---     " Assuming line 4 in buffer 10 contains "tik tok"
+---     :echo matchbufline(10, '\<\k\+\>', 1, 4)
+---     [{'lnum': 4, 'byteidx': 0, 'text': 'tik'}, {'lnum': 4, 'byteidx': 4, 'text': 'tok'}]
+--- <
+--- If {submatch} is present and is v:true, then submatches like
+--- "\1", "\2", etc. are also returned.  Example: >vim
+---     " Assuming line 2 in buffer 2 contains "acd"
+---     :echo matchbufline(2, '\(a\)\?\(b\)\?\(c\)\?\(.*\)', 2, 2
+---         \ {'submatches': v:true})
+---     [{'lnum': 2, 'byteidx': 0, 'text': 'acd', 'submatches': ['a', '', 'c', 'd', '', '', '', '', '']}]
+--- <The "submatches" List always contains 9 items.  If a submatch
+--- is not found, then an empty string is returned for that
+--- submatch.
+---
+--- @param buf string|integer
+--- @param pat string
+--- @param lnum string|integer
+--- @param end_ string|integer
+--- @param dict? table
+--- @return any
+function vim.fn.matchbufline(buf, pat, lnum, end_, dict) end
 
 --- Deletes a match with ID {id} previously defined by |matchadd()|
 --- or one of the |:match| commands.  Returns 0 if successful,
@@ -5552,6 +5731,44 @@ function vim.fn.matchlist(expr, pat, start, count) end
 --- @return any
 function vim.fn.matchstr(expr, pat, start, count) end
 
+--- Returns the |List| of matches in {list} where {pat} matches.
+--- {list} is a |List| of strings.  {pat} is matched against each
+--- string in {list}.
+---
+--- The {dict} argument supports following items:
+---     submatches  include submatch information (|/\(|)
+---
+--- For each match, a |Dict| with the following items is returned:
+---     byteidx  starting byte index of the match.
+---     idx    index in {list} of the match.
+---     text  matched string
+---     submatches  a List of submatches.  Present only if
+---     "submatches" is set to v:true in {dict}.
+---
+--- See |match-pattern| for information about the effect of some
+--- option settings on the pattern.
+---
+--- Example: >vim
+---     :echo matchstrlist(['tik tok'], '\<\k\+\>')
+---     [{'idx': 0, 'byteidx': 0, 'text': 'tik'}, {'idx': 0, 'byteidx': 4, 'text': 'tok'}]
+---     :echo matchstrlist(['a', 'b'], '\<\k\+\>')
+---     [{'idx': 0, 'byteidx': 0, 'text': 'a'}, {'idx': 1, 'byteidx': 0, 'text': 'b'}]
+--- <
+--- If "submatches" is present and is v:true, then submatches like
+--- "\1", "\2", etc. are also returned.  Example: >vim
+---     :echo matchstrlist(['acd'], '\(a\)\?\(b\)\?\(c\)\?\(.*\)',
+---         \ #{submatches: v:true})
+---     [{'idx': 0, 'byteidx': 0, 'text': 'acd', 'submatches': ['a', '', 'c', 'd', '', '', '', '', '']}]
+--- <The "submatches" List always contains 9 items.  If a submatch
+--- is not found, then an empty string is returned for that
+--- submatch.
+---
+--- @param list string[]
+--- @param pat string
+--- @param dict? table
+--- @return any
+function vim.fn.matchstrlist(list, pat, dict) end
+
 --- Same as |matchstr()|, but return the matched string, the start
 --- position and the end position of the match.  Example: >vim
 ---   echo matchstrpos("testing", "ing")
@@ -5583,7 +5800,7 @@ function vim.fn.matchstrpos(expr, pat, start, count) end
 --- it returns the maximum of all values in the Dictionary.
 --- If {expr} is neither a List nor a Dictionary, or one of the
 --- items in {expr} cannot be used as a Number this results in
----                 an error.  An empty |List| or |Dictionary| results in zero.
+--- an error.  An empty |List| or |Dictionary| results in zero.
 ---
 --- @param expr any
 --- @return any
@@ -5812,7 +6029,9 @@ function vim.fn.mkdir(name, flags, prot) end
 ---    Rvc      Virtual Replace mode completion |compl-generic|
 ---    Rvx      Virtual Replace mode |i_CTRL-X| completion
 ---    c      Command-line editing
+---    cr      Command-line editing overstrike mode |c_<Insert>|
 ---    cv      Vim Ex mode |gQ|
+---    cvr      Vim Ex mode while in overstrike mode |c_<Insert>|
 ---    r      Hit-enter prompt
 ---    rm      The -- more -- prompt
 ---    r?      A |:confirm| query of some sort
@@ -5826,8 +6045,9 @@ function vim.fn.mkdir(name, flags, prot) end
 --- the leading character(s).
 --- Also see |visualmode()|.
 ---
+--- @param expr? any
 --- @return any
-function vim.fn.mode() end
+function vim.fn.mode(expr) end
 
 --- Convert a list of Vimscript objects to msgpack. Returned value is a
 --- |readfile()|-style list. When {type} contains "B", a |Blob| is
@@ -5920,7 +6140,6 @@ function vim.fn.msgpackdump(list, type) end
 ---      are binary strings).
 ---   2. String with NUL byte inside.
 ---   3. Duplicate key.
----   4. Empty key.
 --- ext  |List| with two values: first is a signed integer
 ---   representing extension type. Second is
 ---   |readfile()|-style list of strings.
@@ -6156,9 +6375,9 @@ function vim.fn.prevnonblank(lnum) end
 --- <This limits the length of the text used from "line" to
 --- "width" bytes.
 ---
---- If the argument to be formatted is specified using a posional
---- argument specifier, and a '*' is used to indicate that a
---- number argument is to be used to specify the width or
+--- If the argument to be formatted is specified using a
+--- positional argument specifier, and a '*' is used to indicate
+--- that a number argument is to be used to specify the width or
 --- precision, the argument(s) to be used must also be specified
 --- using a {n$} positional argument specifier. See |printf-$|.
 ---
@@ -6261,96 +6480,99 @@ function vim.fn.prevnonblank(lnum) end
 --- having a different word order, positional arguments may be
 --- used to indicate this. For instance: >vim
 ---
----   #, c-format
----   msgid "%s returning %s"
----   msgstr "waarde %2$s komt terug van %1$s"
+---     #, c-format
+---     msgid "%s returning %s"
+---     msgstr "waarde %2$s komt terug van %1$s"
 --- <
---- In this example, the sentence has its 2 string arguments reversed
---- in the output. >vim
+--- In this example, the sentence has its 2 string arguments
+--- reversed in the output. >vim
 ---
----   echo printf(
----     "In The Netherlands, vim's creator's name is: %1$s %2$s",
----     "Bram", "Moolenaar")
---- <  In The Netherlands, vim's creator's name is: Bram Moolenaar >vim
+---     echo printf(
+---   "In The Netherlands, vim's creator's name is: %1$s %2$s",
+---   "Bram", "Moolenaar")
+--- <    In The Netherlands, vim's creator's name is: Bram Moolenaar >vim
 ---
----   echo printf(
----     "In Belgium, vim's creator's name is: %2$s %1$s",
----     "Bram", "Moolenaar")
---- <  In Belgium, vim's creator's name is: Moolenaar Bram
+---     echo printf(
+---   "In Belgium, vim's creator's name is: %2$s %1$s",
+---   "Bram", "Moolenaar")
+--- <    In Belgium, vim's creator's name is: Moolenaar Bram
 ---
 --- Width (and precision) can be specified using the '*' specifier.
 --- In this case, you must specify the field width position in the
 --- argument list. >vim
 ---
----   echo printf("%1$*2$.*3$d", 1, 2, 3)
---- <  001 >vim
----   echo printf("%2$*3$.*1$d", 1, 2, 3)
---- <    2 >vim
----   echo printf("%3$*1$.*2$d", 1, 2, 3)
---- <  03 >vim
----   echo printf("%1$*2$.*3$g", 1.4142, 2, 3)
---- <  1.414
+---     echo printf("%1$*2$.*3$d", 1, 2, 3)
+--- <    001 >vim
+---     echo printf("%2$*3$.*1$d", 1, 2, 3)
+--- <      2 >vim
+---     echo printf("%3$*1$.*2$d", 1, 2, 3)
+--- <    03 >vim
+---     echo printf("%1$*2$.*3$g", 1.4142, 2, 3)
+--- <    1.414
 ---
 --- You can mix specifying the width and/or precision directly
 --- and via positional arguments: >vim
 ---
----   echo printf("%1$4.*2$f", 1.4142135, 6)
---- <  1.414214 >vim
----   echo printf("%1$*2$.4f", 1.4142135, 6)
---- <  1.4142 >vim
----   echo printf("%1$*2$.*3$f", 1.4142135, 6, 2)
---- <    1.41
+---     echo printf("%1$4.*2$f", 1.4142135, 6)
+--- <    1.414214 >vim
+---     echo printf("%1$*2$.4f", 1.4142135, 6)
+--- <    1.4142 >vim
+---     echo printf("%1$*2$.*3$f", 1.4142135, 6, 2)
+--- <      1.41
+---
+--- You will get an overflow error |E1510|, when the field-width
+--- or precision will result in a string longer than 6400 chars.
 ---
 ---           *E1500*
 --- You cannot mix positional and non-positional arguments: >vim
----   echo printf("%s%1$s", "One", "Two")
---- <  E1500: Cannot mix positional and non-positional
----   arguments: %s%1$s
+---     echo printf("%s%1$s", "One", "Two")
+--- <    E1500: Cannot mix positional and non-positional arguments:
+---     %s%1$s
 ---
 ---           *E1501*
 --- You cannot skip a positional argument in a format string: >vim
----   echo printf("%3$s%1$s", "One", "Two", "Three")
---- <  E1501: format argument 2 unused in $-style
----   format: %3$s%1$s
+---     echo printf("%3$s%1$s", "One", "Two", "Three")
+--- <    E1501: format argument 2 unused in $-style format:
+---     %3$s%1$s
 ---
 ---           *E1502*
 --- You can re-use a [field-width] (or [precision]) argument: >vim
----   echo printf("%1$d at width %2$d is: %01$*2$d", 1, 2)
---- <  1 at width 2 is: 01
+---     echo printf("%1$d at width %2$d is: %01$*2$d", 1, 2)
+--- <    1 at width 2 is: 01
 ---
 --- However, you can't use it as a different type: >vim
----   echo printf("%1$d at width %2$ld is: %01$*2$d", 1, 2)
---- <  E1502: Positional argument 2 used as field
----   width reused as different type: long int/int
+---     echo printf("%1$d at width %2$ld is: %01$*2$d", 1, 2)
+--- <    E1502: Positional argument 2 used as field width reused as
+---     different type: long int/int
 ---
 ---           *E1503*
 --- When a positional argument is used, but not the correct number
 --- or arguments is given, an error is raised: >vim
----   echo printf("%1$d at width %2$d is: %01$*2$.*3$d", 1, 2)
---- <  E1503: Positional argument 3 out of bounds:
----   %1$d at width %2$d is: %01$*2$.*3$d
+---     echo printf("%1$d at width %2$d is: %01$*2$.*3$d", 1, 2)
+--- <    E1503: Positional argument 3 out of bounds: %1$d at width
+---     %2$d is: %01$*2$.*3$d
 ---
 --- Only the first error is reported: >vim
----   echo printf("%01$*2$.*3$d %4$d", 1, 2)
---- <  E1503: Positional argument 3 out of bounds:
----   %01$*2$.*3$d %4$d
+---     echo printf("%01$*2$.*3$d %4$d", 1, 2)
+--- <    E1503: Positional argument 3 out of bounds: %01$*2$.*3$d
+---     %4$d
 ---
 ---           *E1504*
 --- A positional argument can be used more than once: >vim
----   echo printf("%1$s %2$s %1$s", "One", "Two")
---- <  One Two One
+---     echo printf("%1$s %2$s %1$s", "One", "Two")
+--- <    One Two One
 ---
 --- However, you can't use a different type the second time: >vim
----   echo printf("%1$s %2$s %1$d", "One", "Two")
---- <  E1504: Positional argument 1 type used
----   inconsistently: int/string
+---     echo printf("%1$s %2$s %1$d", "One", "Two")
+--- <    E1504: Positional argument 1 type used inconsistently:
+---     int/string
 ---
 ---           *E1505*
 --- Various other errors that lead to a format string being
 --- wrongly formatted lead to: >vim
----   echo printf("%1$d at width %2$d is: %01$*2$.3$d", 1, 2)
---- <  E1505: Invalid format specifier:
----   %1$d at width %2$d is: %01$*2$.3$d
+---     echo printf("%1$d at width %2$d is: %01$*2$.3$d", 1, 2)
+--- <    E1505: Invalid format specifier: %1$d at width %2$d is:
+---     %01$*2$.3$d
 ---
 ---           *E1507*
 --- This internal error indicates that the logic to parse a
@@ -7040,6 +7262,7 @@ function vim.fn.screenstring(row, col) end
 --- When a match has been found its line number is returned.
 --- If there is no match a 0 is returned and the cursor doesn't
 --- move.  No error message is given.
+--- To get the matched string, use |matchbufline()|.
 ---
 --- {flags} is a String, which can contain these character flags:
 --- 'b'  search Backward instead of forward
@@ -7967,7 +8190,7 @@ function vim.fn.setqflist(list, action, what) end
 ---
 --- @param regname string
 --- @param value any
---- @param options? table
+--- @param options? string
 --- @return any
 function vim.fn.setreg(regname, value, options) end
 
@@ -8577,7 +8800,8 @@ function vim.fn.sinh(expr) end
 --- Similar to using a |slice| "expr[start : end]", but "end" is
 --- used exclusive.  And for a string the indexes are used as
 --- character indexes instead of byte indexes.
---- Also, composing characters are not counted.
+--- Also, composing characters are treated as a part of the
+--- preceding base character.
 --- When {end} is omitted the slice continues to the last item.
 --- When {end} is -1 the last item is omitted.
 --- Returns an empty value if {start} or {end} are invalid.
@@ -8985,8 +9209,8 @@ function vim.fn.strcharlen(string) end
 --- of byte index and length.
 --- When {skipcc} is omitted or zero, composing characters are
 --- counted separately.
---- When {skipcc} set to 1, Composing characters are ignored,
---- similar to  |slice()|.
+--- When {skipcc} set to 1, composing characters are treated as a
+--- part of the preceding base character, similar to |slice()|.
 --- When a character index is used where a character does not
 --- exist it is omitted and counted as one character.  For
 --- example: >vim
@@ -9006,7 +9230,7 @@ function vim.fn.strcharpart(src, start, len, skipcc) end
 --- in String {string}.
 --- When {skipcc} is omitted or zero, composing characters are
 --- counted separately.
---- When {skipcc} set to 1, Composing characters are ignored.
+--- When {skipcc} set to 1, composing characters are ignored.
 --- |strcharlen()| always does this.
 ---
 --- Returns zero on error.
@@ -9309,7 +9533,12 @@ function vim.fn.strwidth(string) end
 --- A line break is included as a newline character.
 ---
 --- @param nr integer
---- @param list? integer
+--- @param list? nil
+--- @return string
+function vim.fn.submatch(nr, list) end
+
+--- @param nr integer
+--- @param list integer
 --- @return string|string[]
 function vim.fn.submatch(nr, list) end
 
@@ -9525,7 +9754,7 @@ function vim.fn.synIDtrans(synID) end
 ---
 --- @param lnum integer
 --- @param col integer
---- @return {[1]: integer, [2]: string, [3]: integer}[]
+--- @return {[1]: integer, [2]: string, [3]: integer}
 function vim.fn.synconcealed(lnum, col) end
 
 --- Return a |List|, which is the stack of syntax items at the
@@ -10367,17 +10596,16 @@ function vim.fn.win_move_statusline(nr, offset) end
 --- [1, 1], unless there is a tabline, then it is [2, 1].
 --- {nr} can be the window number or the |window-ID|.  Use zero
 --- for the current window.
---- Returns [0, 0] if the window cannot be found in the current
---- tabpage.
+--- Returns [0, 0] if the window cannot be found.
 ---
 --- @param nr integer
 --- @return any
 function vim.fn.win_screenpos(nr) end
 
---- Move the window {nr} to a new split of the window {target}.
---- This is similar to moving to {target}, creating a new window
---- using |:split| but having the same contents as window {nr}, and
---- then closing {nr}.
+--- Temporarily switch to window {target}, then move window {nr}
+--- to a new split adjacent to {target}.
+--- Unlike commands such as |:split|, no new windows are created
+--- (the |window-ID| of window {nr} is unchanged after the move).
 ---
 --- Both {nr} and {target} can be window numbers or |window-ID|s.
 --- Both must be in the current tab page.
@@ -10500,7 +10728,9 @@ function vim.fn.winline() end
 ---   #  the number of the last accessed window (where
 ---     |CTRL-W_p| goes to).  If there is no previous
 ---     window or it is in another tab page 0 is
----     returned.
+---     returned.  May refer to the current window in
+---     some cases (e.g. when evaluating 'statusline'
+---     expressions).
 ---   {N}j  the number of the Nth window below the
 ---     current window (where |CTRL-W_j| goes to).
 ---   {N}k  the number of the Nth window above the current

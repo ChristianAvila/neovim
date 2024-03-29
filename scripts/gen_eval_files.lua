@@ -1,7 +1,8 @@
+#!/usr/bin/env -S nvim -l
+
 -- Generator for various vimdoc and Lua type files
 
-local DEP_API_METADATA = 'build/api_metadata.mpack'
-local DEP_API_DOC  = 'runtime/doc/api.mpack'
+local DEP_API_METADATA = 'build/funcs_metadata.mpack'
 
 --- @class vim.api.metadata
 --- @field name string
@@ -16,6 +17,31 @@ local DEP_API_DOC  = 'runtime/doc/api.mpack'
 --- @field method boolean
 --- @field remote boolean
 --- @field since integer
+
+local LUA_API_RETURN_OVERRIDES = {
+  nvim_buf_get_command = 'table<string,vim.api.keyset.command_info>',
+  nvim_buf_get_extmark_by_id = 'vim.api.keyset.get_extmark_item',
+  nvim_buf_get_extmarks = 'vim.api.keyset.get_extmark_item[]',
+  nvim_buf_get_keymap = 'vim.api.keyset.keymap[]',
+  nvim_get_autocmds = 'vim.api.keyset.get_autocmds.ret[]',
+  nvim_get_color_map = 'table<string,integer>',
+  nvim_get_command = 'table<string,vim.api.keyset.command_info>',
+  nvim_get_keymap = 'vim.api.keyset.keymap[]',
+  nvim_get_mark = 'vim.api.keyset.get_mark',
+
+  -- Can also return table<string,vim.api.keyset.hl_info>, however we need to
+  -- pick one to get some benefit.
+  -- REVISIT lewrus01 (26/01/24): we can maybe add
+  -- @overload fun(ns: integer, {}): table<string,vim.api.keyset.hl_info>
+  nvim_get_hl = 'vim.api.keyset.hl_info',
+
+  nvim_get_mode = 'vim.api.keyset.get_mode',
+  nvim_get_namespaces = 'table<string,integer>',
+  nvim_get_option_info = 'vim.api.keyset.get_option_info',
+  nvim_get_option_info2 = 'vim.api.keyset.get_option_info',
+  nvim_parse_cmd = 'vim.api.keyset.parse_cmd',
+  nvim_win_get_config = 'vim.api.keyset.win_config',
+}
 
 local LUA_META_HEADER = {
   '--- @meta _',
@@ -48,6 +74,16 @@ local LUA_OPTION_META_HEADER = {
   'vim.wo = vim.wo',
 }
 
+local LUA_VVAR_META_HEADER = {
+  '--- @meta _',
+  '-- THIS FILE IS GENERATED',
+  '-- DO NOT EDIT',
+  "error('Cannot require a meta file')",
+  '',
+  '--- @class vim.v',
+  'vim.v = ...',
+}
+
 local LUA_KEYWORDS = {
   ['and'] = true,
   ['end'] = true,
@@ -56,10 +92,12 @@ local LUA_KEYWORDS = {
   ['if'] = true,
   ['while'] = true,
   ['repeat'] = true,
+  ['true'] = true,
+  ['false'] = true,
 }
 
 local OPTION_TYPES = {
-  bool = 'boolean',
+  boolean = 'boolean',
   number = 'integer',
   string = 'string',
 }
@@ -76,6 +114,7 @@ local API_TYPES = {
   LuaRef = 'function',
   Dictionary = 'table<string,any>',
   Float = 'number',
+  HLGroupID = 'number|string',
   void = '',
 }
 
@@ -170,23 +209,48 @@ end
 
 --- @return table<string, vim.EvalFn>
 local function get_api_meta()
-  local mpack_f = assert(io.open(DEP_API_METADATA, 'rb'))
-  local metadata = vim.mpack.decode(mpack_f:read('*all')) --[[@as vim.api.metadata[] ]]
   local ret = {} --- @type table<string, vim.EvalFn>
 
-  local doc_mpack_f = assert(io.open(DEP_API_DOC, 'rb'))
-  local doc_metadata = vim.mpack.decode(doc_mpack_f:read('*all')) --[[@as table<string,vim.gen_vim_doc_fun>]]
+  local cdoc_parser = require('scripts.cdoc_parser')
 
-  for _, fun in ipairs(metadata) do
-    local fdoc = doc_metadata[fun.name]
+  local f = 'src/nvim/api'
+
+  local function include(fun)
+    if not vim.startswith(fun.name, 'nvim_') then
+      return false
+    end
+    if vim.tbl_contains(fun.attrs or {}, 'lua_only') then
+      return true
+    end
+    if vim.tbl_contains(fun.attrs or {}, 'remote_only') then
+      return false
+    end
+    return true
+  end
+
+  --- @type table<string,nvim.cdoc.parser.fun>
+  local functions = {}
+  for path, ty in vim.fs.dir(f) do
+    if ty == 'file' then
+      local filename = vim.fs.joinpath(f, path)
+      local _, funs = cdoc_parser.parse(filename)
+      for _, fn in ipairs(funs) do
+        if include(fn) then
+          functions[fn.name] = fn
+        end
+      end
+    end
+  end
+
+  for _, fun in pairs(functions) do
+    local deprecated = fun.deprecated_since ~= nil
 
     local params = {} --- @type {[1]:string,[2]:string}[]
-    for _, p in ipairs(fun.parameters) do
-      local ptype, pname = p[1], p[2]
+    for _, p in ipairs(fun.params) do
       params[#params + 1] = {
-        pname,
-        api_type(ptype),
-        fdoc and fdoc.parameters_doc[pname] or nil,
+        p.name,
+        api_type(p.type),
+        not deprecated and p.desc or nil,
       }
     end
 
@@ -194,15 +258,13 @@ local function get_api_meta()
       signature = 'NA',
       name = fun.name,
       params = params,
-      returns = api_type(fun.return_type),
-      deprecated = fun.deprecated_since ~= nil,
+      returns = api_type(fun.returns[1].type),
+      deprecated = deprecated,
     }
 
-    if fdoc then
-      if #fdoc.doc > 0 then
-        r.desc = table.concat(fdoc.doc, '\n')
-      end
-      r.return_desc = (fdoc['return'] or {})[1]
+    if not deprecated then
+      r.desc = fun.desc
+      r.return_desc = fun.returns[1].desc
     end
 
     ret[fun.name] = r
@@ -233,11 +295,9 @@ end
 --- @param fun vim.EvalFn
 --- @param write fun(line: string)
 local function render_api_meta(_f, fun, write)
-  if not vim.startswith(fun.name, 'nvim_') then
-    return
-  end
-
   write('')
+
+  local text_utils = require('scripts.text_utils')
 
   if vim.startswith(fun.name, 'nvim__') then
     write('--- @private')
@@ -249,10 +309,10 @@ local function render_api_meta(_f, fun, write)
 
   local desc = fun.desc
   if desc then
+    desc = text_utils.md_to_vimdoc(desc, 0, 0, 74)
     for _, l in ipairs(split(norm_text(desc))) do
       write('--- ' .. l)
     end
-    write('---')
   end
 
   local param_names = {} --- @type string[]
@@ -261,8 +321,11 @@ local function render_api_meta(_f, fun, write)
     param_names[#param_names + 1] = p[1]
     local pdesc = p[3]
     if pdesc then
-      local pdesc_a = split(norm_text(pdesc))
-      write('--- @param ' .. p[1] .. ' ' .. p[2] .. ' ' .. pdesc_a[1])
+      local s = '--- @param ' .. p[1] .. ' ' .. p[2] .. ' '
+      local indent = #('@param ' .. p[1] .. ' ')
+      pdesc = text_utils.md_to_vimdoc(pdesc, #s, indent, 74, true)
+      local pdesc_a = split(vim.trim(norm_text(pdesc)))
+      write(s .. pdesc_a[1])
       for i = 2, #pdesc_a do
         if not pdesc_a[i] then
           break
@@ -274,11 +337,10 @@ local function render_api_meta(_f, fun, write)
     end
   end
   if fun.returns ~= '' then
-    if fun.returns_desc then
-      write('--- @return ' .. fun.returns .. ' : ' .. fun.returns_desc)
-    else
-      write('--- @return ' .. fun.returns)
-    end
+    local ret_desc = fun.returns_desc and ' : ' .. fun.returns_desc or ''
+    ret_desc = text_utils.md_to_vimdoc(ret_desc, 0, 0, 74)
+    local ret = LUA_API_RETURN_OVERRIDES[fun.name] or fun.returns
+    write('--- @return ' .. ret .. ret_desc)
   end
   local param_str = table.concat(param_names, ', ')
 
@@ -288,8 +350,6 @@ end
 --- @return table<string, vim.EvalFn>
 local function get_api_keysets_meta()
   local mpack_f = assert(io.open(DEP_API_METADATA, 'rb'))
-
-  --- @diagnostic disable-next-line:no-unknown
   local metadata = assert(vim.mpack.decode(mpack_f:read('*all')))
 
   local ret = {} --- @type table<string, vim.EvalFn>
@@ -300,7 +360,7 @@ local function get_api_keysets_meta()
   for _, k in ipairs(keysets) do
     local params = {}
     for _, key in ipairs(k.keys) do
-      table.insert(params, {key..'?', api_type(k.types[key] or 'any')})
+      table.insert(params, { key .. '?', api_type(k.types[key] or 'any') })
     end
     ret[k.name] = {
       signature = 'NA',
@@ -340,50 +400,45 @@ local function render_eval_meta(f, fun, write)
 
   local params = process_params(fun.params)
 
-  if fun.signature then
-    write('')
-    if fun.deprecated then
-      write('--- @deprecated')
-    end
-
-    local desc = fun.desc
-
-    if desc then
-      --- @type string
-      desc = desc:gsub('\n%s*\n%s*$', '\n')
-      for _, l in ipairs(split(desc)) do
-        l = l:gsub('^      ', ''):gsub('\t', '  '):gsub('@', '\\@')
-        write('--- ' .. l)
-      end
-    end
-
-    local req_args = type(fun.args) == 'table' and fun.args[1] or fun.args or 0
-
-    for i, param in ipairs(params) do
-      local pname, ptype = param[1], param[2]
-      local optional = (pname ~= '...' and i > req_args) and '?' or ''
-      write(string.format('--- @param %s%s %s', pname, optional, ptype))
-    end
-
-    if fun.returns ~= false then
-      write('--- @return ' .. (fun.returns or 'any'))
-    end
-
-    write(render_fun_sig(funname, params))
-
-    return
+  write('')
+  if fun.deprecated then
+    write('--- @deprecated')
   end
 
-  print('no doc for', funname)
-end
+  local desc = fun.desc
 
---- @type table<string,true>
-local rendered_tags = {}
+  if desc then
+    --- @type string
+    desc = desc:gsub('\n%s*\n%s*$', '\n')
+    for _, l in ipairs(split(desc)) do
+      l = l:gsub('^      ', ''):gsub('\t', '  '):gsub('@', '\\@')
+      write('--- ' .. l)
+    end
+  end
+
+  local req_args = type(fun.args) == 'table' and fun.args[1] or fun.args or 0
+
+  for i, param in ipairs(params) do
+    local pname, ptype = param[1], param[2]
+    local optional = (pname ~= '...' and i > req_args) and '?' or ''
+    write(string.format('--- @param %s%s %s', pname, optional, ptype))
+  end
+
+  if fun.returns ~= false then
+    write('--- @return ' .. (fun.returns or 'any'))
+  end
+
+  write(render_fun_sig(funname, params))
+end
 
 --- @param name string
 --- @param fun vim.EvalFn
 --- @param write fun(line: string)
 local function render_sig_and_tag(name, fun, write)
+  if not fun.signature then
+    return
+  end
+
   local tags = { '*' .. name .. '()*' }
 
   if fun.tags then
@@ -394,7 +449,7 @@ local function render_sig_and_tag(name, fun, write)
 
   local tag = table.concat(tags, ' ')
   local siglen = #fun.signature
-  local conceal_offset = 2*(#tags - 1)
+  local conceal_offset = 2 * (#tags - 1)
   local tag_pad_len = math.max(1, 80 - #tag + conceal_offset)
 
   if siglen + #tag > 80 then
@@ -417,24 +472,17 @@ local function render_eval_doc(f, fun, write)
     return
   end
 
-  local desc = fun.desc
-
-  if not desc then
+  if f:find('__%d+$') then
     write(fun.signature)
+  else
+    render_sig_and_tag(fun.name or f, fun, write)
+  end
+
+  if not fun.desc then
     return
   end
 
-  local name = fun.name or f
-
-  if rendered_tags[name] then
-    write(fun.signature)
-  else
-    render_sig_and_tag(name, fun, write)
-    rendered_tags[name] = true
-  end
-
-  desc = vim.trim(desc)
-  local desc_l = split(desc)
+  local desc_l = split(vim.trim(fun.desc))
   for _, l in ipairs(desc_l) do
     l = l:gsub('^      ', '')
     if vim.startswith(l, '<') and not l:match('^<[^ \t]+>') then
@@ -471,7 +519,7 @@ local function render_option_default(d, vimdoc)
     end
   end
 
-  if dt == "" or dt == nil or type(dt) == 'function' then
+  if dt == '' or dt == nil or type(dt) == 'function' then
     dt = d.meta
   end
 
@@ -479,22 +527,22 @@ local function render_option_default(d, vimdoc)
   if not vimdoc then
     v = vim.inspect(dt) --[[@as string]]
   else
-    v = type(dt) == 'string' and '"'..dt..'"' or tostring(dt)
+    v = type(dt) == 'string' and '"' .. dt .. '"' or tostring(dt)
   end
 
   --- @type table<string, string|false>
   local envvars = {
     TMPDIR = false,
     VIMRUNTIME = false,
-    XDG_CONFIG_HOME = vim.env.HOME..'/.local/config',
-    XDG_DATA_HOME = vim.env.HOME..'/.local/share',
-    XDG_STATE_HOME = vim.env.HOME..'/.local/state',
+    XDG_CONFIG_HOME = vim.env.HOME .. '/.local/config',
+    XDG_DATA_HOME = vim.env.HOME .. '/.local/share',
+    XDG_STATE_HOME = vim.env.HOME .. '/.local/state',
   }
 
   for name, default in pairs(envvars) do
     local value = vim.env[name] or default
     if value then
-      v = v:gsub(vim.pesc(value), '$'..name)
+      v = v:gsub(vim.pesc(value), '$' .. name)
     end
   end
 
@@ -507,28 +555,52 @@ end
 local function render_option_meta(_f, opt, write)
   write('')
   for _, l in ipairs(split(norm_text(opt.desc))) do
-    write('--- '..l)
+    write('--- ' .. l)
   end
 
-  write('--- @type '..OPTION_TYPES[opt.type])
-  write('vim.o.'..opt.full_name..' = '..render_option_default(opt.defaults))
+  write('--- @type ' .. OPTION_TYPES[opt.type])
+  write('vim.o.' .. opt.full_name .. ' = ' .. render_option_default(opt.defaults))
   if opt.abbreviation then
-    write('vim.o.'..opt.abbreviation..' = vim.o.'..opt.full_name)
+    write('vim.o.' .. opt.abbreviation .. ' = vim.o.' .. opt.full_name)
   end
 
   for _, s in pairs {
-    {'wo', 'window'},
-    {'bo', 'buffer'},
-    {'go', 'global'},
+    { 'wo', 'window' },
+    { 'bo', 'buffer' },
+    { 'go', 'global' },
   } do
     local id, scope = s[1], s[2]
     if vim.list_contains(opt.scope, scope) or (id == 'go' and #opt.scope > 1) then
-      local pfx = 'vim.'..id..'.'
-      write(pfx..opt.full_name..' = vim.o.'..opt.full_name)
+      local pfx = 'vim.' .. id .. '.'
+      write(pfx .. opt.full_name .. ' = vim.o.' .. opt.full_name)
       if opt.abbreviation then
-        write(pfx..opt.abbreviation..' = '..pfx..opt.full_name)
+        write(pfx .. opt.abbreviation .. ' = ' .. pfx .. opt.full_name)
       end
     end
+  end
+end
+
+--- @param _f string
+--- @param opt vim.option_meta
+--- @param write fun(line: string)
+local function render_vvar_meta(_f, opt, write)
+  write('')
+
+  local desc = split(norm_text(opt.desc))
+  while desc[#desc]:match('^%s*$') do
+    desc[#desc] = nil
+  end
+
+  for _, l in ipairs(desc) do
+    write('--- ' .. l)
+  end
+
+  write('--- @type ' .. (opt.type or 'any'))
+
+  if LUA_KEYWORDS[opt.full_name] then
+    write("vim.v['" .. opt.full_name .. "'] = ...")
+  else
+    write('vim.v.' .. opt.full_name .. ' = ...')
   end
 end
 
@@ -539,14 +611,14 @@ local function scope_to_doc(s)
     global = 'global',
     buffer = 'local to buffer',
     window = 'local to window',
-    tab = 'local to tab page'
+    tab = 'local to tab page',
   }
 
   if #s == 1 then
     return m[s[1]]
   end
   assert(s[1] == 'global')
-  return 'global or '..m[s[2]]..' |global-local|'
+  return 'global or ' .. m[s[2]] .. ' |global-local|'
 end
 
 -- @param o vim.option_meta
@@ -572,6 +644,21 @@ local function scope_more_doc(o)
   return ''
 end
 
+--- @param x string
+--- @return string
+local function dedent(x)
+  local xs = split(x)
+  local leading_ws = xs[1]:match('^%s*') --[[@as string]]
+  local leading_ws_pat = '^' .. leading_ws
+
+  for i in ipairs(xs) do
+    local strip_pat = xs[i]:match(leading_ws_pat) and leading_ws_pat or '^%s*'
+    xs[i] = xs[i]:gsub(strip_pat, '')
+  end
+
+  return table.concat(xs, '\n')
+end
+
 --- @return table<string,vim.option_meta>
 local function get_option_meta()
   local opts = require('src/nvim/options').options
@@ -594,29 +681,41 @@ local function get_option_meta()
   return ret
 end
 
+--- @return table<string,vim.option_meta>
+local function get_vvar_meta()
+  local info = require('src/nvim/vvars').vars
+  local ret = {} --- @type table<string,vim.option_meta>
+  for name, o in pairs(info) do
+    o.desc = dedent(o.desc)
+    o.full_name = name
+    ret[name] = o
+  end
+  return ret
+end
+
 --- @param opt vim.option_meta
 --- @return string[]
 local function build_option_tags(opt)
   --- @type string[]
   local tags = { opt.full_name }
 
-  tags[#tags+1] = opt.abbreviation
-  if opt.type == 'bool' then
+  tags[#tags + 1] = opt.abbreviation
+  if opt.type == 'boolean' then
     for i = 1, #tags do
-      tags[#tags+1] = 'no'..tags[i]
+      tags[#tags + 1] = 'no' .. tags[i]
     end
   end
 
   for i, t in ipairs(tags) do
-    tags[i] = "'"..t.."'"
+    tags[i] = "'" .. t .. "'"
   end
 
   for _, t in ipairs(opt.tags or {}) do
-    tags[#tags+1] = t
+    tags[#tags + 1] = t
   end
 
   for i, t in ipairs(tags) do
-    tags[i] = "*"..t.."*"
+    tags[i] = '*' .. t .. '*'
   end
 
   return tags
@@ -628,10 +727,10 @@ end
 local function render_option_doc(_f, opt, write)
   local tags = build_option_tags(opt)
   local tag_str = table.concat(tags, ' ')
-  local conceal_offset = 2*(#tags - 1)
+  local conceal_offset = 2 * (#tags - 1)
   local tag_pad = string.rep('\t', math.ceil((64 - #tag_str + conceal_offset) / 8))
   -- local pad = string.rep(' ', 80 - #tag_str + conceal_offset)
-  write(tag_pad..tag_str)
+  write(tag_pad .. tag_str)
 
   local name_str --- @type string
   if opt.abbreviation then
@@ -640,26 +739,65 @@ local function render_option_doc(_f, opt, write)
     name_str = string.format("'%s'", opt.full_name)
   end
 
-  local otype = opt.type == 'bool' and 'boolean' or opt.type
+  local otype = opt.type == 'boolean' and 'boolean' or opt.type
   if opt.defaults.doc or opt.defaults.if_true ~= nil or opt.defaults.meta ~= nil then
     local v = render_option_default(opt.defaults, true)
     local pad = string.rep('\t', math.max(1, math.ceil((24 - #name_str) / 8)))
     if opt.defaults.doc then
       local deflen = #string.format('%s%s%s (', name_str, pad, otype)
       --- @type string
-      v = v:gsub('\n', '\n'..string.rep(' ', deflen - 2))
+      v = v:gsub('\n', '\n' .. string.rep(' ', deflen - 2))
     end
     write(string.format('%s%s%s\t(default %s)', name_str, pad, otype, v))
   else
     write(string.format('%s\t%s', name_str, otype))
   end
 
-  write('\t\t\t'..scope_to_doc(opt.scope)..scope_more_doc(opt))
+  write('\t\t\t' .. scope_to_doc(opt.scope) .. scope_more_doc(opt))
   for _, l in ipairs(split(opt.desc)) do
     if l == '<' or l:match('^<%s') then
       write(l)
     else
-      write('\t'..l:gsub('\\<', '<'))
+      write('\t' .. l:gsub('\\<', '<'))
+    end
+  end
+end
+
+--- @param _f string
+--- @param vvar vim.option_meta
+--- @param write fun(line: string)
+local function render_vvar_doc(_f, vvar, write)
+  local name = vvar.full_name
+
+  local tags = { 'v:' .. name, name .. '-variable' }
+  if vvar.tags then
+    vim.list_extend(tags, vvar.tags)
+  end
+
+  for i, t in ipairs(tags) do
+    tags[i] = '*' .. t .. '*'
+  end
+
+  local tag_str = table.concat(tags, ' ')
+  local conceal_offset = 2 * (#tags - 1)
+
+  local tag_pad = string.rep('\t', math.ceil((64 - #tag_str + conceal_offset) / 8))
+  write(tag_pad .. tag_str)
+
+  local desc = split(vvar.desc)
+
+  if (#desc == 1 or #desc == 2 and desc[2]:match('^%s*$')) and #name < 10 then
+    -- single line
+    write('v:' .. name .. '\t' .. desc[1]:gsub('^%s*', ''))
+    write('')
+  else
+    write('v:' .. name)
+    for _, l in ipairs(desc) do
+      if l == '<' or l:match('^<%s') then
+        write(l)
+      else
+        write('\t\t' .. l:gsub('\\<', '<'))
+      end
     end
   end
 end
@@ -749,21 +887,37 @@ local CONFIG = {
     header = { '' },
     from = 'A jump table for the options with a short description can be found at |Q_op|.',
     footer = {
-      ' vim:tw=78:ts=8:noet:ft=help:norl:'
+      ' vim:tw=78:ts=8:noet:ft=help:norl:',
     },
     funcs = get_option_meta,
     render = render_option_doc,
-  }
+  },
+  {
+    path = 'runtime/lua/vim/_meta/vvars.lua',
+    header = LUA_VVAR_META_HEADER,
+    funcs = get_vvar_meta,
+    render = render_vvar_meta,
+  },
+  {
+    path = 'runtime/doc/vvars.txt',
+    header = { '' },
+    from = 'Type |gO| to see the table of contents.',
+    footer = {
+      ' vim:tw=78:ts=8:noet:ft=help:norl:',
+    },
+    funcs = get_vvar_meta,
+    render = render_vvar_doc,
+  },
 }
 
 --- @param elem nvim.gen_eval_files.elem
 local function render(elem)
-  print('Rendering '..elem.path)
-  local from_lines = {}  --- @type string[]
+  print('Rendering ' .. elem.path)
+  local from_lines = {} --- @type string[]
   local from = elem.from
   if from then
     for line in io.lines(elem.path) do
-      from_lines[#from_lines+1] = line
+      from_lines[#from_lines + 1] = line
       if line:match(from) then
         break
       end

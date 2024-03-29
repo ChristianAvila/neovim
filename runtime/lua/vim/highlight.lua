@@ -1,4 +1,4 @@
----@defgroup vim.highlight
+---@brief
 ---
 --- Nvim includes a function for highlighting a selection on yank.
 ---
@@ -19,18 +19,19 @@
 --- ```vim
 --- au TextYankPost * silent! lua vim.highlight.on_yank {on_visual=false}
 --- ```
+---
 
 local api = vim.api
 
 local M = {}
 
 --- Table with default priorities used for highlighting:
----     - `syntax`: `50`, used for standard syntax highlighting
----     - `treesitter`: `100`, used for tree-sitter-based highlighting
----     - `semantic_tokens`: `125`, used for LSP semantic token highlighting
----     - `diagnostics`: `150`, used for code analysis such as diagnostics
----     - `user`: `200`, used for user-triggered highlights such as LSP document
----       symbols or `on_yank` autocommands
+--- - `syntax`: `50`, used for standard syntax highlighting
+--- - `treesitter`: `100`, used for treesitter-based highlighting
+--- - `semantic_tokens`: `125`, used for LSP semantic token highlighting
+--- - `diagnostics`: `150`, used for code analysis such as diagnostics
+--- - `user`: `200`, used for user-triggered highlights such as LSP document
+---   symbols or `on_yank` autocommands
 M.priorities = {
   syntax = 50,
   treesitter = 100,
@@ -39,6 +40,23 @@ M.priorities = {
   user = 200,
 }
 
+--- @class vim.highlight.range.Opts
+--- @inlinedoc
+---
+--- Type of range. See [setreg()]
+--- (default: `'charwise'`)
+--- @field regtype? string
+---
+--- Indicates whether the range is end-inclusive
+--- (default: `false`)
+--- @field inclusive? boolean
+---
+--- Indicates priority of highlight
+--- (default: `vim.highlight.priorities.user`)
+--- @field priority? integer
+---
+--- @field package _scoped? boolean
+
 --- Apply highlight group to range of text.
 ---
 ---@param bufnr integer Buffer number to apply highlighting to
@@ -46,15 +64,13 @@ M.priorities = {
 ---@param higroup string Highlight group to use for highlighting
 ---@param start integer[]|string Start of region as a (line, column) tuple or string accepted by |getpos()|
 ---@param finish integer[]|string End of region as a (line, column) tuple or string accepted by |getpos()|
----@param opts table|nil Optional parameters
----            - regtype type of range (see |setreg()|, default charwise)
----            - inclusive boolean indicating whether the range is end-inclusive (default false)
----            - priority number indicating priority of highlight (default priorities.user)
+---@param opts? vim.highlight.range.Opts
 function M.range(bufnr, ns, higroup, start, finish, opts)
   opts = opts or {}
   local regtype = opts.regtype or 'v'
   local inclusive = opts.inclusive or false
   local priority = opts.priority or M.priorities.user
+  local scoped = opts._scoped or false
 
   -- TODO: in case of 'v', 'V' (not block), this should calculate equivalent
   -- bounds (row, col, end_row, end_col) as multiline regions are natively
@@ -72,12 +88,14 @@ function M.range(bufnr, ns, higroup, start, finish, opts)
       end_col = cols[2],
       priority = priority,
       strict = false,
+      scoped = scoped,
     })
   end
 end
 
 local yank_ns = api.nvim_create_namespace('hlyank')
-local yank_timer
+local yank_timer --- @type uv.uv_timer_t?
+local yank_cancel --- @type fun()?
 
 --- Highlight the yanked text
 ---
@@ -120,24 +138,30 @@ function M.on_yank(opts)
   local higroup = opts.higroup or 'IncSearch'
   local timeout = opts.timeout or 150
 
-  local bufnr = api.nvim_get_current_buf()
-  api.nvim_buf_clear_namespace(bufnr, yank_ns, 0, -1)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local winid = vim.api.nvim_get_current_win()
   if yank_timer then
     yank_timer:close()
+    assert(yank_cancel)
+    yank_cancel()
   end
 
   M.range(bufnr, yank_ns, higroup, "'[", "']", {
     regtype = event.regtype,
     inclusive = event.inclusive,
     priority = opts.priority or M.priorities.user,
+    _scoped = true,
   })
+  vim.api.nvim_win_add_ns(winid, yank_ns)
 
-  yank_timer = vim.defer_fn(function()
+  yank_cancel = function()
     yank_timer = nil
-    if api.nvim_buf_is_valid(bufnr) then
-      api.nvim_buf_clear_namespace(bufnr, yank_ns, 0, -1)
-    end
-  end, timeout)
+    yank_cancel = nil
+    pcall(vim.api.nvim_buf_clear_namespace, bufnr, yank_ns, 0, -1)
+    pcall(vim.api.nvim_win_remove_ns, winid, yank_ns)
+  end
+
+  yank_timer = vim.defer_fn(yank_cancel, timeout)
 end
 
 return M

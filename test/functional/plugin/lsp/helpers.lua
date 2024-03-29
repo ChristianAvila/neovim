@@ -4,18 +4,20 @@ local clear = helpers.clear
 local exec_lua = helpers.exec_lua
 local run = helpers.run
 local stop = helpers.stop
-local NIL = helpers.NIL
+local NIL = vim.NIL
 
 local M = {}
 
 function M.clear_notrace()
   -- problem: here be dragons
   -- solution: don't look too closely for dragons
-  clear {env={
-    NVIM_LUA_NOTRACK="1";
-    NVIM_APPNAME="nvim_lsp_test";
-    VIMRUNTIME=os.getenv"VIMRUNTIME";
-  }}
+  clear {
+    env = {
+      NVIM_LUA_NOTRACK = '1',
+      NVIM_APPNAME = 'nvim_lsp_test',
+      VIMRUNTIME = os.getenv 'VIMRUNTIME',
+    },
+  }
 end
 
 M.create_server_definition = [[
@@ -79,7 +81,8 @@ M.fake_lsp_code = 'test/functional/fixtures/fake-lsp-server.lua'
 M.fake_lsp_logfile = 'Xtest-fake-lsp.log'
 
 local function fake_lsp_server_setup(test_name, timeout_ms, options, settings)
-  exec_lua([=[
+  exec_lua(
+    [=[
     lsp = require('vim.lsp')
     local test_name, fake_lsp_code, fake_lsp_logfile, timeout, options, settings = ...
     TEST_RPC_CLIENT_ID = lsp.start_client {
@@ -102,6 +105,11 @@ local function fake_lsp_server_setup(test_name, timeout_ms, options, settings)
           uri = 'file://' .. vim.uv.cwd(),
           name = 'test_folder',
       }};
+      before_init = function(params, config)
+        vim.schedule(function()
+          vim.rpcrequest(1, "setup")
+        end)
+      end,
       on_init = function(client, result)
         TEST_RPC_CLIENT = client
         vim.rpcrequest(1, "init", result)
@@ -115,33 +123,68 @@ local function fake_lsp_server_setup(test_name, timeout_ms, options, settings)
         vim.rpcnotify(1, "exit", ...)
       end;
     }
-  ]=], test_name, M.fake_lsp_code, M.fake_lsp_logfile, timeout_ms or 1e3, options or {}, settings or {})
+  ]=],
+    test_name,
+    M.fake_lsp_code,
+    M.fake_lsp_logfile,
+    timeout_ms or 1e3,
+    options or {},
+    settings or {}
+  )
 end
 
+--- @class test.lsp.Config
+--- @field test_name string
+--- @field timeout_ms? integer
+--- @field options? table
+--- @field settings? table
+---
+--- @field on_setup? fun()
+--- @field on_init? fun(client: vim.lsp.Client, ...)
+--- @field on_handler? fun(...)
+--- @field on_exit? fun(code: integer, signal: integer)
+
+--- @param config test.lsp.Config
 function M.test_rpc_server(config)
   if config.test_name then
     M.clear_notrace()
-    fake_lsp_server_setup(config.test_name, config.timeout_ms or 1e3, config.options, config.settings)
+    fake_lsp_server_setup(
+      config.test_name,
+      config.timeout_ms or 1e3,
+      config.options,
+      config.settings
+    )
   end
   local client = setmetatable({}, {
     __index = function(_, name)
       -- Workaround for not being able to yield() inside __index for Lua 5.1 :(
       -- Otherwise I would just return the value here.
       return function(...)
-        return exec_lua([=[
+        return exec_lua(
+          [=[
         local name = ...
         if type(TEST_RPC_CLIENT[name]) == 'function' then
           return TEST_RPC_CLIENT[name](select(2, ...))
         else
           return TEST_RPC_CLIENT[name]
         end
-        ]=], name, ...)
+        ]=],
+          name,
+          ...
+        )
       end
-    end;
+    end,
   })
+  --- @type integer, integer
   local code, signal
   local function on_request(method, args)
-    if method == "init" then
+    if method == 'setup' then
+      if config.on_setup then
+        config.on_setup()
+      end
+      return NIL
+    end
+    if method == 'init' then
       if config.on_init then
         config.on_init(client, unpack(args))
       end
@@ -161,8 +204,8 @@ function M.test_rpc_server(config)
     end
   end
   --  TODO specify timeout?
-  --  run(on_request, on_notify, config.on_setup, 1000)
-  run(on_request, on_notify, config.on_setup)
+  --  run(on_request, on_notify, nil, 1000)
+  run(on_request, on_notify, nil)
   if config.on_exit then
     config.on_exit(code, signal)
   end

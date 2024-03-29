@@ -151,8 +151,11 @@ Syntax: clint.py [--verbose=#] [--output=vs7] [--filter=-x,+y,...]
 _ERROR_CATEGORIES = [
     'build/endif_comment',
     'build/header_guard',
+    'build/include_defs',
+    'build/defs_header',
     'build/printf_format',
     'build/storage_class',
+    'build/init_macro',
     'readability/bool',
     'readability/multiline_comment',
     'readability/multiline_string',
@@ -748,53 +751,6 @@ BRACES = {
 }
 
 
-CLOSING_BRACES = {v: k for k, v in BRACES.items()}
-
-
-def GetExprBracesPosition(clean_lines, linenum, pos):
-    """List positions of all kinds of braces
-
-    If input points to ( or { or [ then function proceeds until finding the
-    position which closes it.
-
-    Args:
-      clean_lines: A CleansedLines instance containing the file.
-      linenum: Current line number.
-      pos: A position on the line.
-
-    Yields:
-      A tuple (linenum, pos, brace, depth) that points to each brace.
-      Additionally each new line (linenum, pos, 's', depth) is yielded, for each
-      line end (linenum, pos, 'e', depth) is yielded and at the very end it
-      yields (linenum, pos, None, None).
-    """
-    depth = 0
-    yielded_line_start = True
-    startpos = pos
-    while linenum < clean_lines.NumLines() - 1:
-        line = clean_lines.elided_with_space_strings[linenum]
-        if not line.startswith('#') or yielded_line_start:
-            # Ignore #ifdefs, but not if it is macros that are checked
-            for i, brace in enumerate(line[startpos:]):
-                pos = i + startpos
-                if brace != ' ' and not yielded_line_start:
-                    yield (linenum, pos, 's', depth)
-                    yielded_line_start = True
-                if brace in BRACES:
-                    depth += 1
-                    yield (linenum, pos, brace, depth)
-                elif brace in CLOSING_BRACES:
-                    yield (linenum, pos, brace, depth)
-                    depth -= 1
-                if depth == 0:
-                    yield (linenum, pos, None, None)
-                    return
-            yield (linenum, len(line) - 1, 'e', depth)
-        yielded_line_start = False
-        startpos = 0
-        linenum += 1
-
-
 def FindEndOfExpressionInLine(line, startpos, depth, startchar, endchar):
     """Find the position just after the matching endchar.
 
@@ -878,6 +834,86 @@ def CheckForHeaderGuard(filename, lines, error):
     if "#pragma once" not in lines:
         error(filename, 0, 'build/header_guard', 5,
               'No "#pragma once" found in header')
+
+
+def CheckIncludes(filename, lines, error):
+    """Checks that headers only include _defs headers.
+
+    Args:
+      filename: The name of the C++ header file.
+      lines: An array of strings, each representing a line of the file.
+      error: The function to call with any errors found.
+    """
+    if (filename.endswith('.c.h')
+            or filename.endswith('.in.h')
+            or FileInfo(filename).RelativePath() in {
+        'func_attr.h',
+        'os/pty_process.h',
+    }):
+        return
+
+    check_includes_ignore = [
+            "src/nvim/api/private/validate.h",
+            "src/nvim/assert_defs.h",
+            "src/nvim/channel.h",
+            "src/nvim/charset.h",
+            "src/nvim/eval/typval.h",
+            "src/nvim/event/multiqueue.h",
+            "src/nvim/garray.h",
+            "src/nvim/globals.h",
+            "src/nvim/highlight.h",
+            "src/nvim/lua/executor.h",
+            "src/nvim/main.h",
+            "src/nvim/mark.h",
+            "src/nvim/msgpack_rpc/channel_defs.h",
+            "src/nvim/msgpack_rpc/unpacker.h",
+            "src/nvim/option.h",
+            "src/nvim/os/pty_conpty_win.h",
+            "src/nvim/os/pty_process_win.h",
+                             ]
+
+    skip_headers = [
+            "auto/config.h",
+            "klib/klist.h",
+            "klib/kvec.h",
+            "mpack/mpack_core.h",
+            "mpack/object.h",
+            "nvim/func_attr.h",
+            "termkey/termkey.h",
+            ]
+
+    for i in check_includes_ignore:
+        if filename.endswith(i):
+            return
+
+    for i, line in enumerate(lines):
+        matched = Match(r'#\s*include\s*"([^"]*)"', line)
+        if matched:
+            name = matched.group(1)
+            if name in skip_headers:
+                continue
+            if (not name.endswith('.h.generated.h') and
+                    not name.endswith('/defs.h') and
+                    not name.endswith('_defs.h') and
+                    not name.endswith('_defs.generated.h') and
+                    not name.endswith('_enum.generated.h')):
+                error(filename, i, 'build/include_defs', 5,
+                      'Headers should not include non-"_defs" headers')
+
+
+def CheckNonSymbols(filename, lines, error):
+    """Checks that a _defs.h header only contains non-symbols.
+
+    Args:
+      filename: The name of the C++ header file.
+      lines: An array of strings, each representing a line of the file.
+      error: The function to call with any errors found.
+    """
+    for i, line in enumerate(lines):
+        # Only a check against extern variables for now.
+        if line.startswith('EXTERN ') or line.startswith('extern '):
+            error(filename, i, 'build/defs_header', 5,
+                  '"_defs" headers should not contain extern variables')
 
 
 def CheckForBadCharacters(filename, lines, error):
@@ -1578,8 +1614,7 @@ def CheckSpacing(filename, clean_lines, linenum, error):
                   line[commentpos - 1] not in string.whitespace) or
                  (commentpos >= 2 and
                   line[commentpos - 2] not in string.whitespace))):
-                error(filename, linenum, 'whitespace/comments', 2,
-                      'At least two spaces is best between code and comments')
+                return
             # There should always be a space between the // and the comment
             commentend = commentpos + 2
             if commentend < len(line) and not line[commentend] == ' ':
@@ -1654,7 +1689,7 @@ def CheckSpacing(filename, clean_lines, linenum, error):
 
         # Look for < that is not surrounded by spaces.  This is only
         # triggered if both sides are missing spaces, even though
-        # technically should should flag if at least one side is missing a
+        # technically should flag if at least one side is missing a
         # space.  This is done to avoid some false positives with shifts.
         match = Search(r'[^\s<]<([^\s=<].*)', reduced_line)
         if (match and not FindNextMatchingAngleBracket(clean_lines, linenum,
@@ -1690,8 +1725,7 @@ def CheckSpacing(filename, clean_lines, linenum, error):
     # There shouldn't be space around unary operators
     match = Search(r'(!\s|~\s|[\s]--[\s;]|[\s]\+\+[\s;])', line)
     if match:
-        error(filename, linenum, 'whitespace/operators', 4,
-              'Extra space for operator %s' % match.group(1))
+        return
 
     # For if/for/while/switch, the left and right parens should be
     # consistent about how many spaces are inside the parens, and
@@ -1973,7 +2007,7 @@ def CheckLanguage(filename, clean_lines, linenum, error):
         if match:
             error(filename, linenum, 'runtime/deprecated', 4,
                   'Accessing list_T internals directly is prohibited; '
-                  'see https://github.com/neovim/neovim/wiki/List-management-in-Neovim')
+                  'see https://neovim.io/doc/user/dev_vimpatch.html#dev-vimpatch-list-management')
 
     # Check for suspicious usage of "if" like
     # } if (a == b) {
@@ -2053,6 +2087,11 @@ def CheckLanguage(filename, clean_lines, linenum, error):
                   "Do not use variable-length arrays.  Use an appropriately"
                   " named ('k' followed by CamelCase) compile-time constant for"
                   " the size.")
+
+    # INIT() macro should only be used in header files.
+    if not filename.endswith('.h') and Search(r' INIT\(', line):
+        error(filename, linenum, 'build/init_macro', 4,
+              'INIT() macro should only be used in header files.')
 
     # Detect TRUE and FALSE.
     match = Search(r'\b(TRUE|FALSE)\b', line)
@@ -2166,6 +2205,9 @@ def ProcessFileData(filename, file_extension, lines, error,
 
     if file_extension == 'h':
         CheckForHeaderGuard(filename, lines, error)
+        CheckIncludes(filename, lines, error)
+        if filename.endswith('/defs.h') or filename.endswith('_defs.h'):
+            CheckNonSymbols(filename, lines, error)
 
     RemoveMultiLineComments(filename, lines, error)
     clean_lines = CleansedLines(lines, init_lines)

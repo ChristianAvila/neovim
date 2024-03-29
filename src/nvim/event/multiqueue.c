@@ -45,11 +45,10 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <uv.h>
 
 #include "nvim/event/defs.h"
 #include "nvim/event/multiqueue.h"
-#include "nvim/lib/queue.h"
+#include "nvim/lib/queue_defs.h"
 #include "nvim/memory.h"
 
 typedef struct multiqueue_item MultiQueueItem;
@@ -157,7 +156,7 @@ void multiqueue_purge_events(MultiQueue *self)
 {
   assert(self);
   while (!multiqueue_empty(self)) {
-    (void)multiqueue_remove(self);
+    multiqueue_remove(self);
   }
 }
 
@@ -261,7 +260,7 @@ Event event_create_oneshot(Event ev, int num)
   data->event = ev;
   data->fired = false;
   data->refcount = num;
-  return event_create(multiqueue_oneshot_event, 1, data);
+  return event_create(multiqueue_oneshot_event, data);
 }
 static void multiqueue_oneshot_event(void **argv)
 {

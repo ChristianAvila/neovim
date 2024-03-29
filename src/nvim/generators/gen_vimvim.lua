@@ -41,12 +41,14 @@ end
 -- Exclude these from the vimCommand keyword list, they are handled specially
 -- in syntax/vim.vim (vimAugroupKey, vimAutoCmd, vimGlobal, vimSubst). #9327
 local function is_special_cased_cmd(cmd)
-  return (cmd == 'augroup'
-          or cmd == 'autocmd'
-          or cmd == 'doautocmd'
-          or cmd == 'doautoall'
-          or cmd == 'global'
-          or cmd == 'substitute')
+  return (
+    cmd == 'augroup'
+    or cmd == 'autocmd'
+    or cmd == 'doautocmd'
+    or cmd == 'doautoall'
+    or cmd == 'global'
+    or cmd == 'substitute'
+  )
 end
 
 local vimcmd_start = 'syn keyword vimCommand contained '
@@ -81,7 +83,7 @@ local vimopt_start = 'syn keyword vimOption contained '
 w('\n\n' .. vimopt_start)
 
 for _, opt_desc in ipairs(options.options) do
-  if not opt_desc.varname or opt_desc.varname:sub(1, 7) ~= 'p_force' then
+  if not opt_desc.immutable then
     if lld.line_length > 850 then
       w('\n' .. vimopt_start)
     end
@@ -89,7 +91,7 @@ for _, opt_desc in ipairs(options.options) do
     if opt_desc.abbreviation then
       w(' ' .. opt_desc.abbreviation)
     end
-    if opt_desc.type == 'bool' then
+    if opt_desc.type == 'boolean' then
       w(' inv' .. opt_desc.full_name)
       w(' no' .. opt_desc.full_name)
       if opt_desc.abbreviation then
@@ -133,7 +135,7 @@ end
 w('\n\nsyn case match')
 local vimfun_start = 'syn keyword vimFuncName contained '
 w('\n\n' .. vimfun_start)
-local funcs = mpack.decode(io.open(funcs_file, 'rb'):read("*all"))
+local funcs = mpack.decode(io.open(funcs_file, 'rb'):read('*all'))
 for _, name in ipairs(funcs) do
   if name then
     if lld.line_length > 850 then

@@ -4,11 +4,8 @@
 #include <stdbool.h>
 #include <uv.h>
 
-#include "nvim/api/private/defs.h"
 #include "nvim/api/private/dispatch.h"
-#include "nvim/event/process.h"
-#include "nvim/event/socket.h"
-#include "nvim/vim.h"
+#include "nvim/map_defs.h"
 
 typedef struct Channel Channel;
 typedef struct Unpacker Unpacker;

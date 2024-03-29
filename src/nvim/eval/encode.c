@@ -14,22 +14,23 @@
 
 #include "klib/kvec.h"
 #include "msgpack/pack.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/eval.h"
 #include "nvim/eval/encode.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_encode.h"
 #include "nvim/garray.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
+#include "nvim/globals.h"
 #include "nvim/hashtab.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/math.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"  // For _()
+#include "nvim/types_defs.h"
+#include "nvim/vim_defs.h"  // For _()
 
 const char *const encode_bool_var_names[] = {
   [kBoolVarTrue] = "v:true",
@@ -1055,3 +1056,17 @@ char *encode_tv2json(typval_T *tv, size_t *len)
 #undef TYPVAL_ENCODE_CONV_LIST_BETWEEN_ITEMS
 #undef TYPVAL_ENCODE_CONV_RECURSE
 #undef TYPVAL_ENCODE_ALLOW_SPECIALS
+
+/// Initialize ListReaderState structure
+ListReaderState encode_init_lrstate(const list_T *const list)
+  FUNC_ATTR_NONNULL_ALL
+{
+  return (ListReaderState) {
+    .list = list,
+    .li = tv_list_first(list),
+    .offset = 0,
+    .li_length = (TV_LIST_ITEM_TV(tv_list_first(list))->vval.v_string == NULL
+                  ? 0
+                  : strlen(TV_LIST_ITEM_TV(tv_list_first(list))->vval.v_string)),
+  };
+}

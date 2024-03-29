@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "nvim/api/keysets.h"
+#include "nvim/api/keysets_defs.h"
 #include "nvim/api/private/converter.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
@@ -14,12 +14,14 @@
 #include "nvim/context.h"
 #include "nvim/eval/encode.h"
 #include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/hashtab.h"
 #include "nvim/keycodes.h"
 #include "nvim/memory.h"
 #include "nvim/option.h"
+#include "nvim/option_defs.h"
 #include "nvim/shada.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -138,8 +140,8 @@ bool ctx_restore(Context *ctx, const int flags)
     free_ctx = true;
   }
 
-  OptVal op_shada = get_option_value("shada", NULL, OPT_GLOBAL, NULL);
-  set_option_value("shada", STATIC_CSTR_AS_OPTVAL("!,'100,%"), OPT_GLOBAL);
+  OptVal op_shada = get_option_value(kOptShada, OPT_GLOBAL);
+  set_option_value(kOptShada, STATIC_CSTR_AS_OPTVAL("!,'100,%"), OPT_GLOBAL);
 
   if (flags & kCtxRegs) {
     ctx_restore_regs(ctx);
@@ -165,7 +167,7 @@ bool ctx_restore(Context *ctx, const int flags)
     ctx_free(ctx);
   }
 
-  set_option_value("shada", op_shada, OPT_GLOBAL);
+  set_option_value(kOptShada, op_shada, OPT_GLOBAL);
   optval_free(op_shada);
 
   return true;
@@ -294,7 +296,7 @@ static inline void ctx_restore_funcs(Context *ctx)
 /// @param[in]  sbuf  msgpack_sbuffer to convert.
 ///
 /// @return readfile()-style array representation of "sbuf".
-static inline Array sbuf_to_array(msgpack_sbuffer sbuf)
+static inline Array sbuf_to_array(msgpack_sbuffer sbuf, Arena *arena)
 {
   list_T *const list = tv_list_alloc(kListLenMayKnow);
   tv_list_append_string(list, "", 0);
@@ -308,7 +310,7 @@ static inline Array sbuf_to_array(msgpack_sbuffer sbuf)
     .vval.v_list = list
   };
 
-  Array array = vim_to_object(&list_tv).data.array;
+  Array array = vim_to_object(&list_tv, arena, false).data.array;
   tv_clear(&list_tv);
   return array;
 }
@@ -326,9 +328,7 @@ static inline msgpack_sbuffer array_to_sbuf(Array array, Error *err)
   msgpack_sbuffer_init(&sbuf);
 
   typval_T list_tv;
-  if (!object_to_vim(ARRAY_OBJ(array), &list_tv, err)) {
-    return sbuf;
-  }
+  object_to_vim(ARRAY_OBJ(array), &list_tv, err);
 
   assert(list_tv.v_type == VAR_LIST);
   if (!encode_vim_list_to_buf(list_tv.vval.v_list, &sbuf.size, &sbuf.data)) {
@@ -346,18 +346,18 @@ static inline msgpack_sbuffer array_to_sbuf(Array array, Error *err)
 /// @param[in]  ctx  Context to convert.
 ///
 /// @return Dictionary representing "ctx".
-Dictionary ctx_to_dict(Context *ctx)
+Dictionary ctx_to_dict(Context *ctx, Arena *arena)
   FUNC_ATTR_NONNULL_ALL
 {
   assert(ctx != NULL);
 
-  Dictionary rv = ARRAY_DICT_INIT;
+  Dictionary rv = arena_dict(arena, 5);
 
-  PUT(rv, "regs", ARRAY_OBJ(sbuf_to_array(ctx->regs)));
-  PUT(rv, "jumps", ARRAY_OBJ(sbuf_to_array(ctx->jumps)));
-  PUT(rv, "bufs", ARRAY_OBJ(sbuf_to_array(ctx->bufs)));
-  PUT(rv, "gvars", ARRAY_OBJ(sbuf_to_array(ctx->gvars)));
-  PUT(rv, "funcs", ARRAY_OBJ(copy_array(ctx->funcs, NULL)));
+  PUT_C(rv, "regs", ARRAY_OBJ(sbuf_to_array(ctx->regs, arena)));
+  PUT_C(rv, "jumps", ARRAY_OBJ(sbuf_to_array(ctx->jumps, arena)));
+  PUT_C(rv, "bufs", ARRAY_OBJ(sbuf_to_array(ctx->bufs, arena)));
+  PUT_C(rv, "gvars", ARRAY_OBJ(sbuf_to_array(ctx->gvars, arena)));
+  PUT_C(rv, "funcs", ARRAY_OBJ(copy_array(ctx->funcs, arena)));
 
   return rv;
 }

@@ -10,41 +10,27 @@ on:
       - '**/CMakePresets.json'
       - 'cmake.*/**'
       - '.github/**'
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   BIN_DIR: ${{ github.workspace }}/bin
   INSTALL_PREFIX: ${{ github.workspace }}/nvim-install
 
 jobs:
-  macos-universal:
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - run: ./.github/scripts/install_deps.sh
-      - run: printf 'NVIM_BUILD_TYPE=Release\n' >> $GITHUB_ENV
-
-      - name: Build universal binary
-        run: ./.github/scripts/build_universal_macos.sh
-
   old-cmake:
     name: Test oldest supported cmake
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
-      CMAKE_URL: 'https://cmake.org/files/v3.10/cmake-3.10.0-Linux-x86_64.sh'
-      CMAKE_VERSION: '3.10.0'
+      CMAKE_URL: 'https://cmake.org/files/v3.13/cmake-3.13.0-Linux-x86_64.sh'
+      CMAKE_VERSION: '3.13.0'
     steps:
       - uses: actions/checkout@v4
-      - run: ./.github/scripts/install_deps.sh
-
-      - name: Set up environment
-        run: echo "$BIN_DIR" >> $GITHUB_PATH
-
+      - uses: ./.github/actions/setup
 
       - name: Install minimum required version of cmake
         run: |
@@ -73,7 +59,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - run: ./.github/scripts/install_deps.sh
+      - uses: ./.github/actions/setup
 
       - name: Build bundled dependencies
         run: make deps

@@ -1,13 +1,17 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>  // IWYU pragma: keep
 
+#include "nvim/api/private/defs.h"  // IWYU pragma: keep
 #include "nvim/api/private/helpers.h"
-#include "nvim/cmdexpand_defs.h"
+#include "nvim/cmdexpand_defs.h"  // IWYU pragma: keep
 #include "nvim/eval/typval_defs.h"
-#include "nvim/ex_cmds_defs.h"
-#include "nvim/option_defs.h"
-#include "nvim/search.h"
+#include "nvim/ex_cmds_defs.h"  // IWYU pragma: keep
+#include "nvim/macros_defs.h"
+#include "nvim/option_defs.h"  // IWYU pragma: keep
+#include "nvim/types_defs.h"  // IWYU pragma: keep
 
 /// The options that are local to a window or buffer have "indir" set to one of
 /// these values.  Special values:
@@ -35,17 +39,18 @@ typedef enum {
 // buffers.  Indicate this by setting "var" to VAR_WIN.
 #define VAR_WIN ((char *)-1)
 
-typedef struct vimoption {
-  char *fullname;    ///< full option name
-  char *shortname;   ///< permissible abbreviation
-  uint32_t flags;    ///< see above
-  void *var;         ///< global option: pointer to variable;
-                     ///< window-local option: VAR_WIN;
-                     ///< buffer-local option: global value
-  idopt_T indir;     ///< global option: PV_NONE;
-                     ///< local option: indirect option index
-                     ///< callback function to invoke after an option is modified to validate and
-                     ///< apply the new value.
+typedef struct {
+  char *fullname;           ///< full option name
+  char *shortname;          ///< permissible abbreviation
+  uint32_t flags;           ///< see above
+  OptTypeFlags type_flags;  ///< option type flags, see OptValType
+  void *var;                ///< global option: pointer to variable;
+                            ///< window-local option: VAR_WIN;
+                            ///< buffer-local option: global value
+  idopt_T indir;            ///< global option: PV_NONE;
+                            ///< local option: indirect option index
+  bool hidden;              ///< option is hidden, any attempt to set its value will be ignored.
+  bool immutable;           ///< option is immutable, trying to set its value will give an error.
 
   /// callback function to invoke after an option is modified to validate and
   /// apply the new value.
@@ -56,7 +61,12 @@ typedef struct vimoption {
   opt_expand_cb_T opt_expand_cb;
 
   // TODO(famiu): Use OptVal for def_val.
-  void *def_val;     ///< default values for variable (neovim!!)
+  union {
+    int boolean;
+    OptInt number;
+    char *string;
+  } def_val;         ///< default value for variable
+
   LastSet last_set;  ///< script in which the option was last set
 } vimoption_T;
 
@@ -72,34 +82,38 @@ enum {
 /// When OPT_GLOBAL and OPT_LOCAL are both missing, set both local and global
 /// values, get local value.
 typedef enum {
-  // TODO(famiu): See if `OPT_FREE` is really necessary and remove it if not.
-  OPT_FREE      = 0x01,   ///< Free old value if it was allocated.
-  OPT_GLOBAL    = 0x02,   ///< Use global value.
-  OPT_LOCAL     = 0x04,   ///< Use local value.
-  OPT_MODELINE  = 0x08,   ///< Option in modeline.
-  OPT_WINONLY   = 0x10,   ///< Only set window-local options.
-  OPT_NOWIN     = 0x20,   ///< Don’t set window-local options.
-  OPT_ONECOLUMN = 0x40,   ///< list options one per line
-  OPT_NO_REDRAW = 0x80,   ///< ignore redraw flags on option
-  OPT_SKIPRTP   = 0x100,  ///< "skiprtp" in 'sessionoptions'
-} OptionFlags;
+  OPT_GLOBAL    = 0x01,  ///< Use global value.
+  OPT_LOCAL     = 0x02,  ///< Use local value.
+  OPT_MODELINE  = 0x04,  ///< Option in modeline.
+  OPT_WINONLY   = 0x08,  ///< Only set window-local options.
+  OPT_NOWIN     = 0x10,  ///< Don’t set window-local options.
+  OPT_ONECOLUMN = 0x20,  ///< list options one per line
+  OPT_NO_REDRAW = 0x40,  ///< ignore redraw flags on option
+  OPT_SKIPRTP   = 0x80,  ///< "skiprtp" in 'sessionoptions'
+} OptionSetFlags;
 
-/// Return value from get_option_value_strict
+/// Return value from get_option_attrs().
 enum {
-  SOPT_BOOL   = 0x01,  ///< Boolean option
-  SOPT_NUM    = 0x02,  ///< Number option
-  SOPT_STRING = 0x04,  ///< String option
-  SOPT_GLOBAL = 0x08,  ///< Option has global value
-  SOPT_WIN    = 0x10,  ///< Option has window-local value
-  SOPT_BUF    = 0x20,  ///< Option has buffer-local value
+  SOPT_GLOBAL = 0x01,  ///< Option has global value
+  SOPT_WIN    = 0x02,  ///< Option has window-local value
+  SOPT_BUF    = 0x04,  ///< Option has buffer-local value
 };
 
-/// Requested option scopes for various functions in option.c
-typedef enum {
-  kOptReqGlobal = 0,  ///< Request global option value
-  kOptReqWin    = 1,  ///< Request window-local option value
-  kOptReqBuf    = 2,  ///< Request buffer-local option value
-} OptReqScope;
+/// Get name of OptValType as a string.
+static inline const char *optval_type_get_name(const OptValType type)
+{
+  switch (type) {
+  case kOptValTypeNil:
+    return "nil";
+  case kOptValTypeBoolean:
+    return "boolean";
+  case kOptValTypeNumber:
+    return "number";
+  case kOptValTypeString:
+    return "string";
+  }
+  UNREACHABLE;
+}
 
 // OptVal helper macros.
 #define NIL_OPTVAL ((OptVal) { .type = kOptValTypeNil })

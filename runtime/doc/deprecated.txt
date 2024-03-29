@@ -90,7 +90,7 @@ For each of the functions below, use the corresponding function in
 - *vim.lsp.diagnostic.enable()*
 - *vim.lsp.diagnostic.get()*
 - *vim.lsp.diagnostic.get_all()*	Use |vim.diagnostic.get()| instead.
-- *vim.lsp.diagnostic.get_count()*	Use |vim.diagnostic.get()| instead.
+- *vim.lsp.diagnostic.get_count()*	Use |vim.diagnostic.count()| instead.
 - *vim.lsp.diagnostic.get_line_diagnostics()* Use |vim.diagnostic.get()| instead.
 - *vim.lsp.diagnostic.get_next()*
 - *vim.lsp.diagnostic.get_next_pos()*
@@ -116,6 +116,9 @@ internally and are no longer exposed as part of the API. Instead, use
 - *vim.lsp.diagnostic.set_underline()*
 - *vim.lsp.diagnostic.set_virtual_text()*
 
+Configuring |diagnostic-signs| with |:sign-define| or |sign_define()| is no
+longer supported. Use the "signs" key of |vim.diagnostic.config()| instead.
+
 LSP FUNCTIONS
 - *vim.lsp.buf.server_ready()*
   Use |LspAttach| instead, depending on your use-case. "Server ready" is not
@@ -138,9 +141,11 @@ LSP FUNCTIONS
 - *vim.lsp.buf.range_formatting()*		Use |vim.lsp.formatexpr()|
 						or |vim.lsp.buf.format()| instead.
 - *vim.lsp.util.get_progress_messages()*	Use |vim.lsp.status()| or access
-						`progress` of |vim.lsp.client|
+						`progress` of |vim.lsp.Client|
 - *vim.lsp.get_active_clients()*		Use |vim.lsp.get_clients()|
 - *vim.lsp.for_each_buffer_client()*		Use |vim.lsp.get_clients()|
+- *vim.lsp.util.lookup_section()*		Use |vim.tbl_get()| and
+						|vim.split()| with {plain=true} instead.
 - *vim.lsp.util.trim_empty_lines()*		Use |vim.split()| with `trimempty` instead.
 - *vim.lsp.util.try_trim_markdown_code_blocks()*
 - *vim.lsp.util.set_lines()*
@@ -164,6 +169,7 @@ LUA
 - vim.register_keystroke_callback()	Use |vim.on_key()| instead.
 - *vim.pretty_print()*			Use |vim.print()| instead.
 - *vim.loop*				Use |vim.uv| instead.
+- *vim.tbl_add_reverse_lookup()*
 
 NORMAL COMMANDS
 - *]f* *[f*		Same as "gf".
@@ -171,7 +177,6 @@ NORMAL COMMANDS
 OPTIONS
 - *cpo-<* *:menu-<special>* *:menu-special* *:map-<special>* *:map-special*
   `<>` notation is always enabled.
-- 'gdefault'		Enables the |:substitute| flag 'g' by default.
 - *'fe'*		'fenc'+'enc' before Vim 6.0; no longer used.
 - *'highlight'* *'hl'*	Names of builtin |highlight-groups| cannot be changed.
 - *'langnoremap'*	Deprecated alias to 'nolangremap'.

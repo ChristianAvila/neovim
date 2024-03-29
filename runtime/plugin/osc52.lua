@@ -1,12 +1,20 @@
-local tty = vim.iter(vim.api.nvim_list_uis()):any(function(ui)
-  return ui.chan == 1 and ui.stdout_tty
-end)
+local tty = false
+for _, ui in ipairs(vim.api.nvim_list_uis()) do
+  if ui.chan == 1 and ui.stdout_tty then
+    tty = true
+    break
+  end
+end
 
 if not tty or vim.g.clipboard ~= nil or vim.o.clipboard ~= '' or not os.getenv('SSH_TTY') then
   return
 end
 
-require('vim.termcap').query('Ms', function(cap, seq)
+require('vim.termcap').query('Ms', function(cap, found, seq)
+  if not found then
+    return
+  end
+
   assert(cap == 'Ms')
 
   -- Check 'clipboard' and g:clipboard again to avoid a race condition
@@ -16,7 +24,7 @@ require('vim.termcap').query('Ms', function(cap, seq)
 
   -- If the terminal reports a sequence other than OSC 52 for the Ms capability
   -- then ignore it. We only support OSC 52 (for now)
-  if not seq:match('^\027%]52') then
+  if not seq or not seq:match('^\027%]52') then
     return
   end
 

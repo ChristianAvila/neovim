@@ -6,18 +6,20 @@
 #include <uv.h>
 
 #include "nvim/api/private/defs.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
+#include "nvim/autocmd_defs.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
 #include "nvim/event/rstream.h"
 #include "nvim/event/stream.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/keycodes.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/main.h"
 #include "nvim/msgpack_rpc/channel.h"
 #include "nvim/option_vars.h"
@@ -26,8 +28,9 @@
 #include "nvim/os/time.h"
 #include "nvim/profile.h"
 #include "nvim/rbuffer.h"
+#include "nvim/rbuffer_defs.h"
 #include "nvim/state.h"
-#include "nvim/vim.h"
+#include "nvim/state_defs.h"
 
 #define READ_BUFFER_SIZE 0xfff
 #define INPUT_BUFFER_SIZE (READ_BUFFER_SIZE * 4)
@@ -75,6 +78,13 @@ void input_stop(void)
   stream_close(&read_stream, NULL, NULL);
 }
 
+#ifdef EXITFREE
+void input_free_all_mem(void)
+{
+  rbuffer_free(input_buffer);
+}
+#endif
+
 static void cursorhold_event(void **argv)
 {
   event_T event = State & MODE_INSERT ? EVENT_CURSORHOLDI : EVENT_CURSORHOLD;
@@ -85,11 +95,11 @@ static void cursorhold_event(void **argv)
 static void create_cursorhold_event(bool events_enabled)
 {
   // If events are enabled and the queue has any items, this function should not
-  // have been called(inbuf_poll would return kInputAvail)
+  // have been called (inbuf_poll would return kInputAvail).
   // TODO(tarruda): Cursorhold should be implemented as a timer set during the
   // `state_check` callback for the states where it can be triggered.
   assert(!events_enabled || multiqueue_empty(main_loop.events));
-  multiqueue_put(main_loop.events, cursorhold_event, 0);
+  multiqueue_put(main_loop.events, cursorhold_event, NULL);
 }
 
 static void restart_cursorhold_wait(int tb_change_cnt)
@@ -100,7 +110,7 @@ static void restart_cursorhold_wait(int tb_change_cnt)
 
 /// Low level input function
 ///
-/// wait until either the input buffer is non-empty or, if `events` is not NULL
+/// Wait until either the input buffer is non-empty or, if `events` is not NULL
 /// until `events` is non-empty.
 int os_inchar(uint8_t *buf, int maxlen, int ms, int tb_change_cnt, MultiQueue *events)
 {
@@ -304,7 +314,8 @@ static uint8_t check_multiclick(int code, int grid, int row, int col)
   }
 
   // For click events the number of clicks is updated.
-  if (code == KE_LEFTMOUSE || code == KE_RIGHTMOUSE || code == KE_MIDDLEMOUSE) {
+  if (code == KE_LEFTMOUSE || code == KE_RIGHTMOUSE || code == KE_MIDDLEMOUSE
+      || code == KE_X1MOUSE || code == KE_X2MOUSE) {
     uint64_t mouse_time = os_hrtime();    // time of current mouse click (ns)
     // compute the time elapsed since the previous mouse click and
     // convert p_mouse from ms to ns
@@ -340,8 +351,7 @@ static uint8_t check_multiclick(int code, int grid, int row, int col)
   return modifiers;
 }
 
-// Mouse event handling code(Extract row/col if available and detect multiple
-// clicks)
+/// Mouse event handling code (extract row/col if available and detect multiple clicks)
 static unsigned handle_mouse_event(const char **ptr, uint8_t *buf, unsigned bufsize)
 {
   int mouse_code = 0;
@@ -408,7 +418,8 @@ static unsigned handle_mouse_event(const char **ptr, uint8_t *buf, unsigned bufs
 size_t input_enqueue_mouse(int code, uint8_t modifier, int grid, int row, int col)
 {
   modifier |= check_multiclick(code, grid, row, col);
-  uint8_t buf[7], *p = buf;
+  uint8_t buf[7];
+  uint8_t *p = buf;
   if (modifier) {
     p[0] = K_SPECIAL;
     p[1] = KS_MODIFIER;
@@ -531,7 +542,7 @@ bool os_input_ready(MultiQueue *events)
 {
   return (typebuf_was_filled             // API call filled typeahead
           || rbuffer_size(input_buffer)  // Input buffer filled
-          || pending_events(events));          // Events must be processed
+          || pending_events(events));    // Events must be processed
 }
 
 // Exit because of an input read error.

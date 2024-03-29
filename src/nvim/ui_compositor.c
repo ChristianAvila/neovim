@@ -7,27 +7,28 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <uv.h>
 
 #include "klib/kvec.h"
 #include "nvim/api/private/defs.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/globals.h"
 #include "nvim/grid.h"
 #include "nvim/highlight.h"
+#include "nvim/highlight_defs.h"
 #include "nvim/highlight_group.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option_vars.h"
 #include "nvim/os/time.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 #include "nvim/ui.h"
 #include "nvim/ui_compositor.h"
-#include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "ui_compositor.c.generated.h"
@@ -61,6 +62,15 @@ void ui_comp_init(void)
   curgrid = &default_grid;
 }
 
+#ifdef EXITFREE
+void ui_comp_free_all_mem(void)
+{
+  kv_destroy(layers);
+  xfree(linebuf);
+  xfree(attrbuf);
+}
+#endif
+
 void ui_comp_syn_init(void)
 {
   dbghl_normal = syn_check_group(S_LEN("RedrawDebugNormal"));
@@ -69,13 +79,13 @@ void ui_comp_syn_init(void)
   dbghl_recompose = syn_check_group(S_LEN("RedrawDebugRecompose"));
 }
 
-void ui_comp_attach(UI *ui)
+void ui_comp_attach(RemoteUI *ui)
 {
   composed_uis++;
   ui->composed = true;
 }
 
-void ui_comp_detach(UI *ui)
+void ui_comp_detach(RemoteUI *ui)
 {
   composed_uis--;
   if (composed_uis == 0) {
@@ -297,7 +307,8 @@ static void compose_line(Integer row, Integer startcol, Integer endcol, LineFlag
   startcol = MAX(startcol, 0);
   // in case we start on the right half of a double-width char, we need to
   // check the left half. But skip it in output if it wasn't doublewidth.
-  int skipstart = 0, skipend = 0;
+  int skipstart = 0;
+  int skipend = 0;
   if (startcol > 0 && (flags & kLineFlagInvalid)) {
     startcol--;
     skipstart = 1;

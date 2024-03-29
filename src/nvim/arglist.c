@@ -7,9 +7,10 @@
 
 #include "auto/config.h"
 #include "nvim/arglist.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/eval/typval.h"
@@ -21,9 +22,10 @@
 #include "nvim/ex_getln.h"
 #include "nvim/fileio.h"
 #include "nvim/garray.h"
-#include "nvim/gettext.h"
+#include "nvim/garray_defs.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mark.h"
 #include "nvim/memline_defs.h"
 #include "nvim/memory.h"
@@ -32,12 +34,13 @@
 #include "nvim/option_vars.h"
 #include "nvim/os/input.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/regexp.h"
-#include "nvim/types.h"
+#include "nvim/regexp_defs.h"
+#include "nvim/types_defs.h"
 #include "nvim/undo.h"
 #include "nvim/version.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 #include "nvim/window.h"
 
 /// State used by the :all command to open all the files in the argument list in
@@ -281,7 +284,7 @@ static char *do_one_arg(char *str)
 
 /// Separate the arguments in "str" and return a list of pointers in the
 /// growarray "gap".
-static void get_arglist(garray_T *gap, char *str, int escaped)
+static void get_arglist(garray_T *gap, char *str, bool escaped)
 {
   ga_init(gap, (int)sizeof(char *), 20);
   while (*str != NUL) {
@@ -427,7 +430,7 @@ static int do_arglist(char *str, int what, int after, bool will_edit)
   garray_T new_ga;
   int exp_count;
   char **exp_files;
-  int arg_escaped = true;
+  bool arg_escaped = true;
 
   if (check_arglist_locked() == FAIL) {
     return FAIL;
@@ -474,7 +477,7 @@ static int do_arglist(char *str, int what, int after, bool will_edit)
 /// Redefine the argument list.
 void set_arglist(char *str)
 {
-  do_arglist(str, AL_SET, 0, false);
+  do_arglist(str, AL_SET, 0, true);
 }
 
 /// @return  true if window "win" is editing the file at the current argument
@@ -620,6 +623,8 @@ void ex_argument(exarg_T *eap)
 /// Edit file "argn" of the argument lists.
 void do_argfile(exarg_T *eap, int argn)
 {
+  bool is_split_cmd = *eap->cmd == 's';
+
   int old_arg_idx = curwin->w_arg_idx;
 
   if (argn < 0 || argn >= ARGCOUNT) {
@@ -634,10 +639,16 @@ void do_argfile(exarg_T *eap, int argn)
     return;
   }
 
+  if (!is_split_cmd
+      && (&ARGLIST[argn])->ae_fnum != curbuf->b_fnum
+      && !check_can_set_curbuf_forceit(eap->forceit)) {
+    return;
+  }
+
   setpcmark();
 
   // split window or create new tab page first
-  if (*eap->cmd == 's' || cmdmod.cmod_tab != 0) {
+  if (is_split_cmd || cmdmod.cmod_tab != 0) {
     if (win_split(0, 0) == FAIL) {
       return;
     }
@@ -851,6 +862,9 @@ static void arg_all_close_unused_windows(arg_all_state_T *aall)
   if (aall->had_tab > 0) {
     goto_tabpage_tp(first_tabpage, true, true);
   }
+
+  // moving tabpages around in an autocommand may cause an endless loop
+  tabpage_move_disallowed++;
   while (true) {
     win_T *wpnext = NULL;
     tabpage_T *tpnext = curtab->tp_next;
@@ -916,7 +930,7 @@ static void arg_all_close_unused_windows(arg_all_state_T *aall)
           if (!buf_hide(buf) && buf->b_nwindows <= 1 && bufIsChanged(buf)) {
             bufref_T bufref;
             set_bufref(&bufref, buf);
-            (void)autowrite(buf, false);
+            autowrite(buf, false);
             // Check if autocommands removed the window.
             if (!win_valid(wp) || !bufref_valid(&bufref)) {
               wpnext = lastwin->w_floating ? lastwin : firstwin;  // Start all over...
@@ -950,6 +964,7 @@ static void arg_all_close_unused_windows(arg_all_state_T *aall)
     }
     goto_tabpage_tp(tpnext, true, true);
   }
+  tabpage_move_disallowed--;
 }
 
 /// Open up to "count" windows for the files in the argument list "aall->alist".
@@ -1015,10 +1030,10 @@ static void arg_all_open_windows(arg_all_state_T *aall, int count)
         aall->new_curwin = curwin;
         aall->new_curtab = curtab;
       }
-      (void)do_ecmd(0, alist_name(&AARGLIST(aall->alist)[i]), NULL, NULL, ECMD_ONE,
-                    ((buf_hide(curwin->w_buffer)
-                      || bufIsChanged(curwin->w_buffer)) ? ECMD_HIDE : 0) + ECMD_OLDBUF,
-                    curwin);
+      do_ecmd(0, alist_name(&AARGLIST(aall->alist)[i]), NULL, NULL, ECMD_ONE,
+              ((buf_hide(curwin->w_buffer)
+                || bufIsChanged(curwin->w_buffer)) ? ECMD_HIDE : 0) + ECMD_OLDBUF,
+              curwin);
       if (tab_drop_empty_window && i == count - 1) {
         autocmd_no_enter++;
       }
@@ -1086,11 +1101,6 @@ static void do_arg_all(int count, int forceit, int keep_tabs)
   // When the ":tab" modifier was used do this for all tab pages.
   arg_all_close_unused_windows(&aall);
 
-  // Now set the last used tabpage to where we started.
-  if (valid_tabpage(new_lu_tp)) {
-    lastused_tabpage = new_lu_tp;
-  }
-
   // Open a window for files in the argument list that don't have one.
   // ARGCOUNT may change while doing this, because of autocommands.
   if (count > aall.opened_len || count <= 0) {
@@ -1127,6 +1137,12 @@ static void do_arg_all(int count, int forceit, int keep_tabs)
   if (valid_tabpage(aall.new_curtab)) {
     goto_tabpage_tp(aall.new_curtab, true, true);
   }
+
+  // Now set the last used tabpage to where we started.
+  if (valid_tabpage(new_lu_tp)) {
+    lastused_tabpage = new_lu_tp;
+  }
+
   if (win_valid(aall.new_curwin)) {
     win_enter(aall.new_curwin, false);
   }

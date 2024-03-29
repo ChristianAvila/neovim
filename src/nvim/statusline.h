@@ -2,9 +2,10 @@
 
 #include <stddef.h>
 
-#include "nvim/buffer_defs.h"
-#include "nvim/macros.h"
-#include "nvim/statusline_defs.h"
+#include "nvim/macros_defs.h"
+#include "nvim/option_defs.h"  // IWYU pragma: keep
+#include "nvim/statusline_defs.h"  // IWYU pragma: keep
+#include "nvim/types_defs.h"  // IWYU pragma: keep
 
 /// Array defining what should be done when tabline is clicked
 EXTERN StlClickDefinition *tab_page_click_defs INIT( = NULL);

@@ -82,12 +82,14 @@
 
 #include "auto/config.h"
 #include "klib/kvec.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
 #include "nvim/buffer.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/buffer_updates.h"
 #include "nvim/change.h"
 #include "nvim/cursor.h"
+#include "nvim/decoration.h"
 #include "nvim/drawscreen.h"
 #include "nvim/edit.h"
 #include "nvim/eval/funcs.h"
@@ -96,35 +98,43 @@
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_getln.h"
 #include "nvim/extmark.h"
+#include "nvim/extmark_defs.h"
 #include "nvim/fileio.h"
 #include "nvim/fold.h"
 #include "nvim/garray.h"
+#include "nvim/garray_defs.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mark.h"
+#include "nvim/mark_defs.h"
+#include "nvim/marktree_defs.h"
+#include "nvim/mbyte.h"
 #include "nvim/memline.h"
+#include "nvim/memline_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
 #include "nvim/option_vars.h"
+#include "nvim/os/fs.h"
 #include "nvim/os/fs_defs.h"
 #include "nvim/os/input.h"
-#include "nvim/os/os.h"
 #include "nvim/os/os_defs.h"
 #include "nvim/os/time.h"
+#include "nvim/os/time_defs.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/sha256.h"
 #include "nvim/spell.h"
 #include "nvim/state.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 #include "nvim/undo.h"
 #include "nvim/undo_defs.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 
 /// Structure passed around between undofile functions.
 typedef struct {
@@ -344,7 +354,7 @@ static inline void zero_fmark_additional_data(fmark_T *fmarks)
 /// "reload" is true when saving for a buffer reload.
 /// Careful: may trigger autocommands that reload the buffer.
 /// Returns FAIL when lines could not be saved, OK otherwise.
-int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, int reload)
+int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, bool reload)
 {
   if (!reload) {
     // When making changes is not allowed return FAIL.  It's a crude way
@@ -467,7 +477,7 @@ int u_savecommon(buf_T *buf, linenr_T top, linenr_T bot, linenr_T newbot, int re
     uhp->uh_entry = NULL;
     uhp->uh_getbot_entry = NULL;
     uhp->uh_cursor = curwin->w_cursor;          // save cursor pos. for undo
-    if (virtual_active() && curwin->w_cursor.coladd > 0) {
+    if (virtual_active(curwin) && curwin->w_cursor.coladd > 0) {
       uhp->uh_cursor_vcol = getviscol();
     } else {
       uhp->uh_cursor_vcol = -1;
@@ -934,7 +944,7 @@ static u_header_T *unserialize_uhp(bufinfo_T *bi, const char *file_name)
     default:
       // Field not supported, skip it.
       while (--len >= 0) {
-        (void)undo_read_byte(bi);
+        undo_read_byte(bi);
       }
     }
   }
@@ -963,12 +973,11 @@ static u_header_T *unserialize_uhp(bufinfo_T *bi, const char *file_name)
   }
 
   // Unserialize all extmark undo information
-  ExtmarkUndoObject *extup;
   kv_init(uhp->uh_extmark);
 
   while ((c = undo_read_2c(bi)) == UF_ENTRY_MAGIC) {
     bool error = false;
-    extup = unserialize_extmark(bi, &error, file_name);
+    ExtmarkUndoObject *extup = unserialize_extmark(bi, &error, file_name);
     if (error) {
       kv_destroy(uhp->uh_extmark);
       xfree(extup);
@@ -1256,7 +1265,7 @@ void u_write_undo(const char *const name, const bool forceit, buf_T *const buf, 
     semsg(_(e_not_open), file_name);
     goto theend;
   }
-  (void)os_setperm(file_name, perm);
+  os_setperm(file_name, perm);
   if (p_verbose > 0) {
     verbose_enter();
     smsg(0, _("Writing undo file: %s"), file_name);
@@ -1501,7 +1510,7 @@ void u_read_undo(char *name, const uint8_t *hash, const char *orig_name FUNC_ATT
     default:
       // field not supported, skip
       while (--len >= 0) {
-        (void)undo_read_byte(&bi);
+        undo_read_byte(&bi);
       }
     }
   }
@@ -1553,7 +1562,9 @@ void u_read_undo(char *name, const uint8_t *hash, const char *orig_name FUNC_ATT
   // We have put all of the headers into a table. Now we iterate through the
   // table and swizzle each sequence number we have stored in uh_*_seq into
   // a pointer corresponding to the header with that sequence number.
-  int16_t old_idx = -1, new_idx = -1, cur_idx = -1;
+  int16_t old_idx = -1;
+  int16_t new_idx = -1;
+  int16_t cur_idx = -1;
   for (int i = 0; i < num_head; i++) {
     u_header_T *uhp = uhp_table[i];
     if (uhp == NULL) {
@@ -2249,7 +2260,7 @@ target_zero:
 ///
 /// @param undo If `true`, go up the tree. Down if `false`.
 /// @param do_buf_event If `true`, send buffer updates.
-static void u_undoredo(int undo, bool do_buf_event)
+static void u_undoredo(bool undo, bool do_buf_event)
 {
   char **newarray = NULL;
   linenr_T newlnum = MAXLNUM;
@@ -2415,17 +2426,14 @@ static void u_undoredo(int undo, bool do_buf_event)
   }
 
   // Adjust Extmarks
-  ExtmarkUndoObject undo_info;
   if (undo) {
     for (int i = (int)kv_size(curhead->uh_extmark) - 1; i > -1; i--) {
-      undo_info = kv_A(curhead->uh_extmark, i);
-      extmark_apply_undo(undo_info, undo);
+      extmark_apply_undo(kv_A(curhead->uh_extmark, i), undo);
     }
     // redo
   } else {
     for (int i = 0; i < (int)kv_size(curhead->uh_extmark); i++) {
-      undo_info = kv_A(curhead->uh_extmark, i);
-      extmark_apply_undo(undo_info, undo);
+      extmark_apply_undo(kv_A(curhead->uh_extmark, i), undo);
     }
   }
   if (curhead->uh_flags & UH_RELOAD) {
@@ -2433,7 +2441,7 @@ static void u_undoredo(int undo, bool do_buf_event)
     // should have all info to send a buffer-reloaing on_lines/on_bytes event
     buf_updates_unload(curbuf, true);
   }
-  // finish Adjusting extmarks
+  // Finish adjusting extmarks
 
   curhead->uh_entry = newlist;
   curhead->uh_flags = new_flags;
@@ -2480,8 +2488,8 @@ static void u_undoredo(int undo, bool do_buf_event)
   if (curwin->w_cursor.lnum <= curbuf->b_ml.ml_line_count) {
     if (curhead->uh_cursor.lnum == curwin->w_cursor.lnum) {
       curwin->w_cursor.col = curhead->uh_cursor.col;
-      if (virtual_active() && curhead->uh_cursor_vcol >= 0) {
-        coladvance(curhead->uh_cursor_vcol);
+      if (virtual_active(curwin) && curhead->uh_cursor_vcol >= 0) {
+        coladvance(curwin, curhead->uh_cursor_vcol);
       } else {
         curwin->w_cursor.coladd = 0;
       }
@@ -2498,7 +2506,7 @@ static void u_undoredo(int undo, bool do_buf_event)
   }
 
   // Make sure the cursor is on an existing line and column.
-  check_cursor();
+  check_cursor(curwin);
 
   // Remember where we are for "g-" and ":earlier 10s".
   curbuf->b_u_seq_cur = curhead->uh_seq;
@@ -2980,6 +2988,28 @@ void u_clearall(buf_T *buf)
   buf->b_u_line_lnum = 0;
 }
 
+/// Free all allocated memory blocks for the buffer 'buf'.
+void u_blockfree(buf_T *buf)
+{
+  while (buf->b_u_oldhead != NULL) {
+#ifndef NDEBUG
+    u_header_T *previous_oldhead = buf->b_u_oldhead;
+#endif
+
+    u_freeheader(buf, buf->b_u_oldhead, NULL);
+    assert(buf->b_u_oldhead != previous_oldhead);
+  }
+  xfree(buf->b_u_line_ptr);
+}
+
+/// Free all allocated memory blocks for the buffer 'buf'.
+/// and invalidate the undo buffer
+void u_clearallandblockfree(buf_T *buf)
+{
+  u_blockfree(buf);
+  u_clearall(buf);
+}
+
 /// Save the line "lnum" for the "U" command.
 void u_saveline(buf_T *buf, linenr_T lnum)
 {
@@ -3031,9 +3061,9 @@ void u_undoline(void)
 
   char *oldp = u_save_line(curbuf->b_u_line_lnum);
   ml_replace(curbuf->b_u_line_lnum, curbuf->b_u_line_ptr, true);
-  changed_bytes(curbuf->b_u_line_lnum, 0);
   extmark_splice_cols(curbuf, (int)curbuf->b_u_line_lnum - 1, 0, (colnr_T)strlen(oldp),
                       (colnr_T)strlen(curbuf->b_u_line_ptr), kExtmarkUndo);
+  changed_bytes(curbuf->b_u_line_lnum, 0);
   xfree(curbuf->b_u_line_ptr);
   curbuf->b_u_line_ptr = oldp;
 
@@ -3043,21 +3073,7 @@ void u_undoline(void)
   }
   curwin->w_cursor.col = t;
   curwin->w_cursor.lnum = curbuf->b_u_line_lnum;
-  check_cursor_col();
-}
-
-/// Free all allocated memory blocks for the buffer 'buf'.
-void u_blockfree(buf_T *buf)
-{
-  while (buf->b_u_oldhead != NULL) {
-#ifndef NDEBUG
-    u_header_T *previous_oldhead = buf->b_u_oldhead;
-#endif
-
-    u_freeheader(buf, buf->b_u_oldhead, NULL);
-    assert(buf->b_u_oldhead != previous_oldhead);
-  }
-  xfree(buf->b_u_line_ptr);
+  check_cursor_col(curwin);
 }
 
 /// Allocate memory and copy curbuf line into it.

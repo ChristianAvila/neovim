@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
@@ -12,17 +12,19 @@
 #include "nvim/globals.h"
 #include "nvim/indent.h"
 #include "nvim/indent_c.h"
-#include "nvim/macros.h"
-#include "nvim/mark.h"
+#include "nvim/macros_defs.h"
+#include "nvim/mark_defs.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
 #include "nvim/option.h"
 #include "nvim/option_vars.h"
 #include "nvim/plines.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/search.h"
+#include "nvim/state_defs.h"
 #include "nvim/strings.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
+#include "nvim/vim_defs.h"
 
 // Find result cache for cpp_baseclass
 typedef struct {
@@ -3103,8 +3105,8 @@ int get_c_indent(void)
               } else {
                 // Found first unterminated line on a row, may
                 // line up with this line, remember its indent
-                //          100 +  //  NOLINT(whitespace/tab)
-                // ->       here;  //  NOLINT(whitespace/tab)
+                //          100 +
+                // ->       here;
                 l = get_cursor_line_ptr();
                 amount = cur_amount;
 
@@ -3653,7 +3655,7 @@ static int find_match(int lookfor, linenr_T ourscope)
     if (cin_iselse(look)) {
       mightbeif = cin_skipcomment(look + 4);
       if (!cin_isif(mightbeif)) {
-        elselevel++;  // NOLINT(readability/braces)
+        elselevel++;
       }
       continue;
     }
@@ -3668,7 +3670,7 @@ static int find_match(int lookfor, linenr_T ourscope)
     // If it's an "if" decrement elselevel
     look = cin_skipcomment(get_cursor_line_ptr());
     if (cin_isif(look)) {
-      elselevel--;  // NOLINT(readability/braces)
+      elselevel--;
       // When looking for an "if" ignore "while"s that
       // get in the way.
       if (elselevel == 0 && lookfor == LOOKFOR_IF) {

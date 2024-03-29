@@ -131,7 +131,7 @@ func Test_normal01_keymodel()
   call assert_equal([0, 1, 1, 0], getpos("'<"))
   call assert_equal([0, 3, 1, 0], getpos("'>"))
   call feedkeys("Gz\<CR>8|\<S-PageUp>y", 'xt')
-  call assert_equal([0, 2, 1, 0], getpos("'<"))
+  call assert_equal([0, 3, 1, 0], getpos("'<"))
   call assert_equal([0, 3, 8, 0], getpos("'>"))
   " Test for <S-C-Home> and <S-C-End>
   call cursor(2, 12)
@@ -915,12 +915,10 @@ func Test_normal14_page()
   set scrolloff=0
   100
   exe "norm! $\<c-b>"
-  call assert_equal('92', getline('.'))
   call assert_equal([0, 92, 1, 0, 1], getcurpos())
   100
   set nostartofline
   exe "norm! $\<c-b>"
-  call assert_equal('92', getline('.'))
   call assert_equal([0, 92, 2, 0, v:maxcol], getcurpos())
   " cleanup
   set startofline
@@ -1285,9 +1283,13 @@ func Test_vert_scroll_cmds()
   exe "normal \<C-D>"
   call assert_equal(46, line('.'))
   exe "normal \<C-U>"
-  call assert_equal(36, line('.'))
+  call assert_equal(36, line('w0'))
+  call assert_equal(46, line('.'))
   exe "normal \<C-U>"
-  call assert_equal(10, line('.'))
+  call assert_equal(1,  line('w0'))
+  call assert_equal(40, line('.'))
+  exe "normal \<C-U>"
+  call assert_equal(30, line('.'))
   exe "normal \<C-U>"
   call assert_equal(1, line('.'))
   set scroll&
@@ -1308,9 +1310,8 @@ func Test_vert_scroll_cmds()
   call assert_equal(50, line('.'))
   call assert_equal(100, line('w$'))
   normal z.
-  let lnum = winline()
   exe "normal \<C-D>"
-  call assert_equal(lnum, winline())
+  call assert_equal(1, winline())
   call assert_equal(50, line('.'))
   normal zt
   exe "normal \<C-D>"
@@ -2240,7 +2241,7 @@ func Test_normal29_brace()
   [DATA]
   call assert_equal(expected, getline(1, '$'))
 
-  " Test with { in cpooptions
+  " Test with { in cpoptions
   %d
   call append(0, text)
   " Nvim: no "{" flag in 'cpoptions'.
@@ -2353,22 +2354,30 @@ func Test_normal30_changecase()
   norm! 1ggVu
   call assert_equal('this is a simple test: äüöß', getline('.'))
   norm! VU
-  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! guu
-  call assert_equal('this is a simple test: äüöss', getline('.'))
+  call assert_equal('this is a simple test: äüöß', getline('.'))
   norm! gUgU
-  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! gugu
-  call assert_equal('this is a simple test: äüöss', getline('.'))
+  call assert_equal('this is a simple test: äüöß', getline('.'))
   norm! gUU
-  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('THIS IS A SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! 010~
-  call assert_equal('this is a SIMPLE TEST: ÄÜÖSS', getline('.'))
+  call assert_equal('this is a SIMPLE TEST: ÄÜÖẞ', getline('.'))
   norm! V~
-  call assert_equal('THIS IS A simple test: äüöss', getline('.'))
+  call assert_equal('THIS IS A simple test: äüöß', getline('.'))
   call assert_beeps('norm! c~')
   %d
   call assert_beeps('norm! ~')
+
+  " Test with multiple lines
+  call setline(1, ['AA', 'BBBB', 'CCCCCC', 'DDDDDDDD'])
+  norm! ggguG
+  call assert_equal(['aa', 'bbbb', 'cccccc', 'dddddddd'], getline(1, '$'))
+  norm! GgUgg
+  call assert_equal(['AA', 'BBBB', 'CCCCCC', 'DDDDDDDD'], getline(1, '$'))
+  %d
 
   " Test for changing case across lines using 'whichwrap'
   call setline(1, ['aaaaaa', 'aaaaaa'])
@@ -3071,7 +3080,8 @@ func Test_normal42_halfpage()
   call assert_equal(2, &scroll)
   set scroll=5
   exe "norm! \<c-u>"
-  call assert_equal('3', getline('.'))
+  call assert_equal('3', getline('w0'))
+  call assert_equal('8', getline('.'))
   1
   set scrolloff=5
   exe "norm! \<c-d>"
@@ -3167,15 +3177,18 @@ endfunc
 func Test_normal50_commandline()
   CheckFeature timers
   CheckFeature cmdline_hist
+
   func! DoTimerWork(id)
-    call assert_equal('[Command Line]', bufname(''))
+    call assert_equal(1, getbufinfo('')[0].command)
+
     " should fail, with E11, but does fail with E23?
     "call feedkeys("\<c-^>", 'tm')
 
-    " should also fail with E11
+    " should fail with E11 - "Invalid in command-line window"
     call assert_fails(":wincmd p", 'E11')
-    " return from commandline window
-    call feedkeys("\<cr>")
+
+    " Return from commandline window.
+    call feedkeys("\<CR>", 't')
   endfunc
 
   let oldlang=v:lang
@@ -3188,7 +3201,9 @@ func Test_normal50_commandline()
   catch /E23/
     " no-op
   endtry
+
   " clean up
+  delfunc DoTimerWork
   set updatetime=4000
   exe "lang" oldlang
   bw!
@@ -3813,7 +3828,7 @@ func Test_normal_vert_scroll_longline()
   call assert_equal(1, winline())
   exe "normal \<C-B>"
   call assert_equal(10, line('.'))
-  call assert_equal(3, winline())
+  call assert_equal(10, winline())
   exe "normal \<C-B>\<C-B>"
   call assert_equal(5, line('.'))
   call assert_equal(5, winline())
@@ -4169,4 +4184,35 @@ func Test_normal34_zet_large()
   norm! z9765405999999999999
 endfunc
 
-" vim: shiftwidth=2 sts=2 expandtab
+" Test for { and } paragraph movements and Ctrl-B in buffer with a single line
+func Test_single_line_scroll()
+  CheckFeature textprop
+
+  new
+  call setline(1, ['foobar one two three'])
+  let vt = 'virt_above'
+  call prop_type_add(vt, {'highlight': 'IncSearch'})
+  call prop_add(1, 0, {'type': vt, 'text': '---', 'text_align': 'above'})
+  1
+  norm! 0}
+
+  call assert_equal([0, 1, 20, 0], getpos('.'))
+  norm! {
+  call assert_equal([0, 1, 1, 0], getpos('.'))
+
+  " Ctrl-B/Ctrl-U scroll up with hidden "above" virtual text.
+  set smoothscroll
+  exe "normal \<C-E>"
+  call assert_notequal(0, winsaveview().skipcol)
+  exe "normal \<C-B>"
+  call assert_equal(0, winsaveview().skipcol)
+  exe "normal \<C-E>"
+  call assert_notequal(0, winsaveview().skipcol)
+  exe "normal \<C-U>"
+  call assert_equal(0, winsaveview().skipcol)
+
+  set smoothscroll&
+  bw!
+endfunc
+
+" vim: shiftwidth=2 sts=2 expandtab nofoldenable

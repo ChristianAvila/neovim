@@ -267,6 +267,7 @@ local extension = {
   crdpro = 'chordpro',
   cho = 'chordpro',
   chordpro = 'chordpro',
+  ck = 'chuck',
   eni = 'cl',
   icl = 'clean',
   cljx = 'clojure',
@@ -334,6 +335,7 @@ local extension = {
   si = 'cuplsim',
   cyn = 'cynpp',
   cypher = 'cypher',
+  dfy = 'dafny',
   dart = 'dart',
   drt = 'dart',
   ds = 'datascript',
@@ -341,7 +343,7 @@ local extension = {
   decl = detect.decl,
   dec = detect.decl,
   dcl = detect_seq(detect.decl, 'clean'),
-  def = 'def',
+  def = detect.def,
   desc = 'desc',
   directory = 'desktop',
   desktop = 'desktop',
@@ -363,6 +365,8 @@ local extension = {
   d = detect.dtrace,
   dts = 'dts',
   dtsi = 'dts',
+  dtso = 'dts',
+  its = 'dts',
   dylan = 'dylan',
   intr = 'dylanintr',
   lid = 'dylanlid',
@@ -462,6 +466,7 @@ local extension = {
   glsl = 'glsl',
   gn = 'gn',
   gni = 'gn',
+  gnuplot = 'gnuplot',
   gpi = 'gnuplot',
   go = 'go',
   gp = 'gp',
@@ -674,8 +679,6 @@ local extension = {
   mmp = 'mmp',
   mms = detect.mms,
   DEF = 'modula2',
-  m2 = 'modula2',
-  mi = 'modula2',
   lm3 = 'modula3',
   mojo = 'mojo',
   ['🔥'] = 'mojo', -- 🙄
@@ -695,6 +698,7 @@ local extension = {
   msql = 'msql',
   mu = 'mupad',
   mush = 'mush',
+  mustache = 'mustache',
   mysql = 'mysql',
   n1ql = 'n1ql',
   nql = 'n1ql',
@@ -716,6 +720,7 @@ local extension = {
   tr = 'nroff',
   nsi = 'nsis',
   nsh = 'nsis',
+  nu = 'nu',
   obj = 'obj',
   objdump = 'objdump',
   cppobjdump = 'objdump',
@@ -907,6 +912,7 @@ local extension = {
   sed = 'sed',
   sexp = 'sexplib',
   bash = detect.bash,
+  bats = detect.bash,
   ebuild = detect.bash,
   eclass = detect.bash,
   env = detect.sh,
@@ -984,6 +990,8 @@ local extension = {
   svelte = 'svelte',
   svg = 'svg',
   swift = 'swift',
+  swig = 'swig',
+  swg = 'swig',
   svh = 'systemverilog',
   sv = 'systemverilog',
   cmm = 'trace32',
@@ -1056,6 +1064,7 @@ local extension = {
   vdmrt = 'vdmrt',
   vdmsl = 'vdmsl',
   vdm = 'vdmsl',
+  vto = 'vento',
   vr = 'vera',
   vri = 'vera',
   vrh = 'vera',
@@ -1134,7 +1143,7 @@ local extension = {
   web = detect.web,
   pl = detect.pl,
   pp = detect.pp,
-  i = detect.progress_asm,
+  i = detect.i,
   w = detect.progress_cweb,
   p = detect.progress_pascal,
   pro = detect_seq(detect.proto, 'idlang'),
@@ -1296,7 +1305,6 @@ local filename = {
   ['.gnashpluginrc'] = 'gnash',
   gnashpluginrc = 'gnash',
   gnashrc = 'gnash',
-  ['.gnuplot'] = 'gnuplot',
   ['go.sum'] = 'gosum',
   ['go.work.sum'] = 'gosum',
   ['go.work'] = 'gowork',
@@ -1338,10 +1346,12 @@ local filename = {
   ['.hintrc'] = 'jsonc',
   ['.jsfmtrc'] = 'jsonc',
   ['.jshintrc'] = 'jsonc',
+  ['.luaurc'] = 'jsonc',
   ['.swrc'] = 'jsonc',
   ['.justfile'] = 'just',
   Kconfig = 'kconfig',
   ['Kconfig.debug'] = 'kconfig',
+  ['Config.in'] = 'kconfig',
   ['lftp.conf'] = 'lftp',
   ['.lftprc'] = 'lftp',
   ['/.libao'] = 'libao',
@@ -1385,13 +1395,12 @@ local filename = {
   Neomuttrc = 'neomuttrc',
   ['.netrc'] = 'netrc',
   NEWS = detect.news,
-  ['env.nu'] = 'nu',
-  ['config.nu'] = 'nu',
   ['.ocamlinit'] = 'ocaml',
   ['.octaverc'] = 'octave',
   octaverc = 'octave',
   ['octave.conf'] = 'octave',
   opam = 'opam',
+  ['pacman.log'] = 'pacmanlog',
   ['/etc/pam.conf'] = 'pamconf',
   ['pam_env.conf'] = 'pamenv',
   ['.pam_environment'] = 'pamenv',
@@ -1463,7 +1472,6 @@ local filename = {
   ['bash.bashrc'] = detect.bash,
   bashrc = detect.bash,
   ['.bashrc'] = detect.bash,
-  ['.env'] = detect.sh,
   ['.kshrc'] = detect.ksh,
   ['.profile'] = detect.sh,
   ['/etc/profile'] = detect.sh,
@@ -1653,6 +1661,11 @@ local pattern = {
   ['.*/dtrace/.*%.d'] = 'dtrace',
   ['.*esmtprc'] = 'esmtprc',
   ['.*Eterm/.*%.cfg'] = 'eterm',
+  ['.*s6.*/up'] = 'execline',
+  ['.*s6.*/down'] = 'execline',
+  ['.*s6.*/run'] = 'execline',
+  ['.*s6.*/finish'] = 'execline',
+  ['s6%-.*'] = 'execline',
   ['[a-zA-Z0-9].*Dict'] = detect.foam,
   ['[a-zA-Z0-9].*Dict%..*'] = detect.foam,
   ['[a-zA-Z].*Properties'] = detect.foam,
@@ -1729,6 +1742,7 @@ local pattern = {
   ['[jt]sconfig.*%.json'] = 'jsonc',
   ['[jJ]ustfile'] = 'just',
   ['Kconfig%..*'] = starsetf('kconfig'),
+  ['Config%.in%..*'] = starsetf('kconfig'),
   ['.*%.[Ss][Uu][Bb]'] = 'krl',
   ['lilo%.conf.*'] = starsetf('lilo'),
   ['.*/etc/logcheck/.*%.d.*/.*'] = starsetf('logcheck'),
@@ -1902,7 +1916,7 @@ local pattern = {
   ['.*baseq[2-3]/.*%.cfg'] = 'quake',
   ['.*quake[1-3]/.*%.cfg'] = 'quake',
   ['.*id1/.*%.cfg'] = 'quake',
-  ['.*/queries/.*%.scm'] = 'query', -- tree-sitter queries (Neovim only)
+  ['.*/queries/.*%.scm'] = 'query', -- treesitter queries (Neovim only)
   ['.*,v'] = 'rcs',
   ['%.reminders.*'] = starsetf('remind'),
   ['[rR]akefile.*'] = starsetf('ruby'),
@@ -2069,6 +2083,7 @@ local function normalize_path(path, as_pattern)
 end
 
 --- @class vim.filetype.add.filetypes
+--- @inlinedoc
 --- @field pattern? vim.filetype.mapping
 --- @field extension? vim.filetype.mapping
 --- @field filename? vim.filetype.mapping
@@ -2259,16 +2274,31 @@ local function match_pattern(name, path, tail, pat)
 end
 
 --- @class vim.filetype.match.args
+--- @inlinedoc
+---
+--- Buffer number to use for matching. Mutually exclusive with {contents}
 --- @field buf? integer
+---
+--- Filename to use for matching. When {buf} is given,
+--- defaults to the filename of the given buffer number. The
+--- file need not actually exist in the filesystem. When used
+--- without {buf} only the name of the file is used for
+--- filetype matching. This may result in failure to detect
+--- the filetype in cases where the filename alone is not
+--- enough to disambiguate the filetype.
 --- @field filename? string
+---
+--- An array of lines representing file contents to use for
+--- matching. Can be used with {filename}. Mutually exclusive
+--- with {buf}.
 --- @field contents? string[]
 
 --- Perform filetype detection.
 ---
 --- The filetype can be detected using one of three methods:
----  1. Using an existing buffer
----  2. Using only a file name
----  3. Using only file contents
+--- 1. Using an existing buffer
+--- 2. Using only a file name
+--- 3. Using only file contents
 ---
 --- Of these, option 1 provides the most accurate result as it uses both the buffer's filename and
 --- (optionally) the buffer contents. Options 2 and 3 can be used without an existing buffer, but
@@ -2294,18 +2324,6 @@ end
 ---
 ---@param args vim.filetype.match.args Table specifying which matching strategy to use.
 ---                 Accepted keys are:
----                   * buf (number): Buffer number to use for matching. Mutually exclusive with
----                                   {contents}
----                   * filename (string): Filename to use for matching. When {buf} is given,
----                                        defaults to the filename of the given buffer number. The
----                                        file need not actually exist in the filesystem. When used
----                                        without {buf} only the name of the file is used for
----                                        filetype matching. This may result in failure to detect
----                                        the filetype in cases where the filename alone is not
----                                        enough to disambiguate the filetype.
----                   * contents (table): An array of lines representing file contents to use for
----                                       matching. Can be used with {filename}. Mutually exclusive
----                                       with {buf}.
 ---@return string|nil # If a match was found, the matched filetype.
 ---@return function|nil # A function that modifies buffer state when called (for example, to set some
 ---                     filetype specific buffer variables). The function accepts a buffer number as
@@ -2368,7 +2386,9 @@ function M.match(args)
     end
 
     -- Next, check file extension
-    local ext = fn.fnamemodify(name, ':e')
+    -- Don't use fnamemodify() with :e modifier here,
+    -- as that's empty when there is only an extension.
+    local ext = name:match('%.([^.]-)$') or ''
     ft, on_detect = dispatch(extension[ext], path, bufnr)
     if ft then
       return ft, on_detect

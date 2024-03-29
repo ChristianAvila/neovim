@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <sys/types.h>
+#include <uv.h>
 
 #ifdef NVIM_VENDOR_BIT
 # include "bit.h"
@@ -16,9 +16,10 @@
 #include "mpack/lmpack.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/eval/typval.h"
+#include "nvim/eval/typval_defs.h"
 #include "nvim/eval/vars.h"
 #include "nvim/ex_eval.h"
 #include "nvim/fold.h"
@@ -28,15 +29,17 @@
 #include "nvim/lua/spell.h"
 #include "nvim/lua/stdlib.h"
 #include "nvim/lua/xdiff.h"
-#include "nvim/map.h"
+#include "nvim/map_defs.h"
 #include "nvim/mbyte.h"
+#include "nvim/mbyte_defs.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/regexp.h"
+#include "nvim/regexp_defs.h"
 #include "nvim/runtime.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/strings.h"
+#include "nvim/types_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "lua/stdlib.c.generated.h"
@@ -82,7 +85,8 @@ static int regex_match_line(lua_State *lstate)
 
   handle_T bufnr = (handle_T)luaL_checkinteger(lstate, 2);
   linenr_T rownr = (linenr_T)luaL_checkinteger(lstate, 3);
-  int start = 0, end = -1;
+  int start = 0;
+  int end = -1;
   if (narg >= 4) {
     start = (int)luaL_checkinteger(lstate, 4);
   }
@@ -103,15 +107,15 @@ static int regex_match_line(lua_State *lstate)
   }
 
   char *line = ml_get_buf(buf, rownr + 1);
-  size_t len = strlen(line);
+  colnr_T len = ml_get_buf_len(buf, rownr + 1);
 
-  if (start < 0 || (size_t)start > len) {
+  if (start < 0 || start > len) {
     return luaL_error(lstate, "invalid start");
   }
 
   char save = NUL;
   if (end >= 0) {
-    if ((size_t)end > len || end < start) {
+    if (end > len || end < start) {
       return luaL_error(lstate, "invalid end");
     }
     save = line[end];
@@ -177,7 +181,8 @@ int nlua_str_utfindex(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
     }
   }
 
-  size_t codepoints = 0, codeunits = 0;
+  size_t codepoints = 0;
+  size_t codeunits = 0;
   mb_utflen(s1, (size_t)idx, &codepoints, &codeunits);
 
   lua_pushinteger(lstate, (lua_Integer)codepoints);
@@ -221,11 +226,12 @@ static int nlua_str_utf_start(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   size_t s1_len;
   const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
   ptrdiff_t offset = luaL_checkinteger(lstate, 2);
-  if (offset < 0 || offset > (intptr_t)s1_len) {
+  if (offset <= 0 || offset > (intptr_t)s1_len) {
     return luaL_error(lstate, "index out of range");
   }
-  int head_offset = -utf_cp_head_off(s1, s1 + offset - 1);
-  lua_pushinteger(lstate, head_offset);
+  size_t const off = (size_t)(offset - 1);
+  int head_off = -utf_cp_bounds_len(s1, s1 + off, (int)(s1_len - off)).begin_off;
+  lua_pushinteger(lstate, head_off);
   return 1;
 }
 
@@ -241,11 +247,12 @@ static int nlua_str_utf_end(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   size_t s1_len;
   const char *s1 = luaL_checklstring(lstate, 1, &s1_len);
   ptrdiff_t offset = luaL_checkinteger(lstate, 2);
-  if (offset < 0 || offset > (intptr_t)s1_len) {
+  if (offset <= 0 || offset > (intptr_t)s1_len) {
     return luaL_error(lstate, "index out of range");
   }
-  int tail_offset = utf_cp_tail_off(s1, s1 + offset - 1);
-  lua_pushinteger(lstate, tail_offset);
+  size_t const off = (size_t)(offset - 1);
+  int tail_off = utf_cp_bounds_len(s1, s1 + off, (int)(s1_len - off)).end_off - 1;
+  lua_pushinteger(lstate, tail_off);
   return 1;
 }
 
@@ -536,11 +543,14 @@ static int nlua_iconv(lua_State *lstate)
   return 1;
 }
 
-// Like 'zx' but don't call newFoldLevel()
+// Update foldlevels (e.g., by evaluating 'foldexpr') for all lines in the current window without
+// invoking other side effects. Unlike `zx`, it does not close manually opened folds and does not
+// open folds under the cursor.
 static int nlua_foldupdate(lua_State *lstate)
 {
   curwin->w_foldinvalid = true;  // recompute folds
-  foldOpenCursor();
+  foldUpdate(curwin, 1, (linenr_T)MAXLNUM);
+  curwin->w_foldinvalid = false;
 
   return 0;
 }

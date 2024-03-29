@@ -1,24 +1,18 @@
 #pragma once
 
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 
 #include "klib/kvec.h"
-#include "nvim/buffer_defs.h"
-#include "nvim/decoration.h"
-#include "nvim/extmark_defs.h"
-#include "nvim/macros.h"
-#include "nvim/marktree.h"
-#include "nvim/pos.h"
-#include "nvim/types.h"
+#include "nvim/extmark_defs.h"  // IWYU pragma: keep
+#include "nvim/macros_defs.h"
+#include "nvim/marktree_defs.h"
+#include "nvim/pos_defs.h"
+#include "nvim/types_defs.h"  // IWYU pragma: keep
 
-EXTERN int extmark_splice_pending INIT( = 0);
+EXTERN int curbuf_splice_pending INIT( = 0);
 
 typedef kvec_t(MTPair) ExtmarkInfoArray;
-
-// TODO(bfredl): good enough name for now.
-typedef ptrdiff_t bcount_t;
 
 // delete the columns between mincol and endcol
 typedef struct {
@@ -51,8 +45,6 @@ typedef struct {
   uint64_t mark;  // raw mark id of the marktree
   int old_row;
   colnr_T old_col;
-  int row;
-  colnr_T col;
   bool invalidated;
 } ExtmarkSavePos;
 
@@ -64,6 +56,8 @@ typedef enum {
   kExtmarkClear,
 } UndoObjectType;
 
+// TODO(bfredl): if possible unify these with marktree flags,
+// so it is possible to filter extmarks directly on top-level flags
 typedef enum {
   kExtmarkNone = 0x1,
   kExtmarkSign = 0x2,

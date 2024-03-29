@@ -8,27 +8,28 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
+#include <uv.h>
 
 #include "auto/config.h"
 #include "klib/kvec.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cursor.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/garray.h"
+#include "nvim/garray_defs.h"
 #include "nvim/globals.h"
-#include "nvim/grid_defs.h"
 #include "nvim/keycodes.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/memory.h"
 #include "nvim/option.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/strings.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
+#include "nvim/vim_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "charset.c.generated.h"
@@ -85,7 +86,7 @@ int init_chartab(void)
 ///
 /// @return FAIL if 'iskeyword', 'isident', 'isfname' or 'isprint' option has
 /// an error, OK otherwise.
-int buf_init_chartab(buf_T *buf, int global)
+int buf_init_chartab(buf_T *buf, bool global)
 {
   int c;
 
@@ -490,7 +491,7 @@ char *str_foldcase(char *str, int orglen, char *buf, int buflen)
           }
         }
       }
-      (void)utf_char2bytes(lc, STR_PTR(i));
+      utf_char2bytes(lc, STR_PTR(i));
     }
 
     // skip to next multi-byte char
@@ -535,7 +536,7 @@ char *transchar_buf(const buf_T *buf, int c)
   }
 
   if ((!chartab_initialized && (c >= ' ' && c <= '~'))
-      || ((c <= 0xFF) && vim_isprintc_strict(c))) {
+      || ((c <= 0xFF) && vim_isprintc(c))) {
     // printable character
     transchar_charbuf[i] = (uint8_t)c;
     transchar_charbuf[i + 1] = NUL;
@@ -848,11 +849,11 @@ bool vim_isfilec(int c)
 }
 
 /// Check if "c" is a valid file-name character, including characters left
-/// out of 'isfname' to make "gf" work, such as comma, space, '@', etc.
+/// out of 'isfname' to make "gf" work, such as ',', ' ', '@', ':', etc.
 bool vim_is_fname_char(int c)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
-  return vim_isfilec(c) || c == ',' || c == ' ' || c == '@';
+  return vim_isfilec(c) || c == ',' || c == ' ' || c == '@' || c == ':';
 }
 
 /// Check that "c" is a valid file-name character or a wildcard character
@@ -871,25 +872,9 @@ bool vim_isfilec_or_wc(int c)
 }
 
 /// Check that "c" is a printable character.
-/// Assume characters above 0x100 are printable for double-byte encodings.
 ///
 /// @param  c  character to check
 bool vim_isprintc(int c)
-  FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
-{
-  if (c >= 0x100) {
-    return utf_printable(c);
-  }
-  return c > 0 && (g_chartab[c] & CT_PRINT_CHAR);
-}
-
-/// Strict version of vim_isprintc(c), don't return true if "c" is the head
-/// byte of a double-byte character.
-///
-/// @param  c  character to check
-///
-/// @return true if "c" is a printable character.
-bool vim_isprintc_strict(int c)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT
 {
   if (c >= 0x100) {
@@ -903,11 +888,14 @@ bool vim_isprintc_strict(int c)
 /// @param[in]  p  String to skip in.
 ///
 /// @return Pointer to character after the skipped whitespace.
-char *skipwhite(const char *const p)
+char *skipwhite(const char *p)
   FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ALL
   FUNC_ATTR_NONNULL_RET
 {
-  return skipwhite_len(p, strlen(p));
+  while (ascii_iswhite(*p)) {
+    p++;
+  }
+  return (char *)p;
 }
 
 /// Like `skipwhite`, but skip up to `len` characters.
@@ -1459,9 +1447,9 @@ bool rem_backslash(const char *str)
                  && str[1] != '?'
                  && !vim_isfilec((uint8_t)str[1])));
 
-#else  // ifdef BACKSLASH_IN_FILENAME
+#else
   return str[0] == '\\' && str[1] != NUL;
-#endif  // ifdef BACKSLASH_IN_FILENAME
+#endif
 }
 
 /// Halve the number of backslashes in a file name argument.
@@ -1469,10 +1457,20 @@ bool rem_backslash(const char *str)
 /// @param p
 void backslash_halve(char *p)
 {
-  for (; *p; p++) {
-    if (rem_backslash(p)) {
-      STRMOVE(p, p + 1);
+  for (; *p && !rem_backslash(p); p++) {}
+  if (*p != NUL) {
+    char *dst = p;
+    goto start;
+    while (*p != NUL) {
+      if (rem_backslash(p)) {
+start:
+        *dst++ = *(p + 1);
+        p += 2;
+      } else {
+        *dst++ = *p++;
+      }
     }
+    *dst = '\0';
   }
 }
 
@@ -1484,8 +1482,16 @@ void backslash_halve(char *p)
 char *backslash_halve_save(const char *p)
   FUNC_ATTR_NONNULL_ALL FUNC_ATTR_NONNULL_RET
 {
-  // TODO(philix): simplify and improve backslash_halve_save algorithm
-  char *res = xstrdup(p);
-  backslash_halve(res);
+  char *res = xmalloc(strlen(p) + 1);
+  char *dst = res;
+  while (*p != NUL) {
+    if (rem_backslash(p)) {
+      *dst++ = *(p + 1);
+      p += 2;
+    } else {
+      *dst++ = *p++;
+    }
+  }
+  *dst = '\0';
   return res;
 }

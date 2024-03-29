@@ -238,7 +238,7 @@ local function get_path(sect, name, silent)
   -- If you run man -w strlen and string.3 comes up first, this is a problem. We
   -- should search for a matching named one in the results list.
   -- However, if you search for man -w clock_gettime, you will *only* get
-  -- clock_getres.2, which is the right page. Searching the resuls for
+  -- clock_getres.2, which is the right page. Searching the results for
   -- clock_gettime will no longer work. In this case, we should just use the
   -- first one that was found in the correct section.
   --
@@ -716,11 +716,11 @@ function M.open_page(count, smods, args)
   local target = ('%s(%s)'):format(name, sect)
 
   local ok, ret = pcall(function()
-    if smods.tab == -1 and find_man() then
-      vim.cmd.tag({ target, mods = { silent = true, keepalt = true } })
+    smods.silent = true
+    smods.keepalt = true
+    if smods.hide or (smods.tab == -1 and find_man()) then
+      vim.cmd.tag({ target, mods = smods })
     else
-      smods.silent = true
-      smods.keepalt = true
       vim.cmd.stag({ target, mods = smods })
     end
   end)

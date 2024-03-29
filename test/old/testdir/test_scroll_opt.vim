@@ -832,7 +832,7 @@ func Test_smoothscroll_eob()
   call VerifyScreenDump(buf, 'Test_smooth_eob_1', {})
 
   " cursor is not placed below window
-  call term_sendkeys(buf, ":call setline(92, 'a'->repeat(100))\<CR>\<C-B>G")
+  call term_sendkeys(buf, ":call setline(92, 'a'->repeat(100))\<CR>\<C-L>\<C-B>G")
   call VerifyScreenDump(buf, 'Test_smooth_eob_2', {})
 
   call StopVimInTerminal(buf)
@@ -923,7 +923,7 @@ func Test_smoothscroll_cursor_top()
       exe "norm G3\<C-E>k"
   END
   call writefile(lines, 'XSmoothScrollCursorTop', 'D')
-  let buf = RunVimInTerminal('-u NONE -S XSmoothScrollCursorTop', #{rows: 12, cols:40})
+  let buf = RunVimInTerminal('-u NONE -S XSmoothScrollCursorTop', #{rows: 12, cols: 40})
   call VerifyScreenDump(buf, 'Test_smoothscroll_cursor_top', {})
 
   call StopVimInTerminal(buf)
@@ -942,10 +942,106 @@ func Test_smoothscroll_crash()
       exe "norm! 0\<c-e>"
   END
   call writefile(lines, 'XSmoothScrollCrash', 'D')
-  let buf = RunVimInTerminal('-u NONE -S XSmoothScrollCrash', #{rows: 12, cols:40})
+  let buf = RunVimInTerminal('-u NONE -S XSmoothScrollCrash', #{rows: 12, cols: 40})
   call term_sendkeys(buf, "2\<C-E>\<C-L>")
 
   call StopVimInTerminal(buf)
+endfunc
+
+func Test_smoothscroll_insert_bottom()
+  CheckScreendump
+
+  let lines =<< trim END
+    call setline(1, repeat([repeat('A very long line ...', 10)], 5))
+    set wrap smoothscroll scrolloff=0
+  END
+  call writefile(lines, 'XSmoothScrollInsertBottom', 'D')
+  let buf = RunVimInTerminal('-u NONE -S XSmoothScrollInsertBottom', #{rows: 9, cols: 40})
+  call term_sendkeys(buf, "Go123456789\<CR>")
+  call VerifyScreenDump(buf, 'Test_smoothscroll_insert_bottom', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_smoothscroll_in_zero_width_window()
+  set cpo+=n number smoothscroll
+  set winwidth=99999 winminwidth=0
+
+  vsplit
+  call assert_equal(0, winwidth(winnr('#')))
+  call win_execute(win_getid(winnr('#')), "norm! \<C-Y>")
+
+  only!
+  set winwidth& winminwidth&
+  set cpo-=n nonumber nosmoothscroll
+endfunc
+
+func Test_smoothscroll_textoff_small_winwidth()
+  set smoothscroll number
+  call setline(1, 'llanfairpwllgwyngyllgogerychwyrndrobwllllantysiliogogogoch')
+  vsplit
+
+  let textoff = getwininfo(win_getid())[0].textoff
+  execute 'vertical resize' textoff + 1
+  redraw
+  call assert_equal(0, winsaveview().skipcol)
+  execute "normal! 0\<C-E>"
+  redraw
+  call assert_equal(1, winsaveview().skipcol)
+  execute 'vertical resize' textoff - 1
+  " This caused a signed integer overflow.
+  redraw
+  call assert_equal(1, winsaveview().skipcol)
+  execute 'vertical resize' textoff
+  " This caused an infinite loop.
+  redraw
+  call assert_equal(1, winsaveview().skipcol)
+
+  %bw!
+  set smoothscroll& number&
+endfunc
+
+func Test_smoothscroll_page()
+  set smoothscroll
+
+  10split | 40vsplit
+  call setline(1, 'abcde '->repeat(150))
+
+  exe "norm! \<C-F>"
+  call assert_equal(400, winsaveview().skipcol)
+  exe "norm! \<C-F>"
+  call assert_equal(800, winsaveview().skipcol)
+  exe "norm! \<C-F>"
+  call assert_equal(880, winsaveview().skipcol)
+  exe "norm! \<C-B>"
+  call assert_equal(480, winsaveview().skipcol)
+  exe "norm! \<C-B>"
+  call assert_equal(80, winsaveview().skipcol)
+  exe "norm! \<C-B>"
+  call assert_equal(0, winsaveview().skipcol)
+
+  exe "norm! \<C-D>"
+  call assert_equal(200, winsaveview().skipcol)
+  exe "norm! \<C-D>"
+  call assert_equal(400, winsaveview().skipcol)
+  exe "norm! \<C-D>"
+  call assert_equal(600, winsaveview().skipcol)
+  exe "norm! \<C-D>"
+  call assert_equal(800, winsaveview().skipcol)
+  exe "norm! \<C-D>"
+  call assert_equal(880, winsaveview().skipcol)
+  exe "norm! \<C-U>"
+  call assert_equal(680, winsaveview().skipcol)
+  exe "norm! \<C-U>"
+  call assert_equal(480, winsaveview().skipcol)
+  exe "norm! \<C-U>"
+  call assert_equal(280, winsaveview().skipcol)
+  exe "norm! \<C-U>"
+  call assert_equal(80, winsaveview().skipcol)
+  exe "norm! \<C-U>"
+  call assert_equal(0, winsaveview().skipcol)
+
+  set smoothscroll&
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

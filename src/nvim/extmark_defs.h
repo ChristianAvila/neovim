@@ -1,14 +1,9 @@
 #pragma once
 
 #include "klib/kvec.h"
-#include "nvim/types.h"
 
-typedef struct {
-  char *text;
-  int hl_id;
-} VirtTextChunk;
-
-typedef kvec_t(VirtTextChunk) VirtText;
+// TODO(bfredl): good enough name for now.
+typedef ptrdiff_t bcount_t;
 
 typedef struct undo_object ExtmarkUndoObject;
 typedef kvec_t(ExtmarkUndoObject) extmark_undo_vec_t;
@@ -21,9 +16,3 @@ typedef enum {
   kExtmarkNoUndo,      // Operation should not be reversible
   kExtmarkUndoNoRedo,  // Operation should be undoable, but not redoable
 } ExtmarkOp;
-
-typedef enum {
-  kDecorLevelNone = 0,
-  kDecorLevelVisible = 1,
-  kDecorLevelVirtLine = 2,
-} DecorLevel;

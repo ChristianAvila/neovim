@@ -4,20 +4,19 @@
 
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/charset.h"
 #include "nvim/cursor_shape.h"
 #include "nvim/ex_getln.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/highlight_group.h"
 #include "nvim/log.h"
-#include "nvim/macros.h"
-#include "nvim/memory.h"
+#include "nvim/macros_defs.h"
 #include "nvim/option_vars.h"
+#include "nvim/state_defs.h"
 #include "nvim/strings.h"
 #include "nvim/ui.h"
-#include "nvim/vim.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "cursor_shape.c.generated.h"
@@ -102,16 +101,10 @@ Array mode_style_array(Arena *arena)
 /// @returns error message for an illegal option, NULL otherwise.
 const char *parse_shape_opt(int what)
 {
-  char *colonp;
-  char *commap;
-  char *slashp;
   char *p = NULL;
-  char *endp;
   int idx = 0;                          // init for GCC
-  int all_idx;
   int len;
-  int i;
-  int found_ve = false;                 // found "ve" flag
+  bool found_ve = false;                 // found "ve" flag
 
   // First round: check for errors; second round: do it for real.
   for (int round = 1; round <= 2; round++) {
@@ -127,8 +120,8 @@ const char *parse_shape_opt(int what)
     // Repeat for all comma separated parts.
     char *modep = p_guicursor;
     while (modep != NULL && *modep != NUL) {
-      colonp = vim_strchr(modep, ':');
-      commap = vim_strchr(modep, ',');
+      char *colonp = vim_strchr(modep, ':');
+      char *commap = vim_strchr(modep, ',');
 
       if (colonp == NULL || (commap != NULL && commap < colonp)) {
         return N_("E545: Missing colon");
@@ -139,7 +132,7 @@ const char *parse_shape_opt(int what)
 
       // Repeat for all modes before the colon.
       // For the 'a' mode, we loop to handle all the modes.
-      all_idx = -1;
+      int all_idx = -1;
       while (modep < colonp || all_idx >= 0) {
         if (all_idx < 0) {
           // Find the mode
@@ -176,7 +169,7 @@ const char *parse_shape_opt(int what)
         for (p = colonp + 1; *p && *p != ',';) {
           {
             // First handle the ones with a number argument.
-            i = (uint8_t)(*p);
+            int i = (uint8_t)(*p);
             len = 0;
             if (STRNICMP(p, "ver", 3) == 0) {
               len = 3;
@@ -222,7 +215,7 @@ const char *parse_shape_opt(int what)
               }
               p += 5;
             } else {          // must be a highlight group name then
-              endp = vim_strchr(p, '-');
+              char *endp = vim_strchr(p, '-');
               if (commap == NULL) {                       // last part
                 if (endp == NULL) {
                   endp = p + strlen(p);                  // find end of part
@@ -230,7 +223,7 @@ const char *parse_shape_opt(int what)
               } else if (endp > commap || endp == NULL) {
                 endp = commap;
               }
-              slashp = vim_strchr(p, '/');
+              char *slashp = vim_strchr(p, '/');
               if (slashp != NULL && slashp < endp) {
                 // "group/langmap_group"
                 i = syn_check_group(p, (size_t)(slashp - p));

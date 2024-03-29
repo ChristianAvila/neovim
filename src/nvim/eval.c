@@ -7,12 +7,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <uv.h>
 
 #include "auto/config.h"
 #include "nvim/api/private/converter.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/autocmd.h"
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/channel.h"
@@ -28,27 +30,31 @@
 #include "nvim/eval/typval.h"
 #include "nvim/eval/userfunc.h"
 #include "nvim/eval/vars.h"
+#include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
 #include "nvim/event/process.h"
+#include "nvim/event/time.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/ex_eval.h"
 #include "nvim/ex_getln.h"
-#include "nvim/ex_session.h"
 #include "nvim/garray.h"
+#include "nvim/garray_defs.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/grid_defs.h"
+#include "nvim/hashtab.h"
 #include "nvim/highlight_group.h"
 #include "nvim/insexpand.h"
 #include "nvim/keycodes.h"
-#include "nvim/lib/queue.h"
+#include "nvim/lib/queue_defs.h"
 #include "nvim/lua/executor.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/main.h"
-#include "nvim/map.h"
+#include "nvim/map_defs.h"
 #include "nvim/mark.h"
+#include "nvim/mark_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
@@ -60,33 +66,36 @@
 #include "nvim/option_vars.h"
 #include "nvim/optionstr.h"
 #include "nvim/os/fileio.h"
+#include "nvim/os/fs.h"
 #include "nvim/os/fs_defs.h"
 #include "nvim/os/lang.h"
 #include "nvim/os/os.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/os/shell.h"
 #include "nvim/os/stdpaths_defs.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/profile.h"
 #include "nvim/quickfix.h"
 #include "nvim/regexp.h"
+#include "nvim/regexp_defs.h"
 #include "nvim/runtime.h"
+#include "nvim/runtime_defs.h"
 #include "nvim/search.h"
 #include "nvim/strings.h"
 #include "nvim/tag.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 #include "nvim/ui.h"
 #include "nvim/ui_compositor.h"
+#include "nvim/ui_defs.h"
 #include "nvim/usercmd.h"
 #include "nvim/version.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 #include "nvim/window.h"
 
 // TODO(ZyX-I): Remove DICT_MAXNEST, make users be non-recursive instead
 
 #define DICT_MAXNEST 100        // maximum nesting of lists and dicts
-
-#define MAX_CALLBACK_DEPTH 20
 
 static const char *e_missbrac = N_("E111: Missing ']'");
 static const char *e_list_end = N_("E697: Missing end of List ']': %s");
@@ -185,6 +194,7 @@ static struct vimvar {
   VV(VV_VERSION,          "version",          VAR_NUMBER, VV_COMPAT + VV_RO),
   VV(VV_LNUM,             "lnum",             VAR_NUMBER, VV_RO_SBX),
   VV(VV_TERMRESPONSE,     "termresponse",     VAR_STRING, VV_RO),
+  VV(VV_TERMREQUEST,      "termrequest",      VAR_STRING, VV_RO),
   VV(VV_FNAME,            "fname",            VAR_STRING, VV_RO),
   VV(VV_LANG,             "lang",             VAR_STRING, VV_RO),
   VV(VV_LC_TIME,          "lc_time",          VAR_STRING, VV_RO),
@@ -298,11 +308,12 @@ static partial_T *vvlua_partial;
 /// v: hashtab
 #define vimvarht  vimvardict.dv_hashtab
 
-/// Enum used by filter(), map() and mapnew()
+/// Enum used by filter(), map(), mapnew() and foreach()
 typedef enum {
   FILTERMAP_FILTER,
   FILTERMAP_MAP,
   FILTERMAP_MAPNEW,
+  FILTERMAP_FOREACH,
 } filtermap_T;
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -497,6 +508,10 @@ static void evalvars_clear(void)
       p->vv_list = NULL;
     }
   }
+
+  partial_unref(vvlua_partial);
+  vimvars[VV_LUA].vv_partial = vvlua_partial = NULL;
+
   hash_clear(&vimvarht);
   hash_init(&vimvarht);    // garbage_collect() will access it
   hash_clear(&compat_hashtab);
@@ -525,7 +540,7 @@ void eval_clear(void)
   free_autoload_scriptnames();
 
   // unreferenced lists and dicts
-  (void)garbage_collect(false);
+  garbage_collect(false);
 
   // functions not garbage collected
   free_all_functions();
@@ -556,7 +571,7 @@ static char *redir_varname = NULL;
 /// @param append  append to an existing variable
 ///
 /// @return  OK if successfully completed the setup.  FAIL otherwise.
-int var_redir_start(char *name, int append)
+int var_redir_start(char *name, bool append)
 {
   // Catch a bad name early.
   if (!eval_isnamec1(*name)) {
@@ -674,7 +689,7 @@ int eval_charconvert(const char *const enc_from, const char *const enc_to,
   set_vim_var_string(VV_CC_TO, enc_to, -1);
   set_vim_var_string(VV_FNAME_IN, fname_from, -1);
   set_vim_var_string(VV_FNAME_OUT, fname_to, -1);
-  sctx_T *ctx = get_option_sctx("charconvert");
+  sctx_T *ctx = get_option_sctx(kOptCharconvert);
   if (ctx != NULL) {
     current_sctx = *ctx;
   }
@@ -703,7 +718,7 @@ void eval_diff(const char *const origfile, const char *const newfile, const char
   set_vim_var_string(VV_FNAME_NEW, newfile, -1);
   set_vim_var_string(VV_FNAME_OUT, outfile, -1);
 
-  sctx_T *ctx = get_option_sctx("diffexpr");
+  sctx_T *ctx = get_option_sctx(kOptDiffexpr);
   if (ctx != NULL) {
     current_sctx = *ctx;
   }
@@ -725,7 +740,7 @@ void eval_patch(const char *const origfile, const char *const difffile, const ch
   set_vim_var_string(VV_FNAME_DIFF, difffile, -1);
   set_vim_var_string(VV_FNAME_OUT, outfile, -1);
 
-  sctx_T *ctx = get_option_sctx("patchexpr");
+  sctx_T *ctx = get_option_sctx(kOptPatchexpr);
   if (ctx != NULL) {
     current_sctx = *ctx;
   }
@@ -743,11 +758,14 @@ void eval_patch(const char *const origfile, const char *const difffile, const ch
 void fill_evalarg_from_eap(evalarg_T *evalarg, exarg_T *eap, bool skip)
 {
   *evalarg = (evalarg_T){ .eval_flags = skip ? 0 : EVAL_EVALUATE };
-  if (eap != NULL) {
-    if (getline_equal(eap->getline, eap->cookie, getsourceline)) {
-      evalarg->eval_getline = eap->getline;
-      evalarg->eval_cookie = eap->cookie;
-    }
+
+  if (eap == NULL) {
+    return;
+  }
+
+  if (getline_equal(eap->getline, eap->cookie, getsourceline)) {
+    evalarg->eval_getline = eap->getline;
+    evalarg->eval_cookie = eap->cookie;
   }
 }
 
@@ -757,7 +775,7 @@ void fill_evalarg_from_eap(evalarg_T *evalarg, exarg_T *eap, bool skip)
 /// @param skip  only parse, don't execute
 ///
 /// @return  true or false.
-int eval_to_bool(char *arg, bool *error, exarg_T *eap, int skip)
+bool eval_to_bool(char *arg, bool *error, exarg_T *eap, bool skip)
 {
   typval_T tv;
   bool retval = false;
@@ -1081,17 +1099,19 @@ bool is_compatht(const hashtab_T *ht)
 }
 
 /// Prepare v: variable "idx" to be used.
-/// Save the current typeval in "save_tv".
+/// Save the current typeval in "save_tv" and clear it.
 /// When not used yet add the variable to the v: hashtable.
 void prepare_vimvar(int idx, typval_T *save_tv)
 {
   *save_tv = vimvars[idx].vv_tv;
+  vimvars[idx].vv_str = NULL;  // don't free it now
   if (vimvars[idx].vv_type == VAR_UNKNOWN) {
     hash_add(&vimvarht, vimvars[idx].vv_di.di_key);
   }
 }
 
 /// Restore v: variable "idx" to typeval "save_tv".
+/// Note that the v: variable must have been cleared already.
 /// When no longer defined, remove the variable from the v: hashtable.
 void restore_vimvar(int idx, typval_T *save_tv)
 {
@@ -1127,7 +1147,7 @@ list_T *eval_spell_expr(char *badword, char *expr)
   if (p_verbose == 0) {
     emsg_off++;
   }
-  sctx_T *ctx = get_option_sctx("spellsuggest");
+  sctx_T *ctx = get_option_sctx(kOptSpellsuggest);
   if (ctx != NULL) {
     current_sctx = *ctx;
   }
@@ -1271,7 +1291,7 @@ void *call_func_retlist(const char *func, int argc, typval_T *argv)
 int eval_foldexpr(win_T *wp, int *cp)
 {
   const sctx_T saved_sctx = current_sctx;
-  const bool use_sandbox = was_set_insecurely(wp, "foldexpr", OPT_LOCAL);
+  const bool use_sandbox = was_set_insecurely(wp, kOptFoldexpr, OPT_LOCAL);
 
   char *arg = wp->w_p_fde;
   current_sctx = wp->w_p_script_ctx[WV_FDE].script_ctx;
@@ -1319,7 +1339,7 @@ int eval_foldexpr(win_T *wp, int *cp)
 /// Evaluate 'foldtext', returning an Array or a String (NULL_STRING on failure).
 Object eval_foldtext(win_T *wp)
 {
-  const bool use_sandbox = was_set_insecurely(wp, "foldtext", OPT_LOCAL);
+  const bool use_sandbox = was_set_insecurely(wp, kOptFoldtext, OPT_LOCAL);
   char *arg = wp->w_p_fdt;
   funccal_entry_T funccal_entry;
 
@@ -1335,7 +1355,7 @@ Object eval_foldtext(win_T *wp)
     retval = STRING_OBJ(NULL_STRING);
   } else {
     if (tv.v_type == VAR_LIST) {
-      retval = vim_to_object(&tv);
+      retval = vim_to_object(&tv, NULL, false);
     } else {
       retval = STRING_OBJ(cstr_to_string(tv_get_string(&tv)));
     }
@@ -1722,7 +1742,7 @@ void clear_lval(lval_T *lp)
 /// @param endp  points to just after the parsed name.
 /// @param op    NULL, "+" for "+=", "-" for "-=", "*" for "*=", "/" for "/=",
 ///              "%" for "%=", "." for ".=" or "=" for "=".
-void set_var_lval(lval_T *lp, char *endp, typval_T *rettv, int copy, const bool is_const,
+void set_var_lval(lval_T *lp, char *endp, typval_T *rettv, bool copy, const bool is_const,
                   const char *op)
 {
   int cc;
@@ -1791,8 +1811,8 @@ void set_var_lval(lval_T *lp, char *endp, typval_T *rettv, int copy, const bool 
       return;
     }
 
-    (void)tv_list_assign_range(lp->ll_list, rettv->vval.v_list,
-                               lp->ll_n1, lp->ll_n2, lp->ll_empty2, op, lp->ll_name);
+    tv_list_assign_range(lp->ll_list, rettv->vval.v_list,
+                         lp->ll_n1, lp->ll_n2, lp->ll_empty2, op, lp->ll_name);
   } else {
     typval_T oldtv = TV_INITIAL_VALUE;
     dict_T *dict = lp->ll_dict;
@@ -2309,20 +2329,22 @@ static int eval_func(char **const arg, evalarg_T *const evalarg, char *const nam
 /// After using "evalarg" filled from "eap": free the memory.
 void clear_evalarg(evalarg_T *evalarg, exarg_T *eap)
 {
-  if (evalarg != NULL) {
-    if (evalarg->eval_tofree != NULL) {
-      if (eap != NULL) {
-        // We may need to keep the original command line, e.g. for
-        // ":let" it has the variable names.  But we may also need the
-        // new one, "nextcmd" points into it.  Keep both.
-        xfree(eap->cmdline_tofree);
-        eap->cmdline_tofree = *eap->cmdlinep;
-        *eap->cmdlinep = evalarg->eval_tofree;
-      } else {
-        xfree(evalarg->eval_tofree);
-      }
-      evalarg->eval_tofree = NULL;
+  if (evalarg == NULL) {
+    return;
+  }
+
+  if (evalarg->eval_tofree != NULL) {
+    if (eap != NULL) {
+      // We may need to keep the original command line, e.g. for
+      // ":let" it has the variable names.  But we may also need the
+      // new one, "nextcmd" points into it.  Keep both.
+      xfree(eap->cmdline_tofree);
+      eap->cmdline_tofree = *eap->cmdlinep;
+      *eap->cmdlinep = evalarg->eval_tofree;
+    } else {
+      xfree(evalarg->eval_tofree);
     }
+    evalarg->eval_tofree = NULL;
   }
 }
 
@@ -2855,7 +2877,8 @@ static int eval5(char **arg, typval_T *rettv, evalarg_T *const evalarg)
       } else {
         bool error = false;
         varnumber_T n1, n2;
-        float_T f1 = 0, f2 = 0;
+        float_T f1 = 0;
+        float_T f2 = 0;
 
         if (rettv->v_type == VAR_FLOAT) {
           f1 = rettv->vval.v_float;
@@ -2946,7 +2969,8 @@ static int eval6(char **arg, typval_T *rettv, evalarg_T *const evalarg, bool wan
     }
 
     varnumber_T n1, n2;
-    float_T f1 = 0, f2 = 0;
+    float_T f1 = 0;
+    float_T f2 = 0;
     bool error = false;
     const bool evaluate = evalarg == NULL ? 0 : (evalarg->eval_flags & EVAL_EVALUATE);
     if (evaluate) {
@@ -3214,6 +3238,13 @@ static int eval7(char **arg, typval_T *rettv, evalarg_T *const evalarg, bool wan
       } else {
         // skip the name
         check_vars(s, (size_t)len);
+        // If evaluate is false rettv->v_type was not set, but it's needed
+        // in handle_subscript() to parse v:lua, so set it here.
+        if (rettv->v_type == VAR_UNKNOWN && !evaluate && strnequal(s, "v:lua.", 6)) {
+          rettv->v_type = VAR_PARTIAL;
+          rettv->vval.v_partial = vvlua_partial;
+          rettv->vval.v_partial->pt_refcount++;
+        }
         ret = OK;
       }
     }
@@ -3418,7 +3449,7 @@ static int eval_method(char **const arg, typval_T *const rettv, evalarg_T *const
   int len;
   char *name = *arg;
   char *lua_funcname = NULL;
-  if (strncmp(name, "v:lua.", 6) == 0) {
+  if (strnequal(name, "v:lua.", 6)) {
     lua_funcname = name + 6;
     *arg = (char *)skip_luafunc_name(lua_funcname);
     *arg = skipwhite(*arg);  // to detect trailing whitespace later
@@ -3607,12 +3638,14 @@ static int check_can_index(typval_T *rettv, bool evaluate, bool verbose)
 /// slice() function
 void f_slice(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
-  if (check_can_index(argvars, true, false) == OK) {
-    tv_copy(argvars, rettv);
-    eval_index_inner(rettv, true, argvars + 1,
-                     argvars[2].v_type == VAR_UNKNOWN ? NULL : argvars + 2,
-                     true, NULL, 0, false);
+  if (check_can_index(argvars, true, false) != OK) {
+    return;
   }
+
+  tv_copy(argvars, rettv);
+  eval_index_inner(rettv, true, argvars + 1,
+                   argvars[2].v_type == VAR_UNKNOWN ? NULL : argvars + 2,
+                   true, NULL, 0, false);
 }
 
 /// Apply index or range to "rettv".
@@ -3728,7 +3761,11 @@ static int eval_index_inner(typval_T *rettv, bool is_range, typval_T *var1, typv
     dictitem_T *const item = tv_dict_find(rettv->vval.v_dict, key, keylen);
 
     if (item == NULL && verbose) {
-      semsg(_(e_dictkey), key);
+      if (keylen > 0) {
+        semsg(_(e_dictkey_len), keylen, key);
+      } else {
+        semsg(_(e_dictkey), key);
+      }
     }
     if (item == NULL || tv_is_luafunc(&item->di_tv)) {
       return FAIL;
@@ -3756,10 +3793,12 @@ int eval_option(const char **const arg, typval_T *const rettv, const bool evalua
   FUNC_ATTR_NONNULL_ARG(1)
 {
   const bool working = (**arg == '+');  // has("+option")
+  OptIndex opt_idx;
   int scope;
 
   // Isolate the option name and find its value.
-  char *option_end = (char *)find_option_end(arg, &scope);
+  char *const option_end = (char *)find_option_var_end(arg, &opt_idx, &scope);
+
   if (option_end == NULL) {
     if (rettv != NULL) {
       semsg(_("E112: Option name missing: %s"), *arg);
@@ -3772,38 +3811,26 @@ int eval_option(const char **const arg, typval_T *const rettv, const bool evalua
     return OK;
   }
 
-  int ret = OK;
-  bool hidden;
   char c = *option_end;
   *option_end = NUL;
-  OptVal value = get_option_value(*arg, NULL, scope, &hidden);
 
-  if (rettv != NULL) {
-    switch (value.type) {
-    case kOptValTypeNil:
+  int ret = OK;
+  bool is_tty_opt = is_tty_option(*arg);
+
+  if (opt_idx == kOptInvalid && !is_tty_opt) {
+    // Only give error if result is going to be used.
+    if (rettv != NULL) {
       semsg(_("E113: Unknown option: %s"), *arg);
-      ret = FAIL;
-      break;
-    case kOptValTypeBoolean:
-      rettv->v_type = VAR_NUMBER;
-      rettv->vval.v_number = value.data.boolean;
-      break;
-    case kOptValTypeNumber:
-      rettv->v_type = VAR_NUMBER;
-      rettv->vval.v_number = value.data.number;
-      break;
-    case kOptValTypeString:
-      rettv->v_type = VAR_STRING;
-      rettv->vval.v_string = value.data.string.data;
-      break;
     }
-  } else {
-    // Value isn't being used, free it.
-    optval_free(value);
 
-    if (value.type == kOptValTypeNil || (working && hidden)) {
-      ret = FAIL;
-    }
+    ret = FAIL;
+  } else if (rettv != NULL) {
+    OptVal value = is_tty_opt ? get_tty_option(*arg) : get_option_value(opt_idx, scope);
+    assert(value.type != kOptValTypeNil);
+
+    *rettv = optval_as_tv(value, true);
+  } else if (working && !is_tty_opt && is_option_hidden(opt_idx)) {
+    ret = FAIL;
   }
 
   *option_end = c;                  // put back for error messages
@@ -4235,7 +4262,11 @@ static void partial_free(partial_T *pt)
 /// becomes zero.
 void partial_unref(partial_T *pt)
 {
-  if (pt != NULL && --pt->pt_refcount <= 0) {
+  if (pt == NULL) {
+    return;
+  }
+
+  if (--pt->pt_refcount <= 0) {
     partial_free(pt);
   }
 }
@@ -4545,7 +4576,7 @@ bool garbage_collect(bool testing)
 
   // history items (ShaDa additional elements)
   if (p_hi) {
-    for (HistoryType i = 0; i < HIST_COUNT; i++) {
+    for (int i = 0; i < HIST_COUNT; i++) {
       const void *iter = NULL;
       do {
         histentry_T hist;
@@ -4704,7 +4735,7 @@ bool set_ref_in_ht(hashtab_T *ht, int copyID, list_stack_T **list_stack)
 /// @param ht_stack      Used to add hashtabs to be marked. Can be NULL.
 ///
 /// @returns             true if setting references failed somehow.
-bool set_ref_in_list(list_T *l, int copyID, ht_stack_T **ht_stack)
+bool set_ref_in_list_items(list_T *l, int copyID, ht_stack_T **ht_stack)
   FUNC_ATTR_WARN_UNUSED_RESULT
 {
   bool abort = false;
@@ -4781,7 +4812,7 @@ bool set_ref_in_item(typval_T *tv, int copyID, ht_stack_T **ht_stack, list_stack
       // Didn't see this list yet.
       ll->lv_copyID = copyID;
       if (list_stack == NULL) {
-        abort = set_ref_in_list(ll, copyID, ht_stack);
+        abort = set_ref_in_list_items(ll, copyID, ht_stack);
       } else {
         list_stack_T *const newitem = xmalloc(sizeof(list_stack_T));
         newitem->list = ll;
@@ -5023,7 +5054,7 @@ size_t string2float(const char *const text, float_T *const ret_value)
     return 3;
   }
   if (STRNICMP(text, "-inf", 3) == 0) {
-    *ret_value = (float_T) - INFINITY;
+    *ret_value = (float_T)(-INFINITY);
     return 4;
   }
   if (STRNICMP(text, "nan", 3) == 0) {
@@ -5086,7 +5117,8 @@ void assert_error(garray_T *gap)
   tv_list_append_string(vimvars[VV_ERRORS].vv_list, gap->ga_data, (ptrdiff_t)gap->ga_len);
 }
 
-/// Implementation of map() and filter() for a Dict.
+/// Implementation of map(), filter(), foreach() for a Dict.  Apply "expr" to
+/// every item in Dict "d" and return the result in "rettv".
 static void filter_map_dict(dict_T *d, filtermap_T filtermap, const char *func_name,
                             const char *arg_errmsg, typval_T *expr, typval_T *rettv)
 {
@@ -5154,7 +5186,7 @@ static void filter_map_dict(dict_T *d, filtermap_T filtermap, const char *func_n
   d->dv_lock = prev_lock;
 }
 
-/// Implementation of map() and filter() for a Blob.
+/// Implementation of map(), filter(), foreach() for a Blob.
 static void filter_map_blob(blob_T *blob_arg, filtermap_T filtermap, typval_T *expr,
                             const char *arg_errmsg, typval_T *rettv)
 {
@@ -5197,20 +5229,22 @@ static void filter_map_blob(blob_T *blob_arg, filtermap_T filtermap, typval_T *e
         || did_emsg) {
       break;
     }
-    if (newtv.v_type != VAR_NUMBER && newtv.v_type != VAR_BOOL) {
-      tv_clear(&newtv);
-      emsg(_(e_invalblob));
-      break;
-    }
-    if (filtermap != FILTERMAP_FILTER) {
-      if (newtv.vval.v_number != val) {
-        tv_blob_set(b_ret, i, (uint8_t)newtv.vval.v_number);
+    if (filtermap != FILTERMAP_FOREACH) {
+      if (newtv.v_type != VAR_NUMBER && newtv.v_type != VAR_BOOL) {
+        tv_clear(&newtv);
+        emsg(_(e_invalblob));
+        break;
       }
-    } else if (rem) {
-      char *const p = (char *)blob_arg->bv_ga.ga_data;
-      memmove(p + i, p + i + 1, (size_t)(b->bv_ga.ga_len - i - 1));
-      b->bv_ga.ga_len--;
-      i--;
+      if (filtermap != FILTERMAP_FILTER) {
+        if (newtv.vval.v_number != val) {
+          tv_blob_set(b_ret, i, (uint8_t)newtv.vval.v_number);
+        }
+      } else if (rem) {
+        char *const p = (char *)blob_arg->bv_ga.ga_data;
+        memmove(p + i, p + i + 1, (size_t)(b->bv_ga.ga_len - i - 1));
+        b->bv_ga.ga_len--;
+        i--;
+      }
     }
     idx++;
   }
@@ -5218,7 +5252,7 @@ static void filter_map_blob(blob_T *blob_arg, filtermap_T filtermap, typval_T *e
   b->bv_lock = prev_lock;
 }
 
-/// Implementation of map() and filter() for a String.
+/// Implementation of map(), filter(), foreach() for a String.
 static void filter_map_string(const char *str, filtermap_T filtermap, typval_T *expr,
                               typval_T *rettv)
 {
@@ -5247,7 +5281,8 @@ static void filter_map_string(const char *str, filtermap_T filtermap, typval_T *
       tv_clear(&newtv);
       tv_clear(&tv);
       break;
-    } else if (filtermap != FILTERMAP_FILTER) {
+    }
+    if (filtermap == FILTERMAP_MAP || filtermap == FILTERMAP_MAPNEW) {
       if (newtv.v_type != VAR_STRING) {
         tv_clear(&newtv);
         tv_clear(&tv);
@@ -5256,7 +5291,7 @@ static void filter_map_string(const char *str, filtermap_T filtermap, typval_T *
       } else {
         ga_concat(&ga, newtv.vval.v_string);
       }
-    } else if (!rem) {
+    } else if (filtermap == FILTERMAP_FOREACH || !rem) {
       ga_concat(&ga, tv.vval.v_string);
     }
 
@@ -5269,7 +5304,8 @@ static void filter_map_string(const char *str, filtermap_T filtermap, typval_T *
   rettv->vval.v_string = ga.ga_data;
 }
 
-/// Implementation of map() and filter() for a List.
+/// Implementation of map(), filter(), foreach() for a List.  Apply "expr" to
+/// every item in List "l" and return the result in "rettv".
 static void filter_map_list(list_T *l, filtermap_T filtermap, const char *func_name,
                             const char *arg_errmsg, typval_T *expr, typval_T *rettv)
 {
@@ -5333,21 +5369,25 @@ static void filter_map_list(list_T *l, filtermap_T filtermap, const char *func_n
   tv_list_set_lock(l, prev_lock);
 }
 
-/// Implementation of map() and filter().
+/// Implementation of map(), filter() and foreach().
 static void filter_map(typval_T *argvars, typval_T *rettv, filtermap_T filtermap)
 {
   const char *const func_name = (filtermap == FILTERMAP_MAP
                                  ? "map()"
                                  : (filtermap == FILTERMAP_MAPNEW
                                     ? "mapnew()"
-                                    : "filter()"));
+                                    : (filtermap == FILTERMAP_FILTER
+                                       ? "filter()"
+                                       : "foreach()")));
   const char *const arg_errmsg = (filtermap == FILTERMAP_MAP
                                   ? N_("map() argument")
                                   : (filtermap == FILTERMAP_MAPNEW
                                      ? N_("mapnew() argument")
-                                     : N_("filter() argument")));
+                                     : (filtermap == FILTERMAP_FILTER
+                                        ? N_("filter() argument")
+                                        : N_("foreach() argument"))));
 
-  // map() and filter() return the first argument, also on failure.
+  // map(), filter(), foreach() return the first argument, also on failure.
   if (filtermap != FILTERMAP_MAPNEW && argvars[0].v_type != VAR_STRING) {
     tv_copy(&argvars[0], rettv);
   }
@@ -5364,38 +5404,40 @@ static void filter_map(typval_T *argvars, typval_T *rettv, filtermap_T filtermap
   // On type errors, the preceding call has already displayed an error
   // message.  Avoid a misleading error message for an empty string that
   // was not passed as argument.
-  if (expr->v_type != VAR_UNKNOWN) {
-    typval_T save_val;
-    prepare_vimvar(VV_VAL, &save_val);
-
-    // We reset "did_emsg" to be able to detect whether an error
-    // occurred during evaluation of the expression.
-    int save_did_emsg = did_emsg;
-    did_emsg = false;
-
-    typval_T save_key;
-    prepare_vimvar(VV_KEY, &save_key);
-    if (argvars[0].v_type == VAR_DICT) {
-      filter_map_dict(argvars[0].vval.v_dict, filtermap, func_name,
-                      arg_errmsg, expr, rettv);
-    } else if (argvars[0].v_type == VAR_BLOB) {
-      filter_map_blob(argvars[0].vval.v_blob, filtermap, expr, arg_errmsg, rettv);
-    } else if (argvars[0].v_type == VAR_STRING) {
-      filter_map_string(tv_get_string(&argvars[0]), filtermap, expr, rettv);
-    } else {
-      assert(argvars[0].v_type == VAR_LIST);
-      filter_map_list(argvars[0].vval.v_list, filtermap, func_name,
-                      arg_errmsg, expr, rettv);
-    }
-
-    restore_vimvar(VV_KEY, &save_key);
-    restore_vimvar(VV_VAL, &save_val);
-
-    did_emsg |= save_did_emsg;
+  if (expr->v_type == VAR_UNKNOWN) {
+    return;
   }
+
+  typval_T save_val;
+  prepare_vimvar(VV_VAL, &save_val);
+
+  // We reset "did_emsg" to be able to detect whether an error
+  // occurred during evaluation of the expression.
+  int save_did_emsg = did_emsg;
+  did_emsg = false;
+
+  typval_T save_key;
+  prepare_vimvar(VV_KEY, &save_key);
+  if (argvars[0].v_type == VAR_DICT) {
+    filter_map_dict(argvars[0].vval.v_dict, filtermap, func_name,
+                    arg_errmsg, expr, rettv);
+  } else if (argvars[0].v_type == VAR_BLOB) {
+    filter_map_blob(argvars[0].vval.v_blob, filtermap, expr, arg_errmsg, rettv);
+  } else if (argvars[0].v_type == VAR_STRING) {
+    filter_map_string(tv_get_string(&argvars[0]), filtermap, expr, rettv);
+  } else {
+    assert(argvars[0].v_type == VAR_LIST);
+    filter_map_list(argvars[0].vval.v_list, filtermap, func_name,
+                    arg_errmsg, expr, rettv);
+  }
+
+  restore_vimvar(VV_KEY, &save_key);
+  restore_vimvar(VV_VAL, &save_val);
+
+  did_emsg |= save_did_emsg;
 }
 
-/// Handle one item for map() and filter().
+/// Handle one item for map(), filter(), foreach().
 /// Sets v:val to "tv".  Caller must set v:key.
 ///
 /// @param tv     original value
@@ -5410,6 +5452,17 @@ static int filter_map_one(typval_T *tv, typval_T *expr, const filtermap_T filter
   int retval = FAIL;
 
   tv_copy(tv, &vimvars[VV_VAL].vv_tv);
+
+  newtv->v_type = VAR_UNKNOWN;
+  if (filtermap == FILTERMAP_FOREACH && expr->v_type == VAR_STRING) {
+    // foreach() is not limited to an expression
+    do_cmdline_cmd(expr->vval.v_string);
+    if (!did_emsg) {
+      retval = OK;
+    }
+    goto theend;
+  }
+
   argv[0] = vimvars[VV_KEY].vv_tv;
   argv[1] = vimvars[VV_VAL].vv_tv;
   if (eval_expr_typval(expr, false, argv, 2, newtv) == FAIL) {
@@ -5426,6 +5479,8 @@ static int filter_map_one(typval_T *tv, typval_T *expr, const filtermap_T filter
     if (error) {
       goto theend;
     }
+  } else if (filtermap == FILTERMAP_FOREACH) {
+    tv_clear(newtv);
   }
   retval = OK;
 theend:
@@ -5449,6 +5504,12 @@ void f_map(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 void f_mapnew(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
 {
   filter_map(argvars, rettv, FILTERMAP_MAPNEW);
+}
+
+/// "foreach()" function
+void f_foreach(typval_T *argvars, typval_T *rettv, EvalFuncData fptr)
+{
+  filter_map(argvars, rettv, FILTERMAP_FOREACH);
 }
 
 /// "function()" function
@@ -6058,7 +6119,7 @@ bool callback_call(Callback *const callback, const int argcount_in, typval_T *co
                    typval_T *const rettv)
   FUNC_ATTR_NONNULL_ALL
 {
-  if (callback_depth > MAX_CALLBACK_DEPTH) {
+  if (callback_depth > p_mfd) {
     emsg(_(e_command_too_recursive));
     return false;
   }
@@ -6089,8 +6150,8 @@ bool callback_call(Callback *const callback, const int argcount_in, typval_T *co
     break;
 
   case kCallbackLua:
-    rv = nlua_call_ref(callback->data.luaref, NULL, args, false, NULL);
-    return (rv.type == kObjectTypeBoolean && rv.data.boolean == true);
+    rv = nlua_call_ref(callback->data.luaref, NULL, args, kRetNilBool, NULL, NULL);
+    return LUARET_TRUTHY(rv);
 
   case kCallbackNone:
     return false;
@@ -6638,7 +6699,7 @@ pos_T *var2fpos(const typval_T *const tv, const bool dollar_lnum, int *const ret
     if (charcol) {
       len = mb_charlen(ml_get(pos.lnum));
     } else {
-      len = (int)strlen(ml_get(pos.lnum));
+      len = ml_get_len(pos.lnum);
     }
 
     // We accept "$" for the column number: last column.
@@ -6728,7 +6789,7 @@ pos_T *var2fpos(const typval_T *const tv, const bool dollar_lnum, int *const ret
       if (charcol) {
         pos.col = (colnr_T)mb_charlen(get_cursor_line_ptr());
       } else {
-        pos.col = (colnr_T)strlen(get_cursor_line_ptr());
+        pos.col = get_cursor_line_len();
       }
     }
     return &pos;
@@ -7458,29 +7519,44 @@ int check_luafunc_name(const char *const str, const bool paren)
   return (int)(p - str);
 }
 
-/// Return the character "str[index]" where "index" is the character index.  If
-/// "index" is out of range NULL is returned.
+/// Return the character "str[index]" where "index" is the character index,
+/// including composing characters.
+/// If "index" is out of range NULL is returned.
 char *char_from_string(const char *str, varnumber_T index)
 {
-  size_t nbyte = 0;
   varnumber_T nchar = index;
 
-  if (str == NULL || index < 0) {
+  if (str == NULL) {
     return NULL;
   }
   size_t slen = strlen(str);
-  while (nchar > 0 && nbyte < slen) {
-    nbyte += (size_t)utf_ptr2len(str + nbyte);
-    nchar--;
+
+  // do the same as for a list: a negative index counts from the end
+  if (index < 0) {
+    int clen = 0;
+
+    for (size_t nbyte = 0; nbyte < slen; clen++) {
+      nbyte += (size_t)utfc_ptr2len(str + nbyte);
+    }
+    nchar = clen + index;
+    if (nchar < 0) {
+      // unlike list: index out of range results in empty string
+      return NULL;
+    }
+  }
+
+  size_t nbyte = 0;
+  for (; nchar > 0 && nbyte < slen; nchar--) {
+    nbyte += (size_t)utfc_ptr2len(str + nbyte);
   }
   if (nbyte >= slen) {
     return NULL;
   }
-  return xmemdupz(str + nbyte, (size_t)utf_ptr2len(str + nbyte));
+  return xmemdupz(str + nbyte, (size_t)utfc_ptr2len(str + nbyte));
 }
 
 /// Get the byte index for character index "idx" in string "str" with length
-/// "str_len".
+/// "str_len".  Composing characters are included.
 /// If going over the end return "str_len".
 /// If "idx" is negative count from the end, -1 is the last character.
 /// When going over the start return -1.
@@ -7491,7 +7567,7 @@ static ssize_t char_idx2byte(const char *str, size_t str_len, varnumber_T idx)
 
   if (nchar >= 0) {
     while (nchar > 0 && nbyte < str_len) {
-      nbyte += (size_t)utf_ptr2len(str + nbyte);
+      nbyte += (size_t)utfc_ptr2len(str + nbyte);
       nchar--;
     }
   } else {
@@ -7508,7 +7584,8 @@ static ssize_t char_idx2byte(const char *str, size_t str_len, varnumber_T idx)
   return (ssize_t)nbyte;
 }
 
-/// Return the slice "str[first:last]" using character indexes.
+/// Return the slice "str[first : last]" using character indexes.  Composing
+/// characters are included.
 ///
 /// @param exclusive  true for slice().
 ///
@@ -7530,7 +7607,7 @@ char *string_slice(const char *str, varnumber_T first, varnumber_T last, bool ex
     end_byte = char_idx2byte(str, slen, last);
     if (!exclusive && end_byte >= 0 && end_byte < (ssize_t)slen) {
       // end index is inclusive
-      end_byte += utf_ptr2len(str + end_byte);
+      end_byte += utfc_ptr2len(str + end_byte);
     }
   }
 
@@ -7560,6 +7637,10 @@ int handle_subscript(const char **const arg, typval_T *rettv, evalarg_T *const e
   const char *lua_funcname = NULL;
 
   if (tv_is_luafunc(rettv)) {
+    if (!evaluate) {
+      tv_clear(rettv);
+    }
+
     if (**arg != '.') {
       tv_clear(rettv);
       ret = FAIL;
@@ -8020,10 +8101,12 @@ void ex_echo(exarg_T *eap)
         // Call msg_start() after eval1(), evaluating the expression
         // may cause a message to appear.
         if (eap->cmdidx == CMD_echo) {
-          // Mark the saved text as finishing the line, so that what
-          // follows is displayed on a new line when scrolling back
-          // at the more prompt.
-          msg_sb_eol();
+          if (!msg_didout) {
+            // Mark the saved text as finishing the line, so that what
+            // follows is displayed on a new line when scrolling back
+            // at the more prompt.
+            msg_sb_eol();
+          }
           msg_start();
         }
       } else if (eap->cmdidx == CMD_echo) {
@@ -8132,13 +8215,14 @@ void ex_execute(exarg_T *eap)
   eap->nextcmd = check_nextcmd(arg);
 }
 
-/// Skip over the name of an option: "&option", "&g:option" or "&l:option".
+/// Skip over the name of an option variable: "&option", "&g:option" or "&l:option".
 ///
-/// @param arg  points to the "&" or '+' when called, to "option" when returning.
+/// @param[in,out]  arg       Points to the "&" or '+' when called, to "option" when returning.
+/// @param[out]     opt_idxp  Set to option index in options[] table.
+/// @param[out]     scope     Set to option scope.
 ///
-/// @return  NULL when no option name found.  Otherwise pointer to the char
-///          after the option name.
-const char *find_option_end(const char **const arg, int *const scope)
+/// @return NULL when no option name found. Otherwise pointer to the char after the option name.
+const char *find_option_var_end(const char **const arg, OptIndex *const opt_idxp, int *const scope)
 {
   const char *p = *arg;
 
@@ -8153,22 +8237,12 @@ const char *find_option_end(const char **const arg, int *const scope)
     *scope = 0;
   }
 
-  if (!ASCII_ISALPHA(*p)) {
-    return NULL;
-  }
-  *arg = p;
-
-  if (p[0] == 't' && p[1] == '_' && p[2] != NUL && p[3] != NUL) {
-    p += 4;  // t_xx/termcap option
-  } else {
-    while (ASCII_ISALPHA(*p)) {
-      p++;
-    }
-  }
-  return p;
+  const char *end = find_option_end(p, opt_idxp);
+  *arg = end == NULL ? *arg : p;
+  return end;
 }
 
-static var_flavour_T var_flavour(char *varname)
+var_flavour_T var_flavour(char *varname)
   FUNC_ATTR_PURE
 {
   char *p = varname;
@@ -8184,48 +8258,6 @@ static var_flavour_T var_flavour(char *varname)
   return VAR_FLAVOUR_DEFAULT;
 }
 
-/// Iterate over global variables
-///
-/// @warning No modifications to global variable dictionary must be performed
-///          while iteration is in progress.
-///
-/// @param[in]   iter   Iterator. Pass NULL to start iteration.
-/// @param[out]  name   Variable name.
-/// @param[out]  rettv  Variable value.
-///
-/// @return Pointer that needs to be passed to next `var_shada_iter` invocation
-///         or NULL to indicate that iteration is over.
-const void *var_shada_iter(const void *const iter, const char **const name, typval_T *rettv,
-                           var_flavour_T flavour)
-  FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_NONNULL_ARG(2, 3)
-{
-  const hashitem_T *hi;
-  const hashitem_T *hifirst = globvarht.ht_array;
-  const size_t hinum = (size_t)globvarht.ht_mask + 1;
-  *name = NULL;
-  if (iter == NULL) {
-    hi = globvarht.ht_array;
-    while ((size_t)(hi - hifirst) < hinum
-           && (HASHITEM_EMPTY(hi)
-               || !(var_flavour(hi->hi_key) & flavour))) {
-      hi++;
-    }
-    if ((size_t)(hi - hifirst) == hinum) {
-      return NULL;
-    }
-  } else {
-    hi = (const hashitem_T *)iter;
-  }
-  *name = TV_DICT_HI2DI(hi)->di_key;
-  tv_copy(&TV_DICT_HI2DI(hi)->di_tv, rettv);
-  while ((size_t)(++hi - hifirst) < hinum) {
-    if (!HASHITEM_EMPTY(hi) && (var_flavour(hi->hi_key) & flavour)) {
-      return hi;
-    }
-  }
-  return NULL;
-}
-
 void var_set_global(const char *const name, typval_T vartv)
 {
   funccal_entry_T funccall_entry;
@@ -8233,50 +8265,6 @@ void var_set_global(const char *const name, typval_T vartv)
   save_funccal(&funccall_entry);
   set_var(name, strlen(name), &vartv, false);
   restore_funccal();
-}
-
-int store_session_globals(FILE *fd)
-{
-  TV_DICT_ITER(&globvardict, this_var, {
-    if ((this_var->di_tv.v_type == VAR_NUMBER
-         || this_var->di_tv.v_type == VAR_STRING)
-        && var_flavour(this_var->di_key) == VAR_FLAVOUR_SESSION) {
-      // Escape special characters with a backslash.  Turn a LF and
-      // CR into \n and \r.
-      char *const p = vim_strsave_escaped(tv_get_string(&this_var->di_tv), "\\\"\n\r");
-      for (char *t = p; *t != NUL; t++) {
-        if (*t == '\n') {
-          *t = 'n';
-        } else if (*t == '\r') {
-          *t = 'r';
-        }
-      }
-      if ((fprintf(fd, "let %s = %c%s%c",
-                   this_var->di_key,
-                   ((this_var->di_tv.v_type == VAR_STRING) ? '"' : ' '),
-                   p,
-                   ((this_var->di_tv.v_type == VAR_STRING) ? '"' : ' ')) < 0)
-          || put_eol(fd) == FAIL) {
-        xfree(p);
-        return FAIL;
-      }
-      xfree(p);
-    } else if (this_var->di_tv.v_type == VAR_FLOAT
-               && var_flavour(this_var->di_key) == VAR_FLAVOUR_SESSION) {
-      float_T f = this_var->di_tv.vval.v_float;
-      int sign = ' ';
-
-      if (f < 0) {
-        f = -f;
-        sign = '-';
-      }
-      if ((fprintf(fd, "let %s = %c%f", this_var->di_key, sign, f) < 0)
-          || put_eol(fd) == FAIL) {
-        return FAIL;
-      }
-    }
-  });
-  return OK;
 }
 
 /// Display script name where an item was last set.
@@ -8295,21 +8283,24 @@ void last_set_msg(sctx_T script_ctx)
 /// Should only be invoked when 'verbose' is non-zero.
 void option_last_set_msg(LastSet last_set)
 {
-  if (last_set.script_ctx.sc_sid != 0) {
-    bool should_free;
-    char *p = get_scriptname(last_set, &should_free);
-    verbose_enter();
-    msg_puts(_("\n\tLast set from "));
-    msg_puts(p);
-    if (last_set.script_ctx.sc_lnum > 0) {
-      msg_puts(_(line_msg));
-      msg_outnum(last_set.script_ctx.sc_lnum);
-    }
-    if (should_free) {
-      xfree(p);
-    }
-    verbose_leave();
+  if (last_set.script_ctx.sc_sid == 0) {
+    return;
   }
+
+  bool should_free;
+  char *p = get_scriptname(last_set, &should_free);
+
+  verbose_enter();
+  msg_puts(_("\n\tLast set from "));
+  msg_puts(p);
+  if (last_set.script_ctx.sc_lnum > 0) {
+    msg_puts(_(line_msg));
+    msg_outnum(last_set.script_ctx.sc_lnum);
+  }
+  if (should_free) {
+    xfree(p);
+  }
+  verbose_leave();
 }
 
 // reset v:option_new, v:option_old, v:option_oldlocal, v:option_oldglobal,
@@ -8680,9 +8671,9 @@ char *do_string_sub(char *str, char *pat, char *sub, typval_T *expr, const char 
       int i = (int)(regmatch.startp[0] - tail);
       memmove((char *)ga.ga_data + ga.ga_len, tail, (size_t)i);
       // add the substituted text
-      (void)vim_regsub(&regmatch, sub, expr,
-                       (char *)ga.ga_data + ga.ga_len + i, sublen,
-                       REGSUB_COPY | REGSUB_MAGIC);
+      vim_regsub(&regmatch, sub, expr,
+                 (char *)ga.ga_data + ga.ga_len + i, sublen,
+                 REGSUB_COPY | REGSUB_MAGIC);
       ga.ga_len += i + sublen - 1;
       tail = regmatch.endp[0];
       if (*tail == NUL) {
@@ -8709,7 +8700,7 @@ char *do_string_sub(char *str, char *pat, char *sub, typval_T *expr, const char 
     // If it's still empty it was changed and restored, need to restore in
     // the complicated way.
     if (*p_cpo == NUL) {
-      set_option_value_give_err("cpo", CSTR_AS_OPTVAL(save_cpo), 0);
+      set_option_value_give_err(kOptCpoptions, CSTR_AS_OPTVAL(save_cpo), 0);
     }
     free_string_option(save_cpo);
   }
@@ -8822,7 +8813,7 @@ typval_T eval_call_provider(char *provider, char *method, list_T *arguments, boo
   funcexe.fe_firstline = curwin->w_cursor.lnum;
   funcexe.fe_lastline = curwin->w_cursor.lnum;
   funcexe.fe_evaluate = true;
-  (void)call_func(func, name_len, &rettv, 2, argvars, &funcexe);
+  call_func(func, name_len, &rettv, 2, argvars, &funcexe);
 
   tv_list_unref(arguments);
   // Restore caller scope information
@@ -8903,32 +8894,6 @@ void eval_fmt_source_name_line(char *buf, size_t bufsize)
   } else {
     snprintf(buf, bufsize, "?");
   }
-}
-
-/// ":checkhealth [plugins]"
-void ex_checkhealth(exarg_T *eap)
-{
-  Error err = ERROR_INIT;
-  MAXSIZE_TEMP_ARRAY(args, 1);
-  ADD_C(args, CSTR_AS_OBJ(eap->arg));
-  NLUA_EXEC_STATIC("return vim.health._check(...)", args, &err);
-  if (!ERROR_SET(&err)) {
-    return;
-  }
-
-  const char *vimruntime_env = os_getenv("VIMRUNTIME");
-  if (vimruntime_env == NULL) {
-    emsg(_("E5009: $VIMRUNTIME is empty or unset"));
-  } else {
-    bool rtp_ok = NULL != strstr(p_rtp, vimruntime_env);
-    if (rtp_ok) {
-      semsg(_("E5009: Invalid $VIMRUNTIME: %s"), vimruntime_env);
-    } else {
-      emsg(_("E5009: Invalid 'runtimepath'"));
-    }
-  }
-  semsg_multiline(err.msg);
-  api_clear_error(&err);
 }
 
 void invoke_prompt_callback(void)

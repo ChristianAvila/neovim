@@ -1,6 +1,7 @@
-local G = require('vim.lsp._snippet_grammar')
+local G = vim.lsp._snippet_grammar
 local snippet_group = vim.api.nvim_create_augroup('vim/snippet', {})
 local snippet_ns = vim.api.nvim_create_namespace('vim/snippet')
+local hl_group = 'SnippetTabstop'
 
 --- Returns the 0-based cursor position.
 ---
@@ -42,9 +43,7 @@ local function resolve_variable(var, default)
   elseif var == 'TM_FILENAME' then
     return expand_or_default('%:t')
   elseif var == 'TM_FILENAME_BASE' then
-    -- Not using '%:t:r' since we want to remove all extensions.
-    local filename_base = expand_or_default('%:t'):gsub('%.[^%.]*$', '')
-    return filename_base
+    return expand_or_default('%:t:r')
   elseif var == 'TM_DIRECTORY' then
     return expand_or_default('%:p:h:t')
   elseif var == 'TM_FILEPATH' then
@@ -102,7 +101,7 @@ local function get_extmark_range(bufnr, extmark_id)
   return { mark[1], mark[2], mark[3].end_row, mark[3].end_col }
 end
 
---- @class vim.snippet.Tabstop
+--- @class (private) vim.snippet.Tabstop
 --- @field extmark_id integer
 --- @field bufnr integer
 --- @field index integer
@@ -119,11 +118,11 @@ local Tabstop = {}
 --- @return vim.snippet.Tabstop
 function Tabstop.new(index, bufnr, range, choices)
   local extmark_id = vim.api.nvim_buf_set_extmark(bufnr, snippet_ns, range[1], range[2], {
-    right_gravity = false,
+    right_gravity = true,
     end_right_gravity = true,
     end_line = range[3],
     end_col = range[4],
-    hl_group = 'SnippetTabstop',
+    hl_group = hl_group,
   })
 
   local self = setmetatable(
@@ -163,7 +162,22 @@ function Tabstop:set_text(text)
   vim.api.nvim_buf_set_text(self.bufnr, range[1], range[2], range[3], range[4], text_to_lines(text))
 end
 
---- @class vim.snippet.Session
+--- Sets the right gravity of the tabstop's extmark.
+---
+--- @package
+--- @param right_gravity boolean
+function Tabstop:set_right_gravity(right_gravity)
+  local range = self:get_range()
+  self.extmark_id = vim.api.nvim_buf_set_extmark(self.bufnr, snippet_ns, range[1], range[2], {
+    right_gravity = right_gravity,
+    end_right_gravity = true,
+    end_line = range[3],
+    end_col = range[4],
+    hl_group = hl_group,
+  })
+end
+
+--- @class (private) vim.snippet.Session
 --- @field bufnr integer
 --- @field extmark_id integer
 --- @field tabstops table<integer, vim.snippet.Tabstop[]>
@@ -220,8 +234,17 @@ function Session:get_dest_index(direction)
   end
 end
 
---- @class vim.snippet.Snippet
---- @field private _session? vim.snippet.Session
+--- Sets the right gravity of the tabstop group with the given index.
+---
+--- @package
+--- @param index integer
+--- @param right_gravity boolean
+function Session:set_group_gravity(index, right_gravity)
+  for _, tabstop in ipairs(self.tabstops[index]) do
+    tabstop:set_right_gravity(right_gravity)
+  end
+end
+
 local M = { session = nil }
 
 --- Displays the choices for the given tabstop as completion items.
@@ -231,9 +254,10 @@ local function display_choices(tabstop)
   assert(tabstop.choices, 'Tabstop has no choices')
 
   local start_col = tabstop:get_range()[2] + 1
-  local matches = vim.iter.map(function(choice)
-    return { word = choice }
-  end, tabstop.choices)
+  local matches = {} --- @type table[]
+  for _, choice in ipairs(tabstop.choices) do
+    matches[#matches + 1] = { word = choice }
+  end
 
   vim.defer_fn(function()
     vim.fn.complete(start_col, matches)
@@ -423,17 +447,23 @@ function M.expand(input)
       base_indent = base_indent .. (snippet_lines[#snippet_lines]:match('(^%s*)%S') or '') --- @type string
     end
 
-    local lines = vim.iter.map(function(i, line)
+    local shiftwidth = vim.fn.shiftwidth()
+    local curbuf = vim.api.nvim_get_current_buf()
+    local expandtab = vim.bo[curbuf].expandtab
+
+    local lines = {} --- @type string[]
+    for i, line in ipairs(text_to_lines(text)) do
       -- Replace tabs by spaces.
-      if vim.o.expandtab then
-        line = line:gsub('\t', (' '):rep(vim.fn.shiftwidth())) --- @type string
+      if expandtab then
+        line = line:gsub('\t', (' '):rep(shiftwidth)) --- @type string
       end
       -- Add the base indentation.
       if i > 1 then
-        line = base_indent .. line
+        line = #line ~= 0 and base_indent .. line
+          or (expandtab and (' '):rep(shiftwidth) or '\t'):rep(vim.fn.indent('.') / shiftwidth + 1)
       end
-      return line
-    end, ipairs(text_to_lines(text)))
+      lines[#lines + 1] = line
+    end
 
     table.insert(snippet_text, table.concat(lines, '\n'))
   end
@@ -562,8 +592,14 @@ function M.jump(direction)
   -- Clear the autocommands so that we can move the cursor freely while selecting the tabstop.
   vim.api.nvim_clear_autocmds({ group = snippet_group, buffer = M._session.bufnr })
 
+  -- Deactivate expansion of the current tabstop.
+  M._session:set_group_gravity(M._session.current_tabstop.index, true)
+
   M._session.current_tabstop = dest
   select_tabstop(dest)
+
+  -- Activate expansion of the destination tabstop.
+  M._session:set_group_gravity(dest.index, false)
 
   -- Restore the autocommands.
   setup_autocmds(M._session.bufnr)

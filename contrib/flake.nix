@@ -134,14 +134,16 @@
 
             buildInputs = with pkgs;
               oa.buildInputs ++ [
-                cmake
                 lua.pkgs.luacheck
                 sumneko-lua-language-server
                 pythonEnv
                 include-what-you-use # for scripts/check-includes.py
                 jq # jq for scripts/vim-patch.sh -r
                 shellcheck # for `make shlint`
-                doxygen # for script/gen_vimdoc.py
+              ];
+
+            nativeBuildInputs = with pkgs;
+              oa.nativeBuildInputs ++ [
                 clang-tools # for clangd to find the correct headers
               ];
 

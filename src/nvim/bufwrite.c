@@ -10,8 +10,9 @@
 #include <uv.h>
 
 #include "auto/config.h"
-#include "nvim/ascii.h"
+#include "nvim/ascii_defs.h"
 #include "nvim/autocmd.h"
+#include "nvim/autocmd_defs.h"
 #include "nvim/buffer.h"
 #include "nvim/buffer_defs.h"
 #include "nvim/bufwrite.h"
@@ -23,29 +24,33 @@
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_eval.h"
 #include "nvim/fileio.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/highlight.h"
 #include "nvim/highlight_defs.h"
-#include "nvim/iconv.h"
+#include "nvim/iconv_defs.h"
 #include "nvim/input.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/mbyte.h"
 #include "nvim/memline.h"
+#include "nvim/memline_defs.h"
 #include "nvim/memory.h"
 #include "nvim/message.h"
 #include "nvim/option.h"
 #include "nvim/option_vars.h"
+#include "nvim/os/fs.h"
 #include "nvim/os/fs_defs.h"
 #include "nvim/os/input.h"
-#include "nvim/os/os.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/sha256.h"
 #include "nvim/strings.h"
-#include "nvim/types.h"
+#include "nvim/types_defs.h"
 #include "nvim/ui.h"
 #include "nvim/undo.h"
-#include "nvim/vim.h"
+#include "nvim/undo_defs.h"
+#include "nvim/vim_defs.h"
 
 static const char *err_readonly = "is read-only (cannot override: \"W\" in 'cpoptions')";
 static const char e_patchmode_cant_touch_empty_original_file[]
@@ -187,7 +192,7 @@ static int buf_write_convert_with_iconv(struct bw_info *ip, char **bufp, int *le
     size_t save_len = tolen;
 
     // output the initial shift state sequence
-    (void)iconv(ip->bw_iconv_fd, NULL, NULL, &to, &tolen);
+    iconv(ip->bw_iconv_fd, NULL, NULL, &to, &tolen);
 
     // There is a bug in iconv() on Linux (which appears to be
     // wide-spread) which sets "to" to NULL and messes up "tolen".
@@ -379,7 +384,7 @@ static int make_bom(char *buf_in, char *name)
     return 3;
   }
   char *p = (char *)buf;
-  (void)ucs2bytes(0xfeff, &p, flags);
+  ucs2bytes(0xfeff, &p, flags);
   return (int)((uint8_t *)p - buf);
 }
 
@@ -481,8 +486,7 @@ static int buf_write_do_autocmds(buf_T *buf, char **fnamep, char **sfnamep, char
       semsg(_(e_no_matching_autocommands_for_buftype_str_buffer), curbuf->b_p_bt);
     }
 
-    if (nofile_err
-        || aborting()) {
+    if (nofile_err || aborting()) {
       // An aborting error, interrupt or exception in the
       // autocommands.
       return FAIL;
@@ -721,7 +725,7 @@ static int get_fileinfo(buf_T *buf, char *fname, bool overwriting, bool forceit,
 
 static int buf_write_make_backup(char *fname, bool append, FileInfo *file_info_old, vim_acl_T acl,
                                  int perm, unsigned bkc, bool file_readonly, bool forceit,
-                                 int *backup_copyp, char **backupp, Error_T *err)
+                                 bool *backup_copyp, char **backupp, Error_T *err)
 {
   FileInfo file_info;
   const bool no_prepend_dot = false;
@@ -799,7 +803,7 @@ static int buf_write_make_backup(char *fname, bool append, FileInfo *file_info_o
   char *backup_ext = *p_bex == NUL ? ".bak" : p_bex;
 
   if (*backup_copyp) {
-    int some_error = false;
+    bool some_error = false;
 
     // Try to make the backup in each directory in the 'bdir' option.
     //
@@ -896,25 +900,6 @@ static int buf_write_make_backup(char *fname, bool append, FileInfo *file_info_o
         // remove old backup, if present
         os_remove(*backupp);
 
-        // set file protection same as original file, but
-        // strip s-bit.
-        (void)os_setperm(*backupp, perm & 0777);
-
-#ifdef UNIX
-        //
-        // Try to set the group of the backup same as the original file. If
-        // this fails, set the protection bits for the group same as the
-        // protection bits for others.
-        //
-        if (file_info_new.stat.st_gid != file_info_old->stat.st_gid
-            && os_chown(*backupp, (uv_uid_t)-1, (uv_gid_t)file_info_old->stat.st_gid) != 0) {
-          os_setperm(*backupp, (perm & 0707) | ((perm & 07) << 3));
-        }
-# ifdef HAVE_XATTR
-        os_copy_xattr(fname, *backupp);
-# endif
-#endif
-
         // copy the file
         if (os_copy(fname, *backupp, UV_FS_COPYFILE_FICLONE) != 0) {
           *err = set_err(_("E509: Cannot create backup file (add ! to override)"));
@@ -923,11 +908,23 @@ static int buf_write_make_backup(char *fname, bool append, FileInfo *file_info_o
           continue;
         }
 
+        // set file protection same as original file, but
+        // strip s-bit.
+        os_setperm(*backupp, perm & 0777);
+
 #ifdef UNIX
+        // Try to set the group of the backup same as the original file. If
+        // this fails, set the protection bits for the group same as the
+        // protection bits for others.
+        if (file_info_new.stat.st_gid != file_info_old->stat.st_gid
+            && os_chown(*backupp, (uv_uid_t)-1, (uv_gid_t)file_info_old->stat.st_gid) != 0) {
+          os_setperm(*backupp, (perm & 0707) | ((perm & 07) << 3));
+        }
         os_file_settime(*backupp,
                         (double)file_info_old->stat.st_atim.tv_sec,
                         (double)file_info_old->stat.st_mtim.tv_sec);
 #endif
+
         os_set_acl(*backupp, acl);
 #ifdef HAVE_XATTR
         os_copy_xattr(fname, *backupp);
@@ -1059,14 +1056,14 @@ nobackup:
 ///
 /// @return        FAIL for failure, OK otherwise
 int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T end, exarg_T *eap,
-              int append, int forceit, int reset_changed, int filtering)
+              bool append, bool forceit, bool reset_changed, bool filtering)
 {
   int retval = OK;
   int msg_save = msg_scroll;
-  int prev_got_int = got_int;
+  bool prev_got_int = got_int;
   // writing everything
-  int whole = (start == 1 && end == buf->b_ml.ml_line_count);
-  int write_undo_file = false;
+  bool whole = (start == 1 && end == buf->b_ml.ml_line_count);
+  bool write_undo_file = false;
   context_sha256_T sha_ctx;
   unsigned bkc = get_bkc_value(buf);
 
@@ -1135,8 +1132,8 @@ int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T en
   fname = sfname;
 #endif
 
-// true if writing over original
-  int overwriting = buf->b_ffname != NULL && path_fnamecmp(ffname, buf->b_ffname) == 0;
+  // true if writing over original
+  bool overwriting = buf->b_ffname != NULL && path_fnamecmp(ffname, buf->b_ffname) == 0;
 
   no_wait_return++;                 // don't wait for return yet
 
@@ -1219,7 +1216,7 @@ int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T en
     dobackup = false;
   }
 
-  int backup_copy = false;  // copy the original file?
+  bool backup_copy = false;  // copy the original file?
 
   // Save the value of got_int and reset it.  We don't want a previous
   // interruption cancel writing, only hitting CTRL-C while writing should
@@ -1245,14 +1242,14 @@ int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T en
   }
 
 #if defined(UNIX)
-  int made_writable = false;  // 'w' bit has been set
+  bool made_writable = false;  // 'w' bit has been set
 
   // When using ":w!" and the file was read-only: make it writable
   if (forceit && perm >= 0 && !(perm & 0200)
       && file_info_old.stat.st_uid == getuid()
       && vim_strchr(p_cpo, CPO_FWRITE) == NULL) {
     perm |= 0200;
-    (void)os_setperm(fname, perm);
+    os_setperm(fname, perm);
     made_writable = true;
   }
 #endif
@@ -1279,8 +1276,7 @@ int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T en
   // This makes all block numbers positive so that recovery does not need
   // the original file.
   // Don't do this if there is a backup file and we are exiting.
-  if (reset_changed && !newfile && overwriting
-      && !(exiting && backup != NULL)) {
+  if (reset_changed && !newfile && overwriting && !(exiting && backup != NULL)) {
     ml_preserve(buf, false, !!p_fs);
     if (got_int) {
       err = set_err(_(e_interr));
@@ -1304,7 +1300,7 @@ int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T en
   }
 
   // Check if the file needs to be converted.
-  int converted = need_conversion(fenc);
+  bool converted = need_conversion(fenc);
   int wb_flags = 0;
 
   // Check if UTF-8 to UCS-2/4 or Latin1 conversion needs to be done.  Or
@@ -1352,7 +1348,7 @@ int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T en
     }
   }
 
-  int notconverted = false;
+  bool notconverted = false;
 
   if (converted && wb_flags == 0
       && write_info.bw_iconv_fd == (iconv_t)-1
@@ -1364,11 +1360,11 @@ int buf_write(buf_T *buf, char *fname, char *sfname, linenr_T start, linenr_T en
     notconverted = true;
   }
 
-  int no_eol = false;  // no end-of-line written
+  bool no_eol = false;  // no end-of-line written
   int nchars;
   linenr_T lnum;
   int fileformat;
-  int checking_conversion;
+  bool checking_conversion;
 
   int fd;
 
@@ -1606,7 +1602,7 @@ restore_backup:
 
     if (!buf->b_p_fixeol && buf->b_p_eof) {
       // write trailing CTRL-Z
-      (void)write_eintr(write_info.bw_fd, "\x1a", 1);
+      write_eintr(write_info.bw_fd, "\x1a", 1);
     }
 
     // Stop when writing done or an error was encountered.
@@ -1655,7 +1651,7 @@ restore_backup:
           || file_info.stat.st_gid != file_info_old.stat.st_gid) {
         os_fchown(fd, (uv_uid_t)file_info_old.stat.st_uid, (uv_gid_t)file_info_old.stat.st_gid);
         if (perm >= 0) {  // Set permission again, may have changed.
-          (void)os_setperm(wfname, perm);
+          os_setperm(wfname, perm);
         }
       }
       buf_set_file_id(buf);
@@ -1676,7 +1672,7 @@ restore_backup:
     }
 #endif
     if (perm >= 0) {  // Set perm. of new file same as old file.
-      (void)os_setperm(wfname, perm);
+      os_setperm(wfname, perm);
     }
     // Probably need to set the ACL before changing the user (can't set the
     // ACL on a file the user doesn't own).

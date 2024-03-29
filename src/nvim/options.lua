@@ -2,10 +2,13 @@
 --- @field full_name string
 --- @field desc? string
 --- @field abbreviation? string
+--- @field alias? string|string[]
 --- @field short_desc? string|fun(): string
 --- @field varname? string
 --- @field pv_name? string
---- @field type 'bool'|'number'|'string'
+--- @field type 'boolean'|'number'|'string'
+--- @field hidden? boolean
+--- @field immutable? boolean
 --- @field list? 'comma'|'onecomma'|'commacolon'|'onecommacolon'|'flags'|'flagscomma'
 --- @field scope vim.option_scope[]
 --- @field deny_duplicates? boolean
@@ -43,10 +46,10 @@
 --- |'statuslines'
 --- |'tabline'
 --- |'current_window'
---- |'current_window_only'
 --- |'current_buffer'
 --- |'all_windows'
 --- |'curswant'
+--- |'highlight_only'
 --- |'ui_option'
 
 --- @param s string
@@ -59,7 +62,7 @@ end
 --- @return fun(): string
 local function macros(s)
   return function()
-    return s
+    return '.string=' .. s
   end
 end
 
@@ -67,7 +70,7 @@ end
 --- @return fun(): string
 local function imacros(s)
   return function()
-    return '(intptr_t)' .. s
+    return '.number=' .. s
   end
 end
 
@@ -83,78 +86,29 @@ end
 return {
   cstr = cstr,
   --- @type vim.option_meta[]
+  --- The order of the options MUST be alphabetic for ":set all".
   options = {
     {
       abbreviation = 'al',
       defaults = { if_true = 224 },
+      enable_if = false,
       full_name = 'aleph',
       scope = { 'global' },
       short_desc = N_('ASCII code of the letter Aleph (Hebrew)'),
       type = 'number',
     },
     {
-      abbreviation = 'arab',
-      cb = 'did_set_arabic',
-      defaults = { if_true = false },
-      desc = [=[
-        This option can be set to start editing Arabic text.
-        Setting this option will:
-        - Set the 'rightleft' option, unless 'termbidi' is set.
-        - Set the 'arabicshape' option, unless 'termbidi' is set.
-        - Set the 'keymap' option to "arabic"; in Insert mode CTRL-^ toggles
-          between typing English and Arabic key mapping.
-        - Set the 'delcombine' option
-
-        Resetting this option will:
-        - Reset the 'rightleft' option.
-        - Disable the use of 'keymap' (without changing its value).
-        Note that 'arabicshape' and 'delcombine' are not reset (it is a global
-        option).
-        Also see |arabic.txt|.
-      ]=],
-      full_name = 'arabic',
-      redraw = { 'curswant' },
-      scope = { 'window' },
-      short_desc = N_('Arabic as a default second language'),
-      type = 'bool',
-    },
-    {
-      abbreviation = 'arshape',
-      defaults = { if_true = true },
-      desc = [=[
-        When on and 'termbidi' is off, the required visual character
-        corrections that need to take place for displaying the Arabic language
-        take effect.  Shaping, in essence, gets enabled; the term is a broad
-        one which encompasses:
-          a) the changing/morphing of characters based on their location
-             within a word (initial, medial, final and stand-alone).
-          b) the enabling of the ability to compose characters
-          c) the enabling of the required combining of some characters
-        When disabled the display shows each character's true stand-alone
-        form.
-        Arabic is a complex language which requires other settings, for
-        further details see |arabic.txt|.
-      ]=],
-      full_name = 'arabicshape',
-      redraw = { 'all_windows', 'ui_option' },
-      scope = { 'global' },
-      short_desc = N_('do shaping for Arabic characters'),
-      type = 'bool',
-      varname = 'p_arshape',
-    },
-    {
       abbreviation = 'ari',
       defaults = { if_true = false },
       desc = [=[
-        Allow CTRL-_ in Insert and Command-line mode.  This is default off, to
-        avoid that users that accidentally type CTRL-_ instead of SHIFT-_ get
-        into reverse Insert mode, and don't know how to get out.  See
-        'revins'.
+        Allow CTRL-_ in Insert mode.  This is default off, to avoid that users
+        that accidentally type CTRL-_ instead of SHIFT-_ get into reverse
+        Insert mode, and don't know how to get out.  See 'revins'.
       ]=],
       full_name = 'allowrevins',
       scope = { 'global' },
-      short_desc = N_('allow CTRL-_ in Insert and Command-line mode'),
-      type = 'bool',
+      short_desc = N_('allow CTRL-_ in Insert mode'),
+      type = 'boolean',
       varname = 'p_ari',
     },
     {
@@ -202,6 +156,56 @@ return {
       varname = 'p_ambw',
     },
     {
+      abbreviation = 'arab',
+      cb = 'did_set_arabic',
+      defaults = { if_true = false },
+      desc = [=[
+        This option can be set to start editing Arabic text.
+        Setting this option will:
+        - Set the 'rightleft' option, unless 'termbidi' is set.
+        - Set the 'arabicshape' option, unless 'termbidi' is set.
+        - Set the 'keymap' option to "arabic"; in Insert mode CTRL-^ toggles
+          between typing English and Arabic key mapping.
+        - Set the 'delcombine' option
+
+        Resetting this option will:
+        - Reset the 'rightleft' option.
+        - Disable the use of 'keymap' (without changing its value).
+        Note that 'arabicshape' and 'delcombine' are not reset (it is a global
+        option).
+        Also see |arabic.txt|.
+      ]=],
+      full_name = 'arabic',
+      redraw = { 'curswant' },
+      scope = { 'window' },
+      short_desc = N_('Arabic as a default second language'),
+      type = 'boolean',
+    },
+    {
+      abbreviation = 'arshape',
+      defaults = { if_true = true },
+      desc = [=[
+        When on and 'termbidi' is off, the required visual character
+        corrections that need to take place for displaying the Arabic language
+        take effect.  Shaping, in essence, gets enabled; the term is a broad
+        one which encompasses:
+          a) the changing/morphing of characters based on their location
+             within a word (initial, medial, final and stand-alone).
+          b) the enabling of the ability to compose characters
+          c) the enabling of the required combining of some characters
+        When disabled the display shows each character's true stand-alone
+        form.
+        Arabic is a complex language which requires other settings, for
+        further details see |arabic.txt|.
+      ]=],
+      full_name = 'arabicshape',
+      redraw = { 'all_windows', 'ui_option' },
+      scope = { 'global' },
+      short_desc = N_('do shaping for Arabic characters'),
+      type = 'boolean',
+      varname = 'p_arshape',
+    },
+    {
       abbreviation = 'acd',
       cb = 'did_set_autochdir',
       defaults = { if_true = false },
@@ -216,7 +220,7 @@ return {
       full_name = 'autochdir',
       scope = { 'global' },
       short_desc = N_('change directory to the file in the current window'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_acd',
     },
     {
@@ -238,7 +242,7 @@ return {
       full_name = 'autoindent',
       scope = { 'buffer' },
       short_desc = N_('take indent for new line from previous line'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ai',
     },
     {
@@ -251,14 +255,14 @@ return {
         from before it was deleted.  When it appears again then it is read.
         |timestamp|
         If this option has a local value, use this command to switch back to
-        using the global value: >
-        	:set autoread<
+        using the global value: >vim
+        	set autoread<
         <
       ]=],
       full_name = 'autoread',
       scope = { 'global', 'buffer' },
       short_desc = N_('autom. read file when changed outside of Vim'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ar',
     },
     {
@@ -283,7 +287,7 @@ return {
       full_name = 'autowrite',
       scope = { 'global' },
       short_desc = N_('automatically write file if changed'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_aw',
     },
     {
@@ -298,7 +302,7 @@ return {
       full_name = 'autowriteall',
       scope = { 'global' },
       short_desc = N_("as 'autowrite', but works with more commands"),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_awa',
     },
     {
@@ -315,23 +319,19 @@ return {
         See |:hi-normal| if you want to set the background color explicitly.
         					*g:colors_name*
         When a color scheme is loaded (the "g:colors_name" variable is set)
-        setting 'background' will cause the color scheme to be reloaded.  If
+        changing 'background' will cause the color scheme to be reloaded.  If
         the color scheme adjusts to the value of 'background' this will work.
         However, if the color scheme sets 'background' itself the effect may
         be undone.  First delete the "g:colors_name" variable when needed.
 
         Normally this option would be set in the vimrc file.  Possibly
-        depending on the terminal name.  Example: >
-        	:if $TERM ==# "xterm"
-        	:  set background=dark
-        	:endif
-        <	When this option is set, the default settings for the highlight groups
+        depending on the terminal name.  Example: >vim
+        	if $TERM ==# "xterm"
+        	  set background=dark
+        	endif
+        <	When this option is changed, the default settings for the highlight groups
         will change.  To use other settings, place ":highlight" commands AFTER
         the setting of the 'background' option.
-        This option is also used in the "$VIMRUNTIME/syntax/syntax.vim" file
-        to select the colors for syntax highlighting.  After changing this
-        option, you must load syntax.vim again to see the result.  This can be
-        done with ":syntax on".
       ]=],
       expand_cb = 'expand_set_background',
       full_name = 'background',
@@ -386,7 +386,7 @@ return {
       full_name = 'backup',
       scope = { 'global' },
       short_desc = N_('keep backup file after overwriting a file'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_bk',
     },
     {
@@ -497,12 +497,12 @@ return {
           use '//', instead of '\\'.
         - Environment variables are expanded |:set_env|.
         - Careful with '\' characters, type one before a space, type two to
-          get one in the option (see |option-backslash|), for example: >
-            :set bdir=c:\\tmp,\ dir\\,with\\,commas,\\\ dir\ with\ spaces
+          get one in the option (see |option-backslash|), for example: >vim
+            set bdir=c:\\tmp,\ dir\\,with\\,commas,\\\ dir\ with\ spaces
         <
         See also 'backup' and 'writebackup' options.
-        If you want to hide your backup files on Unix, consider this value: >
-        	:set backupdir=./.backup,~/.backup,.,/tmp
+        If you want to hide your backup files on Unix, consider this value: >vim
+        	set backupdir=./.backup,~/.backup,.,/tmp
         <	You must create a ".backup" directory in each directory and in your
         home directory for this to work properly.
         The use of |:set+=| and |:set-=| is preferred when adding or removing
@@ -534,8 +534,8 @@ return {
 
         If you like to keep a lot of backups, you could use a BufWritePre
         autocommand to change 'backupext' just before writing the file to
-        include a timestamp. >
-        	:au BufWritePre * let &bex = '-' .. strftime("%Y%b%d%X") .. '~'
+        include a timestamp. >vim
+        	au BufWritePre * let &bex = '-' .. strftime("%Y%b%d%X") .. '~'
         <	Use 'backupdir' to put the backup in a different directory.
       ]=],
       full_name = 'backupext',
@@ -572,7 +572,7 @@ return {
 
         Note that environment variables are not expanded.  If you want to use
         $HOME you must expand it explicitly, e.g.: >vim
-        	:let &backupskip = escape(expand('$HOME'), '\') .. '/tmp/*'
+        	let &backupskip = escape(expand('$HOME'), '\') .. '/tmp/*'
 
         <	Note that the default also makes sure that "crontab -e" works (when a
         backup would be made by renaming the original file crontab won't see
@@ -670,7 +670,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('read/write/edit file in binary mode'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_bin',
     },
     {
@@ -698,7 +698,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('a Byte Order Mark to the file'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_bomb',
     },
     {
@@ -732,7 +732,7 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('wrapped line repeats indent'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'briopt',
@@ -847,7 +847,7 @@ return {
       scope = { 'buffer' },
       short_desc = N_('whether the buffer shows up in the buffer list'),
       tags = { 'E85' },
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_bl',
     },
     {
@@ -949,7 +949,7 @@ return {
       scope = { 'global' },
       secure = true,
       short_desc = N_(':cd without argument goes to the home directory'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_cdh',
     },
     {
@@ -970,8 +970,8 @@ return {
         in the current directory first.
         If the default value taken from $CDPATH is not what you want, include
         a modified version of the following command in your vimrc file to
-        override it: >
-          :let &cdpath = ',' .. substitute(substitute($CDPATH, '[, ]', '\\\0', 'g'), ':', ',', 'g')
+        override it: >vim
+          let &cdpath = ',' .. substitute(substitute($CDPATH, '[, ]', '\\\0', 'g'), ':', ',', 'g')
         <	This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
         (parts of 'cdpath' can be passed to the shell to expand file names).
@@ -996,9 +996,9 @@ return {
         The key used in Command-line Mode to open the command-line window.
         Only non-printable keys are allowed.
         The key can be specified as a single character, but it is difficult to
-        type.  The preferred way is to use the <> notation.  Examples: >
-        	:exe "set cedit=\\<C-Y>"
-        	:exe "set cedit=\\<Esc>"
+        type.  The preferred way is to use the <> notation.  Examples: >vim
+        	exe "set cedit=\\<C-Y>"
+        	exe "set cedit=\\<Esc>"
         <	|Nvi| also has this option, but it only uses the first character.
         See |cmdwin|.
       ]=],
@@ -1044,7 +1044,7 @@ return {
         Conversion between "latin1", "unicode", "ucs-2", "ucs-4" and "utf-8"
         is done internally by Vim, 'charconvert' is not used for this.
         Also used for Unicode conversion.
-        Example: >
+        Example: >vim
         	set charconvert=CharConvert()
         	fun CharConvert()
         	  system("recode "
@@ -1087,7 +1087,7 @@ return {
       full_name = 'cindent',
       scope = { 'buffer' },
       short_desc = N_('do C program indenting'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_cin',
     },
     {
@@ -1128,6 +1128,25 @@ return {
       varname = 'p_cino',
     },
     {
+      abbreviation = 'cinsd',
+      alloced = true,
+      defaults = { if_true = 'public,protected,private' },
+      deny_duplicates = true,
+      desc = [=[
+        Keywords that are interpreted as a C++ scope declaration by |cino-g|.
+        Useful e.g. for working with the Qt framework that defines additional
+        scope declarations "signals", "public slots" and "private slots": >vim
+        	set cinscopedecls+=signals,public\ slots,private\ slots
+        <
+      ]=],
+      full_name = 'cinscopedecls',
+      list = 'onecomma',
+      scope = { 'buffer' },
+      short_desc = N_("words that are recognized by 'cino-g'"),
+      type = 'string',
+      varname = 'p_cinsd',
+    },
+    {
       abbreviation = 'cinw',
       alloced = true,
       defaults = { if_true = 'if,else,while,do,for,switch' },
@@ -1146,25 +1165,6 @@ return {
       short_desc = N_("words where 'si' and 'cin' add an indent"),
       type = 'string',
       varname = 'p_cinw',
-    },
-    {
-      abbreviation = 'cinsd',
-      alloced = true,
-      defaults = { if_true = 'public,protected,private' },
-      deny_duplicates = true,
-      desc = [=[
-        Keywords that are interpreted as a C++ scope declaration by |cino-g|.
-        Useful e.g. for working with the Qt framework that defines additional
-        scope declarations "signals", "public slots" and "private slots": >
-        	set cinscopedecls+=signals,public\ slots,private\ slots
-        <
-      ]=],
-      full_name = 'cinscopedecls',
-      list = 'onecomma',
-      scope = { 'buffer' },
-      short_desc = N_("words that are recognized by 'cino-g'"),
-      type = 'string',
-      varname = 'p_cinsd',
     },
     {
       abbreviation = 'cb',
@@ -1252,26 +1252,27 @@ return {
         highlighted with ColorColumn |hl-ColorColumn|.  Useful to align
         text.  Will make screen redrawing slower.
         The screen column can be an absolute number, or a number preceded with
-        '+' or '-', which is added to or subtracted from 'textwidth'. >
+        '+' or '-', which is added to or subtracted from 'textwidth'. >vim
 
-        	:set cc=+1	  " highlight column after 'textwidth'
-        	:set cc=+1,+2,+3  " highlight three columns after 'textwidth'
-        	:hi ColorColumn ctermbg=lightgrey guibg=lightgrey
+        	set cc=+1	  " highlight column after 'textwidth'
+        	set cc=+1,+2,+3  " highlight three columns after 'textwidth'
+        	hi ColorColumn ctermbg=lightgrey guibg=lightgrey
         <
         When 'textwidth' is zero then the items with '-' and '+' are not used.
         A maximum of 256 columns are highlighted.
       ]=],
       full_name = 'colorcolumn',
       list = 'onecomma',
-      redraw = { 'current_window' },
+      redraw = { 'current_window', 'highlight_only' },
       scope = { 'window' },
       short_desc = N_('columns to highlight'),
       type = 'string',
     },
     {
       abbreviation = 'co',
+      cb = 'did_set_lines_or_columns',
       defaults = {
-        if_true = macros('DFLT_COLS'),
+        if_true = imacros('DFLT_COLS'),
         doc = '80 or terminal width',
       },
       desc = [=[
@@ -1284,8 +1285,8 @@ return {
         number of columns of the display, the display may be messed up.  For
         the GUI it is always possible and Vim limits the number of columns to
         what fits on the screen.  You can use this command to get the widest
-        window possible: >
-        	:set columns=9999
+        window possible: >vim
+        	set columns=9999
         <	Minimum value is 12, maximum value is 10000.
       ]=],
       full_name = 'columns',
@@ -1340,8 +1341,8 @@ return {
       full_name = 'compatible',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_off',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'cpt',
@@ -1362,8 +1363,8 @@ return {
         k	scan the files given with the 'dictionary' option
         kspell  use the currently active spell checking |spell|
         k{dict}	scan the file {dict}.  Several "k" flags can be given,
-        	patterns are valid too.  For example: >
-        		:set cpt=k/usr/dict/*,k~/spanish
+        	patterns are valid too.  For example: >vim
+        		set cpt=k/usr/dict/*,k~/spanish
         <	s	scan the files given with the 'thesaurus' option
         s{tsr}	scan the file {tsr}.  Several "s" flags can be given, patterns
         	are valid too.
@@ -1391,6 +1392,100 @@ return {
       tags = { 'E535' },
       type = 'string',
       varname = 'p_cpt',
+    },
+    {
+      abbreviation = 'cfu',
+      alloced = true,
+      cb = 'did_set_completefunc',
+      defaults = { if_true = '' },
+      desc = [=[
+        This option specifies a function to be used for Insert mode completion
+        with CTRL-X CTRL-U. |i_CTRL-X_CTRL-U|
+        See |complete-functions| for an explanation of how the function is
+        invoked and what it should return.  The value can be the name of a
+        function, a |lambda| or a |Funcref|. See |option-value-function| for
+        more information.
+        This option cannot be set from a |modeline| or in the |sandbox|, for
+        security reasons.
+      ]=],
+      full_name = 'completefunc',
+      func = true,
+      scope = { 'buffer' },
+      secure = true,
+      short_desc = N_('function to be used for Insert mode completion'),
+      type = 'string',
+      varname = 'p_cfu',
+    },
+    {
+      abbreviation = 'cot',
+      cb = 'did_set_completeopt',
+      defaults = { if_true = 'menu,preview' },
+      deny_duplicates = true,
+      desc = [=[
+        A comma-separated list of options for Insert mode completion
+        |ins-completion|.  The supported values are:
+
+           menu	    Use a popup menu to show the possible completions.  The
+        	    menu is only shown when there is more than one match and
+        	    sufficient colors are available.  |ins-completion-menu|
+
+           menuone  Use the popup menu also when there is only one match.
+        	    Useful when there is additional information about the
+        	    match, e.g., what file it comes from.
+
+           longest  Only insert the longest common text of the matches.  If
+        	    the menu is displayed you can use CTRL-L to add more
+        	    characters.  Whether case is ignored depends on the kind
+        	    of completion.  For buffer text the 'ignorecase' option is
+        	    used.
+
+           preview  Show extra information about the currently selected
+        	    completion in the preview window.  Only works in
+        	    combination with "menu" or "menuone".
+
+           noinsert Do not insert any text for a match until the user selects
+        	    a match from the menu. Only works in combination with
+        	    "menu" or "menuone". No effect if "longest" is present.
+
+           noselect Do not select a match in the menu, force the user to
+        	    select one from the menu. Only works in combination with
+        	    "menu" or "menuone".
+
+           popup    Show extra information about the currently selected
+        	    completion in a popup window.  Only works in combination
+        	    with "menu" or "menuone".  Overrides "preview".
+      ]=],
+      expand_cb = 'expand_set_completeopt',
+      full_name = 'completeopt',
+      list = 'onecomma',
+      scope = { 'global' },
+      short_desc = N_('options for Insert mode completion'),
+      type = 'string',
+      varname = 'p_cot',
+    },
+    {
+      abbreviation = 'csl',
+      cb = 'did_set_completeslash',
+      defaults = { if_true = '' },
+      desc = [=[
+        		only for MS-Windows
+        When this option is set it overrules 'shellslash' for completion:
+        - When this option is set to "slash", a forward slash is used for path
+          completion in insert mode. This is useful when editing HTML tag, or
+          Makefile with 'noshellslash' on MS-Windows.
+        - When this option is set to "backslash", backslash is used. This is
+          useful when editing a batch file with 'shellslash' set on MS-Windows.
+        - When this option is empty, same character is used as for
+          'shellslash'.
+        For Insert mode completion the buffer-local value is used.  For
+        command line completion the global value is used.
+      ]=],
+      enable_if = 'BACKSLASH_IN_FILENAME',
+      expand_cb = 'expand_set_completeslash',
+      full_name = 'completeslash',
+      scope = { 'buffer' },
+      type = 'string',
+      varname = 'p_csl',
     },
     {
       abbreviation = 'cocu',
@@ -1452,96 +1547,6 @@ return {
       type = 'number',
     },
     {
-      abbreviation = 'cfu',
-      alloced = true,
-      cb = 'did_set_completefunc',
-      defaults = { if_true = '' },
-      desc = [=[
-        This option specifies a function to be used for Insert mode completion
-        with CTRL-X CTRL-U. |i_CTRL-X_CTRL-U|
-        See |complete-functions| for an explanation of how the function is
-        invoked and what it should return.  The value can be the name of a
-        function, a |lambda| or a |Funcref|. See |option-value-function| for
-        more information.
-        This option cannot be set from a |modeline| or in the |sandbox|, for
-        security reasons.
-      ]=],
-      full_name = 'completefunc',
-      func = true,
-      scope = { 'buffer' },
-      secure = true,
-      short_desc = N_('function to be used for Insert mode completion'),
-      type = 'string',
-      varname = 'p_cfu',
-    },
-    {
-      abbreviation = 'cot',
-      cb = 'did_set_completeopt',
-      defaults = { if_true = 'menu,preview' },
-      deny_duplicates = true,
-      desc = [=[
-        A comma-separated list of options for Insert mode completion
-        |ins-completion|.  The supported values are:
-
-           menu	    Use a popup menu to show the possible completions.  The
-        	    menu is only shown when there is more than one match and
-        	    sufficient colors are available.  |ins-completion-menu|
-
-           menuone  Use the popup menu also when there is only one match.
-        	    Useful when there is additional information about the
-        	    match, e.g., what file it comes from.
-
-           longest  Only insert the longest common text of the matches.  If
-        	    the menu is displayed you can use CTRL-L to add more
-        	    characters.  Whether case is ignored depends on the kind
-        	    of completion.  For buffer text the 'ignorecase' option is
-        	    used.
-
-           preview  Show extra information about the currently selected
-        	    completion in the preview window.  Only works in
-        	    combination with "menu" or "menuone".
-
-          noinsert  Do not insert any text for a match until the user selects
-        	    a match from the menu. Only works in combination with
-        	    "menu" or "menuone". No effect if "longest" is present.
-
-          noselect  Do not select a match in the menu, force the user to
-        	    select one from the menu. Only works in combination with
-        	    "menu" or "menuone".
-      ]=],
-      expand_cb = 'expand_set_completeopt',
-      full_name = 'completeopt',
-      list = 'onecomma',
-      scope = { 'global' },
-      short_desc = N_('options for Insert mode completion'),
-      type = 'string',
-      varname = 'p_cot',
-    },
-    {
-      abbreviation = 'csl',
-      cb = 'did_set_completeslash',
-      defaults = { if_true = '' },
-      desc = [=[
-        		only for MS-Windows
-        When this option is set it overrules 'shellslash' for completion:
-        - When this option is set to "slash", a forward slash is used for path
-          completion in insert mode. This is useful when editing HTML tag, or
-          Makefile with 'noshellslash' on MS-Windows.
-        - When this option is set to "backslash", backslash is used. This is
-          useful when editing a batch file with 'shellslash' set on MS-Windows.
-        - When this option is empty, same character is used as for
-          'shellslash'.
-        For Insert mode completion the buffer-local value is used.  For
-        command line completion the global value is used.
-      ]=],
-      enable_if = 'BACKSLASH_IN_FILENAME',
-      expand_cb = 'expand_set_completeslash',
-      full_name = 'completeslash',
-      scope = { 'buffer' },
-      type = 'string',
-      varname = 'p_csl',
-    },
-    {
       abbreviation = 'cf',
       defaults = { if_true = false },
       desc = [=[
@@ -1557,7 +1562,7 @@ return {
       full_name = 'confirm',
       scope = { 'global' },
       short_desc = N_('ask what to do about unsaved/read-only files'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_confirm',
     },
     {
@@ -1577,7 +1582,7 @@ return {
       full_name = 'copyindent',
       scope = { 'buffer' },
       short_desc = N_("make 'autoindent' use existing indent structure"),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ci',
     },
     {
@@ -1705,9 +1710,6 @@ return {
         		when it didn't exist when editing it.  This is a
         		protection against a file unexpectedly created by
         		someone else.  Vi didn't complain about this.
-        							*cpo-p*
-        	p	Vi compatible Lisp indenting.  When not present, a
-        		slightly better algorithm is used.
         							*cpo-P*
         	P	When included, a ":write" command that appends to a
         		file will set the file name for the current buffer, if
@@ -1842,7 +1844,7 @@ return {
       pv_name = 'p_crbind',
       scope = { 'window' },
       short_desc = N_('move cursor in window as it moves in other windows'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'cuc',
@@ -1852,16 +1854,16 @@ return {
         |hl-CursorColumn|.  Useful to align text.  Will make screen redrawing
         slower.
         If you only want the highlighting in the current window you can use
-        these autocommands: >
+        these autocommands: >vim
         	au WinLeave * set nocursorline nocursorcolumn
         	au WinEnter * set cursorline cursorcolumn
         <
       ]=],
       full_name = 'cursorcolumn',
-      redraw = { 'current_window_only' },
+      redraw = { 'current_window', 'highlight_only' },
       scope = { 'window' },
       short_desc = N_('highlight the screen column of the cursor'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'cul',
@@ -1873,10 +1875,10 @@ return {
         easier to see the selected text.
       ]=],
       full_name = 'cursorline',
-      redraw = { 'current_window_only' },
+      redraw = { 'current_window', 'highlight_only' },
       scope = { 'window' },
       short_desc = N_('highlight the screen line of the cursor'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'culopt',
@@ -1901,7 +1903,7 @@ return {
       expand_cb = 'expand_set_cursorlineopt',
       full_name = 'cursorlineopt',
       list = 'onecomma',
-      redraw = { 'current_window_only' },
+      redraw = { 'current_window', 'highlight_only' },
       scope = { 'window' },
       short_desc = N_("settings for 'cursorline'"),
       type = 'string',
@@ -1949,7 +1951,7 @@ return {
         <	If the function is defined with `func_name : function() {...`: >
                 ^\s*\ze\i\+\s*[:]\s*(*function\s*(
         <	When using the ":set" command, you need to double the backslashes!
-        To avoid that use `:let` with a single quote string: >
+        To avoid that use `:let` with a single quote string: >vim
         	let &l:define = '^\s*\ze\k\+\s*=\s*function('
         <
       ]=],
@@ -1977,7 +1979,7 @@ return {
       full_name = 'delcombine',
       scope = { 'global' },
       short_desc = N_('delete combining characters on their own'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_deco',
     },
     {
@@ -2029,7 +2031,7 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('diff mode for the current window'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'dex',
@@ -2156,11 +2158,11 @@ return {
         			patience   patience diff algorithm
         			histogram  histogram diff algorithm
 
-        Examples: >
-        	:set diffopt=internal,filler,context:4
-        	:set diffopt=
-        	:set diffopt=internal,filler,foldcolumn:3
-        	:set diffopt-=internal  " do NOT use the internal diff parser
+        Examples: >vim
+        	set diffopt=internal,filler,context:4
+        	set diffopt=
+        	set diffopt=internal,filler,foldcolumn:3
+        	set diffopt-=internal  " do NOT use the internal diff parser
         <
       ]=],
       expand_cb = 'expand_set_diffopt',
@@ -2182,7 +2184,7 @@ return {
       full_name = 'digraph',
       scope = { 'global' },
       short_desc = N_('enable the entering of digraphs in Insert mode'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_dg',
     },
     {
@@ -2221,8 +2223,8 @@ return {
         - A directory name may end in an ':' or '/'.
         - Environment variables are expanded |:set_env|.
         - Careful with '\' characters, type one before a space, type two to
-          get one in the option (see |option-backslash|), for example: >
-            :set dir=c:\\tmp,\ dir\\,with\\,commas,\\\ dir\ with\ spaces
+          get one in the option (see |option-backslash|), for example: >vim
+            set dir=c:\\tmp,\ dir\\,with\\,commas,\\\ dir\ with\ spaces
         <
         Editing the same file twice will result in a warning.  Using "/tmp" on
         is discouraged: if the system crashes you lose the swap file. And
@@ -2298,8 +2300,8 @@ return {
       full_name = 'edcompatible',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_off',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'emo',
@@ -2316,7 +2318,7 @@ return {
       redraw = { 'all_windows', 'ui_option' },
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_emoji',
     },
     {
@@ -2353,7 +2355,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('write CTRL-Z for last line in file'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_eof',
     },
     {
@@ -2379,7 +2381,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('write <EOL> for last line in file'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_eol',
     },
     {
@@ -2405,7 +2407,7 @@ return {
       full_name = 'equalalways',
       scope = { 'global' },
       short_desc = N_('windows are automatically made the same size'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ea',
     },
     {
@@ -2441,7 +2443,7 @@ return {
       full_name = 'errorbells',
       scope = { 'global' },
       short_desc = N_('ring the bell for error messages'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_eb',
     },
     {
@@ -2492,8 +2494,8 @@ return {
         A list of autocommand event names, which are to be ignored.
         When set to "all" or when "all" is one of the items, all autocommand
         events are ignored, autocommands will not be executed.
-        Otherwise this is a comma-separated list of event names.  Example: >
-            :set ei=WinEnter,WinLeave
+        Otherwise this is a comma-separated list of event names.  Example: >vim
+            set ei=WinEnter,WinLeave
         <
       ]=],
       expand_cb = 'expand_set_eventignore',
@@ -2516,7 +2518,7 @@ return {
       full_name = 'expandtab',
       scope = { 'buffer' },
       short_desc = N_('use spaces when <Tab> is inserted'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_et',
     },
     {
@@ -2538,7 +2540,7 @@ return {
       scope = { 'global' },
       secure = true,
       short_desc = N_('read .nvimrc and .exrc in the current directory'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_exrc',
     },
     {
@@ -2613,7 +2615,7 @@ return {
         will work and the first entry of 'fileencodings' will be used (except
         "ucs-bom", which requires the BOM to be present).  If you prefer
         another encoding use an BufReadPost autocommand event to test if your
-        preferred encoding is to be used.  Example: >
+        preferred encoding is to be used.  Example: >vim
         	au BufReadPost * if search('\S', 'w') == 0 |
         		\ set fenc=iso-2022-jp | endif
         <	This sets 'fileencoding' to "iso-2022-jp" if the file does not contain
@@ -2621,8 +2623,8 @@ return {
         When the |++enc| argument is used then the value of 'fileencodings' is
         not used.
         Note that 'fileencodings' is not used for a new file, the global value
-        of 'fileencoding' is used instead.  You can set it with: >
-        	:setglobal fenc=iso-8859-2
+        of 'fileencoding' is used instead.  You can set it with: >vim
+        	setglobal fenc=iso-8859-2
         <	This means that a non-existing file may get a different encoding than
         an empty file.
         The special value "ucs-bom" can be used to check for a Unicode BOM
@@ -2768,7 +2770,7 @@ return {
       full_name = 'fileignorecase',
       scope = { 'global' },
       short_desc = N_('ignore case when using file names'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_fic',
     },
     {
@@ -2786,11 +2788,11 @@ return {
         this use the ":filetype on" command. |:filetype|
         Setting this option to a different value is most useful in a modeline,
         for a file for which the file type is not automatically recognized.
-        Example, for in an IDL file: >
+        Example, for in an IDL file: >c
         	/* vim: set filetype=idl : */
         <	|FileType| |filetypes|
         When a dot appears in the value then this separates two filetype
-        names.  Example: >
+        names.  Example: >c
         	/* vim: set filetype=c.doxygen : */
         <	This will use the "c" filetype first, then the "doxygen" filetype.
         This works both for filetype plugins and for syntax files.  More than
@@ -2817,7 +2819,7 @@ return {
         Characters to fill the statuslines, vertical separators and special
         lines in the window.
         It is a comma-separated list of items.  Each item has a name, a colon
-        and the value of that item:
+        and the value of that item: |E1511|
 
           item		default		Used for ~
           stl		' '		statusline of the current window
@@ -2850,12 +2852,12 @@ return {
         "vert", "vertleft", "vertright", "verthoriz", "foldsep" and "fold"
         default to single-byte alternatives.
 
-        Example: >
-            :set fillchars=stl:\ ,stlnc:\ ,vert:│,fold:·,diff:-
+        Example: >vim
+            set fillchars=stl:\ ,stlnc:\ ,vert:│,fold:·,diff:-
         <
         For the "stl", "stlnc", "foldopen", "foldclose" and "foldsep" items
         single-byte and multibyte characters are supported.  But double-width
-        characters are not supported.
+        characters are not supported. |E1512|
 
         The highlighting used for these items:
           item		highlight group ~
@@ -2900,7 +2902,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('make sure last line in file has <EOL>'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_fixeol',
     },
     {
@@ -2959,7 +2961,7 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('set to display all folds open'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'fde',
@@ -3180,6 +3182,9 @@ return {
 
         It is not allowed to change text or jump to another window while
         evaluating 'foldtext' |textlock|.
+
+        When set to an empty string, foldtext is disabled, and the line
+        is displayed normally with highlighting and no line wrapping.
       ]=],
       full_name = 'foldtext',
       modelineexpr = true,
@@ -3205,8 +3210,8 @@ return {
         	      automatic formatting.  This can be empty.  Don't insert
         	      it yet!
 
-        Example: >
-        	:set formatexpr=mylang#Format()
+        Example: >vim
+        	set formatexpr=mylang#Format()
         <	This will invoke the mylang#Format() function in the
         autoload/mylang.vim file in 'runtimepath'. |autoload|
 
@@ -3220,7 +3225,7 @@ return {
         the internal format mechanism.
 
         If the expression starts with s: or |<SID>|, then it is replaced with
-        the script ID (|local-function|). Example: >
+        the script ID (|local-function|). Example: >vim
         	set formatexpr=s:MyFormatExpr()
         	set formatexpr=<SID>SomeFormatExpr()
         <	Otherwise, the expression is evaluated in the context of the script
@@ -3238,27 +3243,6 @@ return {
       short_desc = N_('expression used with "gq" command'),
       type = 'string',
       varname = 'p_fex',
-    },
-    {
-      abbreviation = 'fo',
-      alloced = true,
-      cb = 'did_set_formatoptions',
-      defaults = { if_true = macros('DFLT_FO_VIM') },
-      desc = [=[
-        This is a sequence of letters which describes how automatic
-        formatting is to be done.
-        See |fo-table| for possible values and |gq| for how to format text.
-        Commas can be inserted for readability.
-        To avoid problems with flags that are added in the future, use the
-        "+=" and "-=" feature of ":set" |add-option-flags|.
-      ]=],
-      expand_cb = 'expand_set_formatoptions',
-      full_name = 'formatoptions',
-      list = 'flags',
-      scope = { 'buffer' },
-      short_desc = N_('how automatic formatting is to be done'),
-      type = 'string',
-      varname = 'p_fo',
     },
     {
       abbreviation = 'flp',
@@ -3280,6 +3264,27 @@ return {
       short_desc = N_('pattern used to recognize a list header'),
       type = 'string',
       varname = 'p_flp',
+    },
+    {
+      abbreviation = 'fo',
+      alloced = true,
+      cb = 'did_set_formatoptions',
+      defaults = { if_true = macros('DFLT_FO_VIM') },
+      desc = [=[
+        This is a sequence of letters which describes how automatic
+        formatting is to be done.
+        See |fo-table| for possible values and |gq| for how to format text.
+        Commas can be inserted for readability.
+        To avoid problems with flags that are added in the future, use the
+        "+=" and "-=" feature of ":set" |add-option-flags|.
+      ]=],
+      expand_cb = 'expand_set_formatoptions',
+      full_name = 'formatoptions',
+      list = 'flags',
+      scope = { 'buffer' },
+      short_desc = N_('how automatic formatting is to be done'),
+      type = 'string',
+      varname = 'p_fo',
     },
     {
       abbreviation = 'fp',
@@ -3328,7 +3333,7 @@ return {
       scope = { 'global' },
       secure = true,
       short_desc = N_('whether to invoke fsync() after file write'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_fs',
     },
     {
@@ -3345,14 +3350,14 @@ return {
         	:s///g		  subst. one	  subst. all
         	:s///gg		  subst. all	  subst. one
 
-        DEPRECATED: Setting this option may break plugins that are not aware
-        of this option.  Also, many users get confused that adding the /g flag
-        has the opposite effect of that it normally does.
+        NOTE: Setting this option may break plugins that rely on the default
+        behavior of the 'g' flag. This will also make the 'g' flag have the
+        opposite effect of that documented in |:s_g|.
       ]=],
       full_name = 'gdefault',
       scope = { 'global' },
       short_desc = N_('the ":substitute" flag \'g\' is default on'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_gd',
     },
     {
@@ -3387,8 +3392,8 @@ return {
         will be included.  Environment variables are expanded |:set_env|.  See
         |option-backslash| about including spaces and backslashes.
         When your "grep" accepts the "-H" argument, use this to make ":grep"
-        also work well with a single file: >
-        	:set grepprg=grep\ -nH
+        also work well with a single file: >vim
+        	set grepprg=grep\ -nH
         <	Special value: When 'grepprg' is set to "internal" the |:grep| command
         works like |:vimgrep|, |:lgrep| like |:lvimgrep|, |:grepadd| like
         |:vimgrepadd| and |:lgrepadd| like |:lvimgrepadd|.
@@ -3414,11 +3419,11 @@ return {
         Configures the cursor style for each mode. Works in the GUI and many
         terminals.  See |tui-cursor-shape|.
 
-        To disable cursor-styling, reset the option: >
-        	:set guicursor=
+        To disable cursor-styling, reset the option: >vim
+        	set guicursor=
 
-        <	To enable mode shapes, "Cursor" highlight, and blinking: >
-        	:set guicursor=n-v-c:block,i-ci-ve:ver25,r-cr:hor20,o:hor50
+        <	To enable mode shapes, "Cursor" highlight, and blinking: >vim
+        	set guicursor=n-v-c:block,i-ci-ve:ver25,r-cr:hor20,o:hor50
         	  \,a:blinkwait700-blinkoff400-blinkon250-Cursor/lCursor
         	  \,sm:block-blinkwait175-blinkoff150-blinkon175
 
@@ -3451,8 +3456,8 @@ return {
         		the cursor starts blinking, blinkon is the time that
         		the cursor is shown and blinkoff is the time that the
         		cursor is not shown.  Times are in msec.  When one of
-        		the numbers is zero, there is no blinking. E.g.: >
-        			:set guicursor=n:blinkon0
+        		the numbers is zero, there is no blinking. E.g.: >vim
+        			set guicursor=n:blinkon0
         <			- Default is "blinkon0" for each mode.
         	{group-name}
         		Highlight group that decides the color and font of the
@@ -3490,9 +3495,9 @@ return {
         to do a common setting for all modes.  For example, to switch off
         blinking: "a:blinkon0"
 
-        Examples of cursor highlighting: >
-            :highlight Cursor gui=reverse guifg=NONE guibg=NONE
-            :highlight Cursor gui=NONE guifg=bg guibg=fg
+        Examples of cursor highlighting: >vim
+            highlight Cursor gui=reverse guifg=NONE guibg=NONE
+            highlight Cursor gui=NONE guifg=bg guibg=fg
         <
       ]=],
       full_name = 'guicursor',
@@ -3516,8 +3521,8 @@ return {
         Spaces after a comma are ignored.  To include a comma in a font name
         precede it with a backslash.  Setting an option requires an extra
         backslash before a space and a backslash.  See also
-        |option-backslash|.  For example: >
-            :set guifont=Screen15,\ 7x13,font\\,with\\,commas
+        |option-backslash|.  For example: >vim
+            set guifont=Screen15,\ 7x13,font\\,with\\,commas
         <	will make Vim try to use the font "Screen15" first, and if it fails it
         will try to use "7x13" and then "font,with,commas" instead.
 
@@ -3528,14 +3533,14 @@ return {
         the case of X).  The font names given should be "normal" fonts.  Vim
         will try to find the related bold and italic fonts.
 
-        For Win32 and Mac OS: >
-            :set guifont=*
+        For Win32 and Mac OS: >vim
+            set guifont=*
         <	will bring up a font requester, where you can pick the font you want.
 
         The font name depends on the GUI used.
 
-        For Mac OSX you can use something like this: >
-            :set guifont=Monaco:h10
+        For Mac OSX you can use something like this: >vim
+            set guifont=Monaco:h10
         <								*E236*
         Note that the fonts must be mono-spaced (all characters have the same
         width).
@@ -3560,9 +3565,9 @@ return {
           Use a ':' to separate the options.
         - A '_' can be used in the place of a space, so you don't need to use
           backslashes to escape the spaces.
-        - Examples: >
-            :set guifont=courier_new:h12:w5:b:cRUSSIAN
-            :set guifont=Andale_Mono:h7.5:w4.5
+        - Examples: >vim
+            set guifont=courier_new:h12:w5:b:cRUSSIAN
+            set guifont=Andale_Mono:h7.5:w4.5
         <
       ]=],
       deny_duplicates = true,
@@ -3742,8 +3747,8 @@ return {
         When non-empty describes the text to use in a tooltip for the GUI tab
         pages line.  When empty Vim will use a default tooltip.
         This option is otherwise just like 'guitablabel' above.
-        You can include a line break.  Simplest method is to use |:let|: >
-        	:let &guitabtooltip = "line one\nline two"
+        You can include a line break.  Simplest method is to use |:let|: >vim
+        	let &guitabtooltip = "line one\nline two"
         <
       ]=],
       enable_if = false,
@@ -3811,8 +3816,8 @@ return {
         be used as a last resort.  You can add "en" to prefer English over
         another language, but that will only find tags that exist in that
         language and not in the English help.
-        Example: >
-        	:set helplang=de,it
+        Example: >vim
+        	set helplang=de,it
         <	This will first search German, then Italian and finally English help
         files.
         When using |CTRL-]| and ":help!" in a non-English help file Vim will
@@ -3848,7 +3853,7 @@ return {
       full_name = 'hidden',
       scope = { 'global' },
       short_desc = N_("don't unload buffer when it is |abandon|ed"),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_hid',
     },
     {
@@ -3884,8 +3889,8 @@ return {
       full_name = 'hkmap',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_off',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'hkp',
@@ -3893,8 +3898,8 @@ return {
       full_name = 'hkmapp',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_off',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'hls',
@@ -3922,10 +3927,10 @@ return {
         with the 'h' flag in 'shada' |shada-h|.
       ]=],
       full_name = 'hlsearch',
-      redraw = { 'all_windows' },
+      redraw = { 'all_windows', 'highlight_only' },
       scope = { 'global' },
       short_desc = N_('highlight matches with last search pattern'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_hls',
     },
     {
@@ -3944,7 +3949,7 @@ return {
       full_name = 'icon',
       scope = { 'global' },
       short_desc = N_('Vim set the text of the window icon'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_icon',
     },
     {
@@ -3980,7 +3985,7 @@ return {
       full_name = 'ignorecase',
       scope = { 'global' },
       short_desc = N_('ignore case in search patterns'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ic',
     },
     {
@@ -3997,7 +4002,7 @@ return {
       full_name = 'imcmdline',
       scope = { 'global' },
       short_desc = N_('use IM when starting to edit a command line'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'imd',
@@ -4015,12 +4020,12 @@ return {
       full_name = 'imdisable',
       scope = { 'global' },
       short_desc = N_('do not use the IM in any mode'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'imi',
       cb = 'did_set_iminsert',
-      defaults = { if_true = macros('B_IMODE_NONE') },
+      defaults = { if_true = imacros('B_IMODE_NONE') },
       desc = [=[
         Specifies whether :lmap or an Input Method (IM) is to be used in
         Insert mode.  Valid values:
@@ -4028,8 +4033,8 @@ return {
         	1	:lmap is ON and IM is off
         	2	:lmap is off and IM is ON
         To always reset the option to zero when leaving Insert mode with <Esc>
-        this can be used: >
-        	:inoremap <ESC> <ESC>:set iminsert=0<CR>
+        this can be used: >vim
+        	inoremap <ESC> <ESC>:set iminsert=0<CR>
         <	This makes :lmap and IM turn off automatically when leaving Insert
         mode.
         Note that this option changes when using CTRL-^ in Insert mode
@@ -4046,7 +4051,7 @@ return {
     },
     {
       abbreviation = 'ims',
-      defaults = { if_true = macros('B_IMODE_USE_INSERT') },
+      defaults = { if_true = imacros('B_IMODE_USE_INSERT') },
       desc = [=[
         Specifies whether :lmap or an Input Method (IM) is to be used when
         entering a search pattern.  Valid values:
@@ -4122,20 +4127,20 @@ return {
       defaults = { if_true = '' },
       desc = [=[
         Expression to be used to transform the string found with the 'include'
-        option to a file name.  Mostly useful to change "." to "/" for Java: >
-        	:setlocal includeexpr=substitute(v:fname,'\\.','/','g')
+        option to a file name.  Mostly useful to change "." to "/" for Java: >vim
+        	setlocal includeexpr=substitute(v:fname,'\\.','/','g')
         <	The "v:fname" variable will be set to the file name that was detected.
         Note the double backslash: the `:set` command first halves them, then
         one remains in the value, where "\." matches a dot literally.  For
-        simple character replacements `tr()` avoids the need for escaping: >
-        	:setlocal includeexpr=tr(v:fname,'.','/')
+        simple character replacements `tr()` avoids the need for escaping: >vim
+        	setlocal includeexpr=tr(v:fname,'.','/')
         <
         Also used for the |gf| command if an unmodified file name can't be
         found.  Allows doing "gf" on the name after an 'include' statement.
         Also used for |<cfile>|.
 
         If the expression starts with s: or |<SID>|, then it is replaced with
-        the script ID (|local-function|). Example: >
+        the script ID (|local-function|). Example: >vim
         	setlocal includeexpr=s:MyIncludeExpr(v:fname)
         	setlocal includeexpr=<SID>SomeIncludeExpr(v:fname)
         <	Otherwise, the expression is evaluated in the context of the script
@@ -4177,7 +4182,7 @@ return {
         typing a search command. See also: 'hlsearch'.
         If you don't want to turn 'hlsearch' on, but want to highlight all
         matches while searching, you can turn on and off 'hlsearch' with
-        autocmd.  Example: >
+        autocmd.  Example: >vim
         	augroup vimrc-incsearch-highlight
         	  autocmd!
         	  autocmd CmdlineEnter /,\? :set hlsearch
@@ -4194,7 +4199,7 @@ return {
       full_name = 'incsearch',
       scope = { 'global' },
       short_desc = N_('highlight match while typing search pattern'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_is',
     },
     {
@@ -4214,7 +4219,7 @@ return {
         when the expression is evaluated (but it may be moved around).
 
         If the expression starts with s: or |<SID>|, then it is replaced with
-        the script ID (|local-function|). Example: >
+        the script ID (|local-function|). Example: >vim
         	set indentexpr=s:MyIndentExpr()
         	set indentexpr=<SID>SomeIndentExpr()
         <	Otherwise, the expression is evaluated in the context of the script
@@ -4228,8 +4233,8 @@ return {
         The evaluation of the expression must not have side effects!  It must
         not change the text, jump to another window, etc.  Afterwards the
         cursor position is always restored, thus the cursor may be moved.
-        Normally this option would be set to call a function: >
-        	:set indentexpr=GetMyIndent()
+        Normally this option would be set to call a function: >vim
+        	set indentexpr=GetMyIndent()
         <	Error messages will be suppressed, unless the 'debug' option contains
         "msg".
         See |indent-expression|.
@@ -4282,7 +4287,7 @@ return {
       full_name = 'infercase',
       scope = { 'buffer' },
       short_desc = N_('adjust case of match for keyword completion'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_inf',
     },
     {
@@ -4291,8 +4296,8 @@ return {
       full_name = 'insertmode',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_off',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'isf',
@@ -4468,7 +4473,7 @@ return {
       full_name = 'joinspaces',
       scope = { 'global' },
       short_desc = N_('two spaces after a period with a join command'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_js',
     },
     {
@@ -4557,9 +4562,9 @@ return {
         When "man" or "man -s" is used, Vim will automatically translate
         a [count] for the "K" command to a section number.
         See |option-backslash| about including spaces and backslashes.
-        Example: >
-        	:set keywordprg=man\ -s
-        	:set keywordprg=:Man
+        Example: >vim
+        	set keywordprg=man\ -s
+        	set keywordprg=:Man
         <	This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
       ]=],
@@ -4590,10 +4595,10 @@ return {
         This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
 
-        Example (for Greek, in UTF-8):				*greek*  >
-            :set langmap=ΑA,ΒB,ΨC,ΔD,ΕE,ΦF,ΓG,ΗH,ΙI,ΞJ,ΚK,ΛL,ΜM,ΝN,ΟO,ΠP,QQ,ΡR,ΣS,ΤT,ΘU,ΩV,WW,ΧX,ΥY,ΖZ,αa,βb,ψc,δd,εe,φf,γg,ηh,ιi,ξj,κk,λl,μm,νn,οo,πp,qq,ρr,σs,τt,θu,ωv,ςw,χx,υy,ζz
-        <	Example (exchanges meaning of z and y for commands): >
-            :set langmap=zy,yz,ZY,YZ
+        Example (for Greek, in UTF-8):				*greek*  >vim
+            set langmap=ΑA,ΒB,ΨC,ΔD,ΕE,ΦF,ΓG,ΗH,ΙI,ΞJ,ΚK,ΛL,ΜM,ΝN,ΟO,ΠP,QQ,ΡR,ΣS,ΤT,ΘU,ΩV,WW,ΧX,ΥY,ΖZ,αa,βb,ψc,δd,εe,φf,γg,ηh,ιi,ξj,κk,λl,μm,νn,οo,πp,qq,ρr,σs,τt,θu,ωv,ςw,χx,υy,ζz
+        <	Example (exchanges meaning of z and y for commands): >vim
+            set langmap=zy,yz,ZY,YZ
         <
         The 'langmap' option is a list of parts, separated with commas.  Each
         part can be in one of two forms:
@@ -4631,22 +4636,22 @@ return {
       defaults = { if_true = '' },
       desc = [=[
         Language to use for menu translation.  Tells which file is loaded
-        from the "lang" directory in 'runtimepath': >
+        from the "lang" directory in 'runtimepath': >vim
         	"lang/menu_" .. &langmenu .. ".vim"
         <	(without the spaces).  For example, to always use the Dutch menus, no
-        matter what $LANG is set to: >
-        	:set langmenu=nl_NL.ISO_8859-1
+        matter what $LANG is set to: >vim
+        	set langmenu=nl_NL.ISO_8859-1
         <	When 'langmenu' is empty, |v:lang| is used.
         Only normal file name characters can be used, `/\*?[|<>` are illegal.
         If your $LANG is set to a non-English language but you do want to use
-        the English menus: >
-        	:set langmenu=none
+        the English menus: >vim
+        	set langmenu=none
         <	This option must be set before loading menus, switching on filetype
         detection or syntax highlighting.  Once the menus are defined setting
-        this option has no effect.  But you could do this: >
-        	:source $VIMRUNTIME/delmenu.vim
-        	:set langmenu=de_DE.ISO_8859-1
-        	:source $VIMRUNTIME/menu.vim
+        this option has no effect.  But you could do this: >vim
+        	source $VIMRUNTIME/delmenu.vim
+        	set langmenu=de_DE.ISO_8859-1
+        	source $VIMRUNTIME/menu.vim
         <	Warning: This deletes all menus that you defined yourself!
       ]=],
       full_name = 'langmenu',
@@ -4663,7 +4668,7 @@ return {
       full_name = 'langnoremap',
       scope = { 'global' },
       short_desc = N_("do not apply 'langmap' to mapped characters"),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_lnr',
     },
     {
@@ -4678,7 +4683,7 @@ return {
       full_name = 'langremap',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_lrm',
     },
     {
@@ -4717,7 +4722,7 @@ return {
       full_name = 'lazyredraw',
       scope = { 'global' },
       short_desc = N_("don't redraw while executing macros"),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_lz',
     },
     {
@@ -4738,11 +4743,12 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('wrap long lines at a blank'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
+      cb = 'did_set_lines_or_columns',
       defaults = {
-        if_true = macros('DFLT_ROWS'),
+        if_true = imacros('DFLT_ROWS'),
         doc = '24 or terminal height',
       },
       desc = [=[
@@ -4753,8 +4759,8 @@ return {
         option will cause the window size to be changed.  When you only want
         to use the size for the GUI, put the command in your |gvimrc| file.
         Vim limits the number of lines to what fits on the screen.  You can
-        use this command to get the tallest window possible: >
-        	:set lines=999
+        use this command to get the tallest window possible: >vim
+        	set lines=999
         <	Minimum value is 2, maximum value is 1000.
       ]=],
       full_name = 'lines',
@@ -4801,7 +4807,7 @@ return {
       full_name = 'lisp',
       scope = { 'buffer' },
       short_desc = N_('indenting for Lisp'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_lisp',
     },
     {
@@ -4856,8 +4862,8 @@ return {
 
         The cursor is displayed at the start of the space a Tab character
         occupies, not at the end as usual in Normal mode.  To get this cursor
-        position while displaying Tabs with spaces, use: >
-        	:set list lcs=tab:\ \
+        position while displaying Tabs with spaces, use: >vim
+        	set list lcs=tab:\ \
         <
         Note that list mode will also affect formatting (set with 'textwidth'
         or 'wrapmargin') when 'cpoptions' includes 'L'.  See 'listchars' for
@@ -4867,7 +4873,7 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('<Tab> and <EOL>'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'lcs',
@@ -4877,7 +4883,7 @@ return {
       deny_duplicates = true,
       desc = [=[
         Strings to use in 'list' mode and for the |:list| command.  It is a
-        comma-separated list of string settings.
+        comma-separated list of string settings. *E1511*
 
         						*lcs-eol*
           eol:c		Character to show at the end of each line.  When
@@ -4921,8 +4927,8 @@ return {
           lead:c	Character to show for leading spaces.  When omitted,
         		leading spaces are blank.  Overrides the "space" and
         		"multispace" settings for leading spaces.  You can
-        		combine it with "tab:", for example: >
-        			:set listchars+=tab:>-,lead:.
+        		combine it with "tab:", for example: >vim
+        			set listchars+=tab:>-,lead:.
         <
         						*lcs-leadmultispace*
           leadmultispace:c...
@@ -4956,19 +4962,19 @@ return {
         		omitted.
 
         The characters ':' and ',' should not be used.  UTF-8 characters can
-        be used.  All characters must be single width.
+        be used.  All characters must be single width. *E1512*
 
-        Each character can be specified as hex: >
+        Each character can be specified as hex: >vim
         	set listchars=eol:\\x24
         	set listchars=eol:\\u21b5
         	set listchars=eol:\\U000021b5
         <	Note that a double backslash is used.  The number of hex characters
         must be exactly 2 for \\x, 4 for \\u and 8 for \\U.
 
-        Examples: >
-            :set lcs=tab:>-,trail:-
-            :set lcs=tab:>-,eol:<,nbsp:%
-            :set lcs=extends:>,precedes:<
+        Examples: >vim
+            set lcs=tab:>-,trail:-
+            set lcs=tab:>-,eol:<,nbsp:%
+            set lcs=extends:>,precedes:<
         <	|hl-NonText| highlighting will be used for "eol", "extends" and
         "precedes". |hl-Whitespace| for "nbsp", "space", "tab", "multispace",
         "lead" and "trail".
@@ -4995,7 +5001,7 @@ return {
       full_name = 'loadplugins',
       scope = { 'global' },
       short_desc = N_('load plugin scripts when starting up'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_lpl',
     },
     {
@@ -5012,7 +5018,7 @@ return {
       full_name = 'magic',
       scope = { 'global' },
       short_desc = N_('special characters in search patterns'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_magic',
     },
     {
@@ -5052,8 +5058,8 @@ return {
 
         This would be mostly useful when you use MS-Windows.  If iconv is
         enabled, setting 'makeencoding' to "char" has the same effect as
-        setting to the system locale encoding.  Example: >
-        	:set makeencoding=char	" system locale is used
+        setting to the system locale encoding.  Example: >vim
+        	set makeencoding=char	" system locale is used
         <
       ]=],
       expand_cb = 'expand_set_encoding',
@@ -5075,11 +5081,11 @@ return {
         about including spaces and backslashes.
         Note that a '|' must be escaped twice: once for ":set" and once for
         the interpretation of a command.  When you use a filter called
-        "myfilter" do it like this: >
-            :set makeprg=gmake\ \\\|\ myfilter
+        "myfilter" do it like this: >vim
+            set makeprg=gmake\ \\\|\ myfilter
         <	The placeholder "$*" can be given (even multiple times) to specify
-        where the arguments will be included, for example: >
-            :set makeprg=latex\ \\\\nonstopmode\ \\\\input\\{$*}
+        where the arguments will be included, for example: >vim
+            set makeprg=latex\ \\\\nonstopmode\ \\\\input\\{$*}
         <	This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
       ]=],
@@ -5104,12 +5110,12 @@ return {
         jump between two double quotes.
         The characters must be separated by a colon.
         The pairs must be separated by a comma.  Example for including '<' and
-        '>' (for HTML): >
-        	:set mps+=<:>
+        '>' (for HTML): >vim
+        	set mps+=<:>
 
         <	A more exotic example, to jump between the '=' and ';' in an
-        assignment, useful for languages like C and Java: >
-        	:au FileType c,cpp,java set mps+==:;
+        assignment, useful for languages like C and Java: >vim
+        	au FileType c,cpp,java set mps+==:;
 
         <	For a more advanced way of using "%", see the matchit.vim plugin in
         the $VIMRUNTIME/plugin directory. |add-local-help|
@@ -5137,12 +5143,12 @@ return {
     },
     {
       abbreviation = 'mco',
-      defaults = { if_true = 6 },
+      defaults = { if_true = imacros('MAX_MCO') },
       full_name = 'maxcombine',
       scope = { 'global' },
       short_desc = N_('maximum nr of combining characters displayed'),
       type = 'number',
-      varname = 'p_mco',
+      hidden = true,
     },
     {
       abbreviation = 'mfd',
@@ -5155,6 +5161,7 @@ return {
         Increasing this limit above 200 also changes the maximum for Ex
         command recursion, see |E169|.
         See also |:function|.
+        Also used for maximum depth of callback functions.
       ]=],
       full_name = 'maxfuncdepth',
       scope = { 'global' },
@@ -5249,8 +5256,8 @@ return {
 
         The languages for which these numbers are important are Italian and
         Hungarian.  The default works for when you have about 512 Mbyte.  If
-        you have 1 Gbyte you could use: >
-        	:set mkspellmem=900000,3000,800
+        you have 1 Gbyte you could use: >vim
+        	set mkspellmem=900000,3000,800
         <	If you have less than 512 Mbyte |:mkspell| may fail for some
         languages, no matter what you set 'mkspellmem' to.
 
@@ -5279,7 +5286,7 @@ return {
       full_name = 'modeline',
       scope = { 'buffer' },
       short_desc = N_('recognize modelines at start or end of file'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ml',
     },
     {
@@ -5296,7 +5303,7 @@ return {
       scope = { 'global' },
       secure = true,
       short_desc = N_('allow some options to be set in modeline'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_mle',
     },
     {
@@ -5328,7 +5335,7 @@ return {
       scope = { 'buffer' },
       short_desc = N_('changes to the text are not possible'),
       tags = { 'E21' },
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ma',
     },
     {
@@ -5363,7 +5370,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('buffer has been modified'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_mod',
     },
     {
@@ -5376,7 +5383,7 @@ return {
       full_name = 'more',
       scope = { 'global' },
       short_desc = N_('listings when the whole screen is filled'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_more',
     },
     {
@@ -5384,8 +5391,8 @@ return {
       defaults = { if_true = 'nvi' },
       desc = [=[
         Enables mouse support. For example, to enable the mouse in Normal mode
-        and Visual mode: >
-        	:set mouse=nv
+        and Visual mode: >vim
+        	set mouse=nv
         <
         To temporarily disable mouse support, hold the shift key while using
         the mouse.
@@ -5442,7 +5449,7 @@ return {
       redraw = { 'ui_option' },
       scope = { 'global' },
       short_desc = N_('keyboard focus follows the mouse'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_mousef',
     },
     {
@@ -5453,12 +5460,11 @@ return {
         When on, the mouse pointer is hidden when characters are typed.
         The mouse pointer is restored when the mouse is moved.
       ]=],
-      enable_if = false,
       full_name = 'mousehide',
       redraw = { 'ui_option' },
       scope = { 'global' },
       short_desc = N_('hide mouse pointer while typing'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_mh',
     },
     {
@@ -5495,19 +5501,19 @@ return {
         Note that you can further refine the meaning of buttons with mappings.
         See |mouse-overview|.  But mappings are NOT used for modeless selection.
 
-        Example: >
-           :map <S-LeftMouse>     <RightMouse>
-           :map <S-LeftDrag>      <RightDrag>
-           :map <S-LeftRelease>   <RightRelease>
-           :map <2-S-LeftMouse>   <2-RightMouse>
-           :map <2-S-LeftDrag>    <2-RightDrag>
-           :map <2-S-LeftRelease> <2-RightRelease>
-           :map <3-S-LeftMouse>   <3-RightMouse>
-           :map <3-S-LeftDrag>    <3-RightDrag>
-           :map <3-S-LeftRelease> <3-RightRelease>
-           :map <4-S-LeftMouse>   <4-RightMouse>
-           :map <4-S-LeftDrag>    <4-RightDrag>
-           :map <4-S-LeftRelease> <4-RightRelease>
+        Example: >vim
+            map <S-LeftMouse>     <RightMouse>
+            map <S-LeftDrag>      <RightDrag>
+            map <S-LeftRelease>   <RightRelease>
+            map <2-S-LeftMouse>   <2-RightMouse>
+            map <2-S-LeftDrag>    <2-RightDrag>
+            map <2-S-LeftRelease> <2-RightRelease>
+            map <3-S-LeftMouse>   <3-RightMouse>
+            map <3-S-LeftDrag>    <3-RightDrag>
+            map <3-S-LeftRelease> <3-RightRelease>
+            map <4-S-LeftMouse>   <4-RightMouse>
+            map <4-S-LeftDrag>    <4-RightDrag>
+            map <4-S-LeftRelease> <4-RightRelease>
         <
         Mouse commands requiring the CTRL modifier can be simulated by typing
         the "g" key before using the mouse:
@@ -5535,7 +5541,7 @@ return {
       redraw = { 'ui_option' },
       scope = { 'global' },
       short_desc = N_('deliver mouse move events to input queue'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_mousemev',
     },
     {
@@ -5555,8 +5561,8 @@ return {
         for vertical scrolling). You can disable mouse scrolling by using
         a count of 0.
 
-        Example: >
-        	:set mousescroll=ver:5,hor:2
+        Example: >vim
+        	set mousescroll=ver:5,hor:2
         <	Will make Nvim scroll 5 lines at a time when scrolling vertically, and
         scroll 2 columns at a time when scrolling horizontally.
       ]=],
@@ -5632,8 +5638,8 @@ return {
         Any modes not specified or shapes not available use the normal mouse
         pointer.
 
-        Example: >
-        	:set mouseshape=s:udsizing,m:no
+        Example: >vim
+        	set mouseshape=s:udsizing,m:no
         <	will make the mouse turn to a sizing arrow over the status lines and
         indicate no input when the hit-enter prompt is displayed (since
         clicking the mouse has no effect in this state.)
@@ -5732,7 +5738,7 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('print the line number in front of each line'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'nuw',
@@ -5796,7 +5802,7 @@ return {
       full_name = 'opendevice',
       scope = { 'global' },
       short_desc = N_('allow reading/writing devices on MS-Windows'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'opfunc',
@@ -5863,12 +5869,13 @@ return {
       pri_mkrc = true,
       scope = { 'global' },
       short_desc = N_('pasting text'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_paste',
     },
     {
       abbreviation = 'pt',
       defaults = { if_true = '' },
+      enable_if = false,
       full_name = 'pastetoggle',
       scope = { 'global' },
       short_desc = N_('No description'),
@@ -5931,30 +5938,30 @@ return {
         provided that the file being searched for has a relative path (not
         starting with "/", "./" or "../").  The directories in the 'path'
         option may be relative or absolute.
-        - Use commas to separate directory names: >
-        	:set path=.,/usr/local/include,/usr/include
+        - Use commas to separate directory names: >vim
+        	set path=.,/usr/local/include,/usr/include
         <	- Spaces can also be used to separate directory names.  To have a
           space in a directory name, precede it with an extra backslash, and
-          escape the space: >
-        	:set path=.,/dir/with\\\ space
+          escape the space: >vim
+        	set path=.,/dir/with\\\ space
         <	- To include a comma in a directory name precede it with an extra
-          backslash: >
-        	:set path=.,/dir/with\\,comma
-        <	- To search relative to the directory of the current file, use: >
-        	:set path=.
+          backslash: >vim
+        	set path=.,/dir/with\\,comma
+        <	- To search relative to the directory of the current file, use: >vim
+        	set path=.
         <	- To search in the current directory use an empty string between two
-          commas: >
-        	:set path=,,
+          commas: >vim
+        	set path=,,
         <	- A directory name may end in a ':' or '/'.
         - Environment variables are expanded |:set_env|.
         - When using |netrw.vim| URLs can be used.  For example, adding
           "https://www.vim.org" will make ":find index.html" work.
         - Search upwards and downwards in a directory tree using "*", "**" and
           ";".  See |file-searching| for info and syntax.
-        - Careful with '\' characters, type two to get one in the option: >
-        	:set path=.,c:\\include
-        <	  Or just use '/' instead: >
-        	:set path=.,c:/include
+        - Careful with '\' characters, type two to get one in the option: >vim
+        	set path=.,c:\\include
+        <	  Or just use '/' instead: >vim
+        	set path=.,c:/include
         <	Don't forget "." or files won't even be found in the same directory as
         the file!
         The maximum length is limited.  How much depends on the system, mostly
@@ -5963,14 +5970,14 @@ return {
         'path', see |:checkpath|.
         The use of |:set+=| and |:set-=| is preferred when adding or removing
         directories from the list.  This avoids problems when a future version
-        uses another default.  To remove the current directory use: >
-        	:set path-=
-        <	To add the current directory use: >
-        	:set path+=
+        uses another default.  To remove the current directory use: >vim
+        	set path-=
+        <	To add the current directory use: >vim
+        	set path+=
         <	To use an environment variable, you probably need to replace the
         separator.  Here is an example to append $INCL, in which directory
-        names are separated with a semi-colon: >
-        	:let &path = &path .. "," .. substitute($INCL, ';', ',', 'g')
+        names are separated with a semi-colon: >vim
+        	let &path = &path .. "," .. substitute($INCL, ';', ',', 'g')
         <	Replace the ';' with a ':' or whatever separator is used.  Note that
         this doesn't work when $INCL contains a comma or white space.
       ]=],
@@ -6003,7 +6010,7 @@ return {
       full_name = 'preserveindent',
       scope = { 'buffer' },
       short_desc = N_('preserve the indent structure when reindenting'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_pi',
     },
     {
@@ -6034,15 +6041,15 @@ return {
       scope = { 'window' },
       short_desc = N_('identifies the preview window'),
       tags = { 'E590' },
-      type = 'bool',
+      type = 'boolean',
     },
     {
       defaults = { if_true = true },
       full_name = 'prompt',
       scope = { 'global' },
       short_desc = N_('enable prompt in Ex mode'),
-      type = 'bool',
-      varname = 'p_force_on',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'pb',
@@ -6055,10 +6062,10 @@ return {
 
         It is possible to override the level for individual highlights within
         the popupmenu using |highlight-blend|. For instance, to enable
-        transparency but force the current selected element to be fully opaque: >
+        transparency but force the current selected element to be fully opaque: >vim
 
-        	:set pumblend=15
-        	:hi PmenuSel blend=0
+        	set pumblend=15
+        	hi PmenuSel blend=0
         <
         UI-dependent. Works best with RGB colors. 'termguicolors'
       ]=],
@@ -6175,7 +6182,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('disallow writing the buffer'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ro',
     },
     {
@@ -6291,15 +6298,15 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('show relative line number in front of each line'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       defaults = { if_true = true },
       full_name = 'remap',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_on',
+      type = 'boolean',
+      immutable = true,
     },
     {
       defaults = { if_true = 2 },
@@ -6327,7 +6334,7 @@ return {
       full_name = 'revins',
       scope = { 'global' },
       short_desc = N_('inserting characters will work backwards'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ri',
     },
     {
@@ -6348,7 +6355,7 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('window is right-to-left oriented'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'rlc',
@@ -6402,7 +6409,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'global' },
       short_desc = N_('show cursor line and column in the status line'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ru',
     },
     {
@@ -6418,8 +6425,8 @@ return {
 
         The default ruler width is 17 characters.  To make the ruler 15
         characters wide, put "%15(" at the start and "%)" at the end.
-        Example: >
-        	:set rulerformat=%15(%c%V\ %p%%%)
+        Example: >vim
+        	set rulerformat=%15(%c%V\ %p%%%)
         <
       ]=],
       full_name = 'rulerformat',
@@ -6512,8 +6519,8 @@ return {
         runtime files.  For speed, use as few items as possible and avoid
         wildcards.
         See |:runtime|.
-        Example: >
-        	:set runtimepath=~/vimruntime,/mygroup/vim,$VIMRUNTIME
+        Example: >vim
+        	set runtimepath=~/vimruntime,/mygroup/vim,$VIMRUNTIME
         <	This will use the directory "~/vimruntime" first (containing your
         personal Nvim runtime files), then "/mygroup/vim", and finally
         "$VIMRUNTIME" (the default runtime files).
@@ -6556,27 +6563,6 @@ return {
       type = 'number',
     },
     {
-      abbreviation = 'sms',
-      cb = 'did_set_smoothscroll',
-      defaults = { if_true = false },
-      desc = [=[
-        Scrolling works with screen lines.  When 'wrap' is set and the first
-        line in the window wraps part of it may not be visible, as if it is
-        above the window. "<<<" is displayed at the start of the first line,
-        highlighted with |hl-NonText|.
-        You may also want to add "lastline" to the 'display' option to show as
-        much of the last line as possible.
-        NOTE: only partly implemented, currently works with CTRL-E, CTRL-Y
-        and scrolling with the mouse.
-      ]=],
-      full_name = 'smoothscroll',
-      pv_name = 'p_sms',
-      redraw = { 'current_window' },
-      scope = { 'window' },
-      short_desc = N_("scroll by screen lines when 'wrap' is set"),
-      type = 'bool',
-    },
-    {
       abbreviation = 'scbk',
       cb = 'did_set_scrollback',
       defaults = {
@@ -6588,9 +6574,6 @@ return {
         top are deleted if new lines exceed this limit.
         Minimum is 1, maximum is 100000.
         Only in |terminal| buffers.
-
-        Note: Lines that are not visible and kept in scrollback are not
-        reflown when the terminal buffer is resized horizontally.
       ]=],
       full_name = 'scrollback',
       redraw = { 'current_buffer' },
@@ -6618,7 +6601,7 @@ return {
       pv_name = 'p_scbind',
       scope = { 'window' },
       short_desc = N_('scroll in window as other windows scroll'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'sj',
@@ -6647,7 +6630,7 @@ return {
         in the middle of the window (except at the start or end of the file or
         when long lines wrap).
         After using the local value, go back the global value with one of
-        these two: >
+        these two: >vim
         	setlocal scrolloff<
         	setlocal scrolloff=-1
         <	For scrolling horizontally see 'sidescrolloff'.
@@ -6720,7 +6703,7 @@ return {
       scope = { 'global' },
       secure = true,
       short_desc = N_('No description'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_secure',
     },
     {
@@ -6829,6 +6812,7 @@ return {
     },
     {
       abbreviation = 'sd',
+      alias = { 'vi', 'viminfo' },
       cb = 'did_set_shada',
       defaults = {
         if_true = "!,'100,<50,s10,h",
@@ -6926,8 +6910,8 @@ return {
         	2^8 < 10240 < 2^16) + 10240 bytes (requested maximum item
         	contents size) = 10253 bytes.
 
-        Example: >
-            :set shada='50,<1000,s100,:0,n~/nvim/shada
+        Example: >vim
+            set shada='50,<1000,s100,:0,n~/nvim/shada
         <
         '50		Marks will be remembered for the last 50 files you
         		edited.
@@ -6960,6 +6944,7 @@ return {
     },
     {
       abbreviation = 'sdf',
+      alias = { 'vif', 'viminfofile' },
       defaults = { if_true = '' },
       deny_duplicates = true,
       desc = [=[
@@ -6997,12 +6982,12 @@ return {
         Environment variables are expanded |:set_env|.
 
         If the name of the shell contains a space, you need to enclose it in
-        quotes.  Example with quotes: >
-        	:set shell=\"c:\program\ files\unix\sh.exe\"\ -f
+        quotes.  Example with quotes: >vim
+        	set shell=\"c:\program\ files\unix\sh.exe\"\ -f
         <	Note the backslash before each quote (to avoid starting a comment) and
         each space (to avoid ending the option value), so better use |:let-&|
-        like this: >
-        	:let &shell='"C:\Program Files\unix\sh.exe" -f'
+        like this: >vim
+        	let &shell='"C:\Program Files\unix\sh.exe" -f'
         <	Also note that the "-f" is not inside the quotes, because it is not
         part of the command name.
         						*shell-unquoting*
@@ -7025,7 +7010,7 @@ return {
         Note that such processing is done after |:set| did its own round of
         unescaping, so to keep yourself sane use |:let-&| like shown above.
         						*shell-powershell*
-        To use PowerShell: >
+        To use PowerShell: >vim
         	let &shell = executable('pwsh') ? 'pwsh' : 'powershell'
         	let &shellcmdflag = '-NoLogo -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$PSDefaultParameterValues[''Out-File:Encoding'']=''utf8'';Remove-Alias -Force -ErrorAction SilentlyContinue tee;'
         	let &shellredir = '2>&1 | %%{ "$_" } | Out-File %s; exit $LastExitCode'
@@ -7196,7 +7181,7 @@ return {
         existing file names, thus this option needs to be set before opening
         any file for best results.  This might change in the future.
         'shellslash' only works when a backslash can be used as a path
-        separator.  To test if this is so use: >
+        separator.  To test if this is so use: >vim
         	if exists('+shellslash')
         <	Also see 'completeslash'.
       ]=],
@@ -7204,7 +7189,7 @@ return {
       full_name = 'shellslash',
       scope = { 'global' },
       short_desc = N_('use forward slash for shell file names'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ssl',
     },
     {
@@ -7225,8 +7210,25 @@ return {
       full_name = 'shelltemp',
       scope = { 'global' },
       short_desc = N_('whether to use a temp file for shell commands'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_stmp',
+    },
+    {
+      abbreviation = 'sxe',
+      defaults = { if_true = '' },
+      desc = [=[
+        When 'shellxquote' is set to "(" then the characters listed in this
+        option will be escaped with a '^' character.  This makes it possible
+        to execute most external commands with cmd.exe.
+        This option cannot be set from a |modeline| or in the |sandbox|, for
+        security reasons.
+      ]=],
+      full_name = 'shellxescape',
+      scope = { 'global' },
+      secure = true,
+      short_desc = N_("characters to escape when 'shellxquote' is ("),
+      type = 'string',
+      varname = 'p_sxe',
     },
     {
       abbreviation = 'sxq',
@@ -7255,23 +7257,6 @@ return {
       varname = 'p_sxq',
     },
     {
-      abbreviation = 'sxe',
-      defaults = { if_true = '' },
-      desc = [=[
-        When 'shellxquote' is set to "(" then the characters listed in this
-        option will be escaped with a '^' character.  This makes it possible
-        to execute most external commands with cmd.exe.
-        This option cannot be set from a |modeline| or in the |sandbox|, for
-        security reasons.
-      ]=],
-      full_name = 'shellxescape',
-      scope = { 'global' },
-      secure = true,
-      short_desc = N_("characters to escape when 'shellxquote' is ("),
-      type = 'string',
-      varname = 'p_sxe',
-    },
-    {
       abbreviation = 'sr',
       defaults = { if_true = false },
       desc = [=[
@@ -7282,7 +7267,7 @@ return {
       full_name = 'shiftround',
       scope = { 'global' },
       short_desc = N_('round indent to multiple of shiftwidth'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_sr',
     },
     {
@@ -7342,9 +7327,10 @@ return {
         	match", "Pattern not found", "Back at original", etc.
           C	don't give messages while scanning for ins-completion	*shm-C*
         	items, for instance "scanning tags"
-          q	use "recording" instead of "recording @a"		*shm-q*
+          q	do not show "recording @a" when recording a macro	*shm-q*
           F	don't give the file info when editing a file, like	*shm-F*
-        	`:silent` was used for the command
+        	`:silent` was used for the command; note that this also
+        	affects messages from 'autoread' reloading
           S	do not show search count message when searching, e.g.	*shm-S*
         	"[1/5]"
 
@@ -7372,9 +7358,9 @@ return {
       defaults = { if_true = '' },
       desc = [=[
         String to put at the start of lines that have been wrapped.  Useful
-        values are "> " or "+++ ": >
-        	:let &showbreak = "> "
-        	:let &showbreak = '+++ '
+        values are "> " or "+++ ": >vim
+        	let &showbreak = "> "
+        	let &showbreak = '+++ '
         <	Only printable single-cell characters are allowed, excluding <Tab> and
         comma (in a future version the comma might be used to separate the
         part that is shown at the end and at the start of a line).
@@ -7383,8 +7369,8 @@ return {
         If you want the 'showbreak' to appear in between line numbers, add the
         "n" flag to 'cpoptions'.
         A window-local value overrules a global value.  If the global value is
-        set and you want no value in the current window use NONE: >
-        	:setlocal showbreak=NONE
+        set and you want no value in the current window use NONE: >vim
+        	setlocal showbreak=NONE
         <
       ]=],
       full_name = 'showbreak',
@@ -7414,7 +7400,7 @@ return {
       full_name = 'showcmd',
       scope = { 'global' },
       short_desc = N_('show (partial) command in status line'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_sc',
     },
     {
@@ -7457,7 +7443,7 @@ return {
       full_name = 'showfulltag',
       scope = { 'global' },
       short_desc = N_('show full tag pattern when completing tag'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_sft',
     },
     {
@@ -7483,7 +7469,7 @@ return {
       full_name = 'showmatch',
       scope = { 'global' },
       short_desc = N_('briefly jump to matching bracket if insert one'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_sm',
     },
     {
@@ -7497,7 +7483,7 @@ return {
       full_name = 'showmode',
       scope = { 'global' },
       short_desc = N_('message on status line to show current mode'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_smd',
     },
     {
@@ -7550,16 +7536,16 @@ return {
         horizontally centered in the window, as long as one does not come too
         close to the beginning of the line.
         After using the local value, go back the global value with one of
-        these two: >
+        these two: >vim
         	setlocal sidescrolloff<
         	setlocal sidescrolloff=-1
         <
         Example: Try this together with 'sidescroll' and 'listchars' as
         	 in the following example to never allow the cursor to move
-        	 onto the "extends" character: >
+        	 onto the "extends" character: >vim
 
-        	 :set nowrap sidescroll=1 listchars=extends:>,precedes:<
-        	 :set sidescrolloff=1
+        	 set nowrap sidescroll=1 listchars=extends:>,precedes:<
+        	 set sidescrolloff=1
         <
       ]=],
       full_name = 'sidescrolloff',
@@ -7612,7 +7598,7 @@ return {
       full_name = 'smartcase',
       scope = { 'global' },
       short_desc = N_('no ignore case when pattern has uppercase'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_scs',
     },
     {
@@ -7642,7 +7628,7 @@ return {
       full_name = 'smartindent',
       scope = { 'buffer' },
       short_desc = N_('smart autoindenting for C programs'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_si',
     },
     {
@@ -7663,8 +7649,29 @@ return {
       full_name = 'smarttab',
       scope = { 'global' },
       short_desc = N_("use 'shiftwidth' when inserting <Tab>"),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_sta',
+    },
+    {
+      abbreviation = 'sms',
+      cb = 'did_set_smoothscroll',
+      defaults = { if_true = false },
+      desc = [=[
+        Scrolling works with screen lines.  When 'wrap' is set and the first
+        line in the window wraps part of it may not be visible, as if it is
+        above the window. "<<<" is displayed at the start of the first line,
+        highlighted with |hl-NonText|.
+        You may also want to add "lastline" to the 'display' option to show as
+        much of the last line as possible.
+        NOTE: only partly implemented, currently works with CTRL-E, CTRL-Y,
+        CTRL-D, CTRL-U, CTRL-F, CTRL-B and scrolling with the mouse.
+      ]=],
+      full_name = 'smoothscroll',
+      pv_name = 'p_sms',
+      redraw = { 'current_window' },
+      scope = { 'window' },
+      short_desc = N_("scroll by screen lines when 'wrap' is set"),
+      type = 'boolean',
     },
     {
       abbreviation = 'sts',
@@ -7700,10 +7707,10 @@ return {
         The languages are specified with 'spelllang'.
       ]=],
       full_name = 'spell',
-      redraw = { 'current_window' },
+      redraw = { 'current_window', 'highlight_only' },
       scope = { 'window' },
       short_desc = N_('spell checking'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'spc',
@@ -7722,7 +7729,7 @@ return {
         |set-spc-auto|.
       ]=],
       full_name = 'spellcapcheck',
-      redraw = { 'current_buffer' },
+      redraw = { 'current_buffer', 'highlight_only' },
       scope = { 'buffer' },
       short_desc = N_('pattern to locate end of a sentence'),
       type = 'string',
@@ -7738,7 +7745,7 @@ return {
         Name of the word list file where words are added for the |zg| and |zw|
         commands.  It must end in ".{encoding}.add".  You need to include the
         path, otherwise the file is placed in the current directory.
-        The path may include characters from 'isfname', space, comma and '@'.
+        The path may include characters from 'isfname', ' ', ',', '@' and ':'.
         							*E765*
         It may also be a comma-separated list of names.  A count before the
         |zg| and |zw| commands can be used to access each.  This allows using
@@ -7774,7 +7781,7 @@ return {
       deny_duplicates = true,
       desc = [=[
         A comma-separated list of word list names.  When the 'spell' option is
-        on spellchecking will be done for these languages.  Example: >
+        on spellchecking will be done for these languages.  Example: >vim
         	set spelllang=en_us,nl,medical
         <	This means US English, Dutch and medical words are recognized.  Words
         that are not recognized will be highlighted.
@@ -7813,11 +7820,36 @@ return {
       expand = true,
       full_name = 'spelllang',
       list = 'onecomma',
-      redraw = { 'current_buffer' },
+      redraw = { 'current_buffer', 'highlight_only' },
       scope = { 'buffer' },
       short_desc = N_('language(s) to do spell checking for'),
       type = 'string',
       varname = 'p_spl',
+    },
+    {
+      abbreviation = 'spo',
+      cb = 'did_set_spelloptions',
+      defaults = { if_true = '' },
+      deny_duplicates = true,
+      desc = [=[
+        A comma-separated list of options for spell checking:
+        camel		When a word is CamelCased, assume "Cased" is a
+        		separate word: every upper-case character in a word
+        		that comes after a lower case character indicates the
+        		start of a new word.
+        noplainbuffer	Only spellcheck a buffer when 'syntax' is enabled,
+        		or when extmarks are set within the buffer. Only
+        		designated regions of the buffer are spellchecked in
+        		this case.
+      ]=],
+      expand_cb = 'expand_set_spelloptions',
+      full_name = 'spelloptions',
+      list = 'onecomma',
+      redraw = { 'current_buffer', 'highlight_only' },
+      scope = { 'buffer' },
+      secure = true,
+      type = 'string',
+      varname = 'p_spo',
     },
     {
       abbreviation = 'sps',
@@ -7883,8 +7915,8 @@ return {
         		'verbose' option to a non-zero value.
 
         Only one of "best", "double" or "fast" may be used.  The others may
-        appear several times in any order.  Example: >
-        	:set sps=file:~/.config/nvim/sugg,best,expr:MySuggest()
+        appear several times in any order.  Example: >vim
+        	set sps=file:~/.config/nvim/sugg,best,expr:MySuggest()
         <
         This option cannot be set from a |modeline| or in the |sandbox|, for
         security reasons.
@@ -7900,31 +7932,6 @@ return {
       varname = 'p_sps',
     },
     {
-      abbreviation = 'spo',
-      cb = 'did_set_spelloptions',
-      defaults = { if_true = '' },
-      deny_duplicates = true,
-      desc = [=[
-        A comma-separated list of options for spell checking:
-        camel		When a word is CamelCased, assume "Cased" is a
-        		separate word: every upper-case character in a word
-        		that comes after a lower case character indicates the
-        		start of a new word.
-        noplainbuffer	Only spellcheck a buffer when 'syntax' is enabled,
-        		or when extmarks are set within the buffer. Only
-        		designated regions of the buffer are spellchecked in
-        		this case.
-      ]=],
-      expand_cb = 'expand_set_spelloptions',
-      full_name = 'spelloptions',
-      list = 'onecomma',
-      redraw = { 'current_buffer' },
-      scope = { 'buffer' },
-      secure = true,
-      type = 'string',
-      varname = 'p_spo',
-    },
-    {
       abbreviation = 'sb',
       defaults = { if_true = false },
       desc = [=[
@@ -7934,7 +7941,7 @@ return {
       full_name = 'splitbelow',
       scope = { 'global' },
       short_desc = N_('new window from split is below the current one'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_sb',
     },
     {
@@ -7972,7 +7979,7 @@ return {
       full_name = 'splitright',
       scope = { 'global' },
       short_desc = N_('new window is put right of the current one'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_spr',
     },
     {
@@ -7993,7 +8000,7 @@ return {
       full_name = 'startofline',
       scope = { 'global' },
       short_desc = N_('commands move cursor to first non-blank in line'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_sol',
       vim = false,
     },
@@ -8016,15 +8023,22 @@ return {
         %s	sign column for currently drawn line
         %C	fold column for currently drawn line
 
-        NOTE: To draw the sign and fold columns, their items must be included in
-        'statuscolumn'. Even when they are not included, the status column width
-        will adapt to the 'signcolumn' and 'foldcolumn' width.
+        The 'statuscolumn' width follows that of the default columns and
+        adapts to the |'numberwidth'|, |'signcolumn'| and |'foldcolumn'| option
+        values (regardless of whether the sign and fold items are present).
+        Additionally, the 'statuscolumn' grows with the size of the evaluated
+        format string, up to a point (following the maximum size of the default
+        fold, sign and number columns). Shrinking only happens when the number
+        of lines in a buffer changes, or the 'statuscolumn' option is set.
 
         The |v:lnum|    variable holds the line number to be drawn.
         The |v:relnum|  variable holds the relative line number to be drawn.
         The |v:virtnum| variable is negative when drawing virtual lines, zero
         	      when drawing the actual buffer line, and positive when
         	      drawing the wrapped part of a buffer line.
+
+        When using |v:relnum|, keep in mind that cursor movement by itself will
+        not cause the 'statuscolumn' to update unless |'relativenumber'| is set.
 
         NOTE: The %@ click execute function item is supported as well but the
         specified function will be the same for each row in the same column.
@@ -8033,21 +8047,21 @@ return {
 
         Examples: >vim
         	" Relative number with bar separator and click handlers:
-        	:set statuscolumn=%@SignCb@%s%=%T%@NumCb@%r│%T
+        	set statuscolumn=%@SignCb@%s%=%T%@NumCb@%r│%T
 
         	" Right aligned relative cursor line number:
-        	:let &stc='%=%{v:relnum?v:relnum:v:lnum} '
+        	let &stc='%=%{v:relnum?v:relnum:v:lnum} '
 
         	" Line numbers in hexadecimal for non wrapped part of lines:
-        	:let &stc='%=%{v:virtnum>0?"":printf("%x",v:lnum)} '
+        	let &stc='%=%{v:virtnum>0?"":printf("%x",v:lnum)} '
 
         	" Human readable line numbers with thousands separator:
-        	:let &stc='%{substitute(v:lnum,"\\d\\zs\\ze\\'
+        	let &stc='%{substitute(v:lnum,"\\d\\zs\\ze\\'
         		   . '%(\\d\\d\\d\\)\\+$",",","g")}'
 
         	" Both relative and absolute line numbers with different
         	" highlighting for odd and even relative numbers:
-        	:let &stc='%#NonText#%{&nu?v:lnum:""}' .
+        	let &stc='%#NonText#%{&nu?v:lnum:""}' .
         	 '%=%{&rnu&&(v:lnum%2)?"\ ".v:relnum:""}' .
         	 '%#LineNr#%{&rnu&&!(v:lnum%2)?"\ ".v:relnum:""}'
 
@@ -8077,8 +8091,8 @@ return {
         be given as "%%".
 
         When the option starts with "%!" then it is used as an expression,
-        evaluated and the result is used as the option value.  Example: >
-        	:set statusline=%!MyStatusLine()
+        evaluated and the result is used as the option value.  Example: >vim
+        	set statusline=%!MyStatusLine()
         <	The *g:statusline_winid* variable will be set to the |window-ID| of the
         window that the status line belongs to.
         The result can contain %{} items that will be evaluated too.
@@ -8159,7 +8173,7 @@ return {
               return value of expr contains "%" items they will get expanded.
               The expression can contain the "}" character, the end of
               expression is denoted by "%}".
-              For example: >
+              For example: >vim
         	func! Stl_filename() abort
         	    return "%t"
         	endfunc
@@ -8171,16 +8185,17 @@ return {
         ) -   End of item group.  No width fields allowed.
         T N   For 'tabline': start of tab page N label.  Use %T or %X to end
               the label.  Clicking this label with left mouse button switches
-              to the specified tab page.
+              to the specified tab page, while clicking it with middle mouse
+              button closes the specified tab page.
         X N   For 'tabline': start of close tab N label.  Use %X or %T to end
               the label, e.g.: %3Xclose%X.  Use %999X for a "close current
-              tab" label.    Clicking this label with left mouse button closes
-              specified tab page.
-        @ N   Start of execute function label. Use %X or %T to
-              end the label, e.g.: %10@SwitchBuffer@foo.c%X.  Clicking this
-              label runs specified function: in the example when clicking once
-              using left mouse button on "foo.c" "SwitchBuffer(10, 1, 'l',
-              '    ')" expression will be run.  Function receives the
+              tab" label.  Clicking this label with left mouse button closes
+              the specified tab page.
+        @ N   Start of execute function label. Use %X or %T to end the label,
+              e.g.: %10@SwitchBuffer@foo.c%X.  Clicking this label runs the
+              specified function: in the example when clicking once using left
+              mouse button on "foo.c", a `SwitchBuffer(10, 1, 'l', '    ')`
+              expression will be run.  The specified function receives the
               following arguments in order:
               1. minwid field value or zero if no N was specified
               2. number of mouse clicks to detect multiple clicks
@@ -8226,8 +8241,8 @@ return {
         When all items in a group becomes an empty string (i.e. flags that are
         not set) and a minwid is not set for the group, the whole group will
         become empty.  This will make a group like the following disappear
-        completely from the statusline when none of the flags are set. >
-        	:set statusline=...%(\ [%M%R%H]%)...
+        completely from the statusline when none of the flags are set. >vim
+        	set statusline=...%(\ [%M%R%H]%)...
         <	Beware that an expression is evaluated each and every time the status
         line is displayed.
         			*stl-%{* *g:actual_curbuf* *g:actual_curwin*
@@ -8258,23 +8273,23 @@ return {
         edit your vimrc or whatever with "vim --clean" to get it right.
 
         Examples:
-        Emulate standard status line with 'ruler' set >
-          :set statusline=%<%f\ %h%m%r%=%-14.(%l,%c%V%)\ %P
-        <	Similar, but add ASCII value of char under the cursor (like "ga") >
-          :set statusline=%<%f%h%m%r%=%b\ 0x%B\ \ %l,%c%V\ %P
-        <	Display byte count and byte value, modified flag in red. >
-          :set statusline=%<%f%=\ [%1*%M%*%n%R%H]\ %-19(%3l,%02c%03V%)%O'%02b'
-          :hi User1 term=inverse,bold cterm=inverse,bold ctermfg=red
-        <	Display a ,GZ flag if a compressed file is loaded >
-          :set statusline=...%r%{VarExists('b:gzflag','\ [GZ]')}%h...
-        <	In the |:autocmd|'s: >
-          :let b:gzflag = 1
-        <	And: >
-          :unlet b:gzflag
-        <	And define this function: >
-          :function VarExists(var, val)
-          :    if exists(a:var) | return a:val | else | return '' | endif
-          :endfunction
+        Emulate standard status line with 'ruler' set >vim
+          set statusline=%<%f\ %h%m%r%=%-14.(%l,%c%V%)\ %P
+        <	Similar, but add ASCII value of char under the cursor (like "ga") >vim
+          set statusline=%<%f%h%m%r%=%b\ 0x%B\ \ %l,%c%V\ %P
+        <	Display byte count and byte value, modified flag in red. >vim
+          set statusline=%<%f%=\ [%1*%M%*%n%R%H]\ %-19(%3l,%02c%03V%)%O'%02b'
+          hi User1 term=inverse,bold cterm=inverse,bold ctermfg=red
+        <	Display a ,GZ flag if a compressed file is loaded >vim
+          set statusline=...%r%{VarExists('b:gzflag','\ [GZ]')}%h...
+        <	In the |:autocmd|'s: >vim
+          let b:gzflag = 1
+        <	And: >vim
+          unlet b:gzflag
+        <	And define this function: >vim
+          function VarExists(var, val)
+              if exists(a:var) | return a:val | else | return '' | endif
+          endfunction
         <
       ]=],
       full_name = 'statusline',
@@ -8316,8 +8331,8 @@ return {
       deny_duplicates = true,
       desc = [=[
         Comma-separated list of suffixes, which are used when searching for a
-        file for the "gf", "[I", etc. commands.  Example: >
-        	:set suffixesadd=.java
+        file for the "gf", "[I", etc. commands.  Example: >vim
+        	set suffixesadd=.java
         <
       ]=],
       full_name = 'suffixesadd',
@@ -8355,7 +8370,7 @@ return {
       redraw = { 'statuslines' },
       scope = { 'buffer' },
       short_desc = N_('whether to use a swapfile for a buffer'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_swf',
     },
     {
@@ -8389,6 +8404,8 @@ return {
         		"split" when both are present.
            uselast	If included, jump to the previously used window when
         		jumping to errors with |quickfix| commands.
+        If a window has 'winfixbuf' enabled, 'switchbuf' is currently not
+        applied to the split window.
       ]=],
       expand_cb = 'expand_set_switchbuf',
       full_name = 'switchbuf',
@@ -8427,19 +8444,19 @@ return {
         Otherwise this option does not always reflect the current syntax (the
         b:current_syntax variable does).
         This option is most useful in a modeline, for a file which syntax is
-        not automatically recognized.  Example, in an IDL file: >
+        not automatically recognized.  Example, in an IDL file: >c
         	/* vim: set syntax=idl : */
         <	When a dot appears in the value then this separates two filetype
-        names.  Example: >
+        names.  Example: >c
         	/* vim: set syntax=c.doxygen : */
         <	This will use the "c" syntax first, then the "doxygen" syntax.
         Note that the second one must be prepared to be loaded as an addition,
         otherwise it will be skipped.  More than one dot may appear.
-        To switch off syntax highlighting for the current file, use: >
-        	:set syntax=OFF
+        To switch off syntax highlighting for the current file, use: >vim
+        	set syntax=OFF
         <	To switch syntax highlighting on according to the current value of the
-        'filetype' option: >
-        	:set syntax=ON
+        'filetype' option: >vim
+        	set syntax=ON
         <	What actually happens when setting the 'syntax' option is that the
         Syntax autocommand event is triggered with the value as argument.
         This option is not copied to another buffer, independent of the 's' or
@@ -8453,28 +8470,6 @@ return {
       short_desc = N_('syntax to be loaded for current buffer'),
       type = 'string',
       varname = 'p_syn',
-    },
-    {
-      abbreviation = 'tfu',
-      cb = 'did_set_tagfunc',
-      defaults = { if_true = '' },
-      desc = [=[
-        This option specifies a function to be used to perform tag searches.
-        The function gets the tag pattern and should return a List of matching
-        tags.  See |tag-function| for an explanation of how to write the
-        function and an example.  The value can be the name of a function, a
-        |lambda| or a |Funcref|. See |option-value-function| for more
-        information.
-        This option cannot be set from a |modeline| or in the |sandbox|, for
-        security reasons.
-      ]=],
-      full_name = 'tagfunc',
-      func = true,
-      scope = { 'buffer' },
-      secure = true,
-      short_desc = N_('function used to perform tag searches'),
-      type = 'string',
-      varname = 'p_tfu',
     },
     {
       abbreviation = 'tal',
@@ -8535,7 +8530,7 @@ return {
         appear wrong in many places.
         The value must be more than 0 and less than 10000.
 
-        There are four main ways to use tabs in Vim:
+        There are five main ways to use tabs in Vim:
         1. Always keep 'tabstop' at 8, set 'softtabstop' and 'shiftwidth' to 4
            (or 3 or whatever you prefer) and use 'noexpandtab'.  Then Vim
            will use a mix of tabs and spaces, but typing <Tab> and <BS> will
@@ -8631,7 +8626,7 @@ return {
       full_name = 'tagbsearch',
       scope = { 'global' },
       short_desc = N_('use binary searching in tags files'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_tbs',
     },
     {
@@ -8655,6 +8650,28 @@ return {
       varname = 'p_tc',
     },
     {
+      abbreviation = 'tfu',
+      cb = 'did_set_tagfunc',
+      defaults = { if_true = '' },
+      desc = [=[
+        This option specifies a function to be used to perform tag searches.
+        The function gets the tag pattern and should return a List of matching
+        tags.  See |tag-function| for an explanation of how to write the
+        function and an example.  The value can be the name of a function, a
+        |lambda| or a |Funcref|. See |option-value-function| for more
+        information.
+        This option cannot be set from a |modeline| or in the |sandbox|, for
+        security reasons.
+      ]=],
+      full_name = 'tagfunc',
+      func = true,
+      scope = { 'buffer' },
+      secure = true,
+      short_desc = N_('function used to perform tag searches'),
+      type = 'string',
+      varname = 'p_tfu',
+    },
+    {
       abbreviation = 'tl',
       defaults = { if_true = 0 },
       desc = [=[
@@ -8676,7 +8693,7 @@ return {
       full_name = 'tagrelative',
       scope = { 'global' },
       short_desc = N_('file names in tag file are relative'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_tr',
     },
     {
@@ -8726,7 +8743,7 @@ return {
       full_name = 'tagstack',
       scope = { 'global' },
       short_desc = N_('push tags onto the tag stack'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_tgst',
     },
     {
@@ -8745,12 +8762,13 @@ return {
       full_name = 'termbidi',
       scope = { 'global' },
       short_desc = N_('terminal takes care of bi-directionality'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_tbidi',
     },
     {
       abbreviation = 'tenc',
       defaults = { if_true = '' },
+      enable_if = false,
       full_name = 'termencoding',
       scope = { 'global' },
       short_desc = N_('Terminal encoding'),
@@ -8763,12 +8781,16 @@ return {
         Enables 24-bit RGB color in the |TUI|.  Uses "gui" |:highlight|
         attributes instead of "cterm" attributes. |guifg|
         Requires an ISO-8613-3 compatible terminal.
+
+        Nvim will automatically attempt to determine if the host terminal
+        supports 24-bit color and will enable this option if it does
+        (unless explicitly disabled by the user).
       ]=],
       full_name = 'termguicolors',
       redraw = { 'ui_option' },
       scope = { 'global' },
       short_desc = N_('Terminal true color support'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_tgc',
     },
     {
@@ -8815,7 +8837,7 @@ return {
       redraw = { 'ui_option' },
       scope = { 'global' },
       short_desc = N_('synchronize redraw output with the host terminal'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_termsync',
     },
     {
@@ -8823,8 +8845,8 @@ return {
       full_name = 'terse',
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_off',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'tw',
@@ -8839,7 +8861,7 @@ return {
         When 'formatexpr' is set it will be used to break the line.
       ]=],
       full_name = 'textwidth',
-      redraw = { 'current_buffer' },
+      redraw = { 'current_buffer', 'highlight_only' },
       scope = { 'buffer' },
       short_desc = N_('maximum width of text that is being inserted'),
       type = 'number',
@@ -8905,7 +8927,7 @@ return {
       full_name = 'tildeop',
       scope = { 'global' },
       short_desc = N_('tilde command "~" behaves like an operator'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_to',
     },
     {
@@ -8920,7 +8942,7 @@ return {
       full_name = 'timeout',
       scope = { 'global' },
       short_desc = N_('time out on mappings and key codes'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_timeout',
     },
     {
@@ -8954,7 +8976,7 @@ return {
       full_name = 'title',
       scope = { 'global' },
       short_desc = N_('Vim set the title of the window'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_title',
     },
     {
@@ -9004,13 +9026,13 @@ return {
         expanded according to the rules used for 'statusline'.
         This option cannot be set in a modeline when 'modelineexpr' is off.
 
-        Example: >
-            :auto BufEnter * let &titlestring = hostname() .. "/" .. expand("%:p")
-            :set title titlestring=%<%F%=%l/%L-%P titlelen=70
+        Example: >vim
+            auto BufEnter * let &titlestring = hostname() .. "/" .. expand("%:p")
+            set title titlestring=%<%F%=%l/%L-%P titlelen=70
         <	The value of 'titlelen' is used to align items in the middle or right
         of the available space.
-        Some people prefer to have the file name first: >
-            :set titlestring=%t%(\ %M%)%(\ (%{expand(\"%:~:.:h\")})%)%(\ %a%)
+        Some people prefer to have the file name first: >vim
+            set titlestring=%t%(\ %M%)%(\ (%{expand(\"%:~:.:h\")})%)%(\ %a%)
         <	Note the use of "%{ }" and an expression to get the path of the file,
         without the file name.  The "%( %)" constructs are used to add a
         separating space only when needed.
@@ -9043,7 +9065,7 @@ return {
       redraw = { 'ui_option' },
       scope = { 'global' },
       short_desc = N_('out on mappings'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ttimeout',
     },
     {
@@ -9068,8 +9090,8 @@ return {
       no_mkrc = true,
       scope = { 'global' },
       short_desc = N_('No description'),
-      type = 'bool',
-      varname = 'p_force_on',
+      type = 'boolean',
+      immutable = true,
     },
     {
       abbreviation = 'udir',
@@ -9124,7 +9146,7 @@ return {
       full_name = 'undofile',
       scope = { 'buffer' },
       short_desc = N_('save undo information in a file'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_udf',
     },
     {
@@ -9136,13 +9158,13 @@ return {
         is kept in memory, higher numbers will cause more memory to be used.
         Nevertheless, a single change can already use a large amount of memory.
         Set to 0 for Vi compatibility: One level of undo and "u" undoes
-        itself: >
+        itself: >vim
         	set ul=0
         <	But you can also get Vi compatibility by including the 'u' flag in
         'cpoptions', and still be able to use CTRL-R to repeat undo.
         Also see |undo-two-ways|.
         Set to -1 for no undo at all.  You might want to do this only for the
-        current buffer: >
+        current buffer: >vim
         	setlocal ul=-1
         <	This helps when you run out of memory for a single change.
 
@@ -9228,8 +9250,8 @@ return {
 
         For example, when editing assembly language files where statements
         start in the 9th column and comments in the 41st, it may be useful
-        to use the following: >
-        	:set varsofttabstop=8,32,8
+        to use the following: >vim
+        	set varsofttabstop=8,32,8
         <	This will set soft tabstops with 8 and 8 + 32 spaces, and 8 more
         for every column thereafter.
 
@@ -9250,8 +9272,8 @@ return {
       desc = [=[
         A list of the number of spaces that a <Tab> in the file counts for,
         separated by commas.  Each value corresponds to one tab, with the
-        final value applying to all subsequent tabs. For example: >
-        	:set vartabstop=4,20,10,8
+        final value applying to all subsequent tabs. For example: >vim
+        	set vartabstop=4,20,10,8
         <	This will make the first tab 4 spaces wide, the second 20 spaces,
         the third 10 spaces, and all following tabs 8 spaces.
 
@@ -9272,15 +9294,15 @@ return {
       desc = [=[
         Sets the verbosity level.  Also set by |-V| and |:verbose|.
 
-        Tracing of options in Lua scripts is activated at level 1; Lua scripts
-        are not traced with verbose=0, for performance.
+        Tracing of assignments to options, mappings, etc. in Lua scripts is
+        enabled at level 1; Lua scripts are not traced when 'verbose' is 0,
+        for performance.
 
         If greater than or equal to a given level, Nvim produces the following
         messages:
 
         Level   Messages ~
         ----------------------------------------------------------------------
-        1	Lua assignments to options, mappings, etc.
         2	When a file is ":source"'ed, or |shada| file is read or written.
         3	UI info, terminal capabilities.
         4	Shell commands.
@@ -9370,22 +9392,6 @@ return {
       varname = 'p_vop',
     },
     {
-      abbreviation = 'vi',
-      full_name = 'viminfo',
-      nodefault = true,
-      scope = { 'global' },
-      short_desc = N_('Alias for shada'),
-      type = 'string',
-    },
-    {
-      abbreviation = 'vif',
-      full_name = 'viminfofile',
-      nodefault = true,
-      scope = { 'global' },
-      short_desc = N_('Alias for shadafile instead'),
-      type = 'string',
-    },
-    {
       abbreviation = 've',
       cb = 'did_set_virtualedit',
       defaults = { if_true = '' },
@@ -9436,7 +9442,7 @@ return {
       full_name = 'visualbell',
       scope = { 'global' },
       short_desc = N_('use visual bell instead of beeping'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_vb',
     },
     {
@@ -9448,7 +9454,7 @@ return {
       full_name = 'warn',
       scope = { 'global' },
       short_desc = N_('for shell command when buffer was changed'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_warn',
     },
     {
@@ -9469,8 +9475,8 @@ return {
         	 ~    "~"	 Normal
         	 [    <Left>	 Insert and Replace
         	 ]    <Right>	 Insert and Replace
-        For example: >
-        	:set ww=<,>,[,]
+        For example: >vim
+        	set ww=<,>,[,]
         <	allows wrap only when cursor keys are used.
         When the movement keys are used in combination with a delete or change
         operator, the <EOL> also counts for a character.  This makes "3h"
@@ -9507,8 +9513,8 @@ return {
         Some keys will not work, such as CTRL-C, <CR> and Enter.
         <Esc> can be used, but hitting it twice in a row will still exit
         command-line as a failsafe measure.
-        Although 'wc' is a number option, you can set it to a special key: >
-        	:set wc=<Tab>
+        Although 'wc' is a number option, you can set it to a special key: >vim
+        	set wc=<Tab>
         <
       ]=],
       full_name = 'wildchar',
@@ -9526,9 +9532,9 @@ return {
         recognized when used inside a macro.  You can find "spare" command-line
         keys suitable for this option by looking at |ex-edit-index|.  Normally
         you'll never actually type 'wildcharm', just use it in mappings that
-        automatically invoke completion mode, e.g.: >
-        	:set wcm=<C-Z>
-        	:cnoremap ss so $vim/sessions/*.vim<C-Z>
+        automatically invoke completion mode, e.g.: >vim
+        	set wcm=<C-Z>
+        	cnoremap ss so $vim/sessions/*.vim<C-Z>
         <	Then after typing :ss you can use CTRL-P & CTRL-N.
       ]=],
       full_name = 'wildcharm',
@@ -9548,8 +9554,8 @@ return {
         |globpath()| unless a flag is passed to disable this.
         The pattern is used like with |:autocmd|, see |autocmd-pattern|.
         Also see 'suffixes'.
-        Example: >
-        	:set wildignore=*.o,*.obj
+        Example: >vim
+        	set wildignore=*.o,*.obj
         <	The use of |:set+=| and |:set-=| is preferred when adding or removing
         a pattern from the list.  This avoids problems when a future version
         uses another default.
@@ -9573,7 +9579,7 @@ return {
       full_name = 'wildignorecase',
       scope = { 'global' },
       short_desc = N_('ignore case when completing file names'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_wic',
     },
     {
@@ -9612,16 +9618,16 @@ return {
         		  completion.
 
         If you want <Left> and <Right> to move the cursor instead of selecting
-        a different match, use this: >
-        	:cnoremap <Left> <Space><BS><Left>
-        	:cnoremap <Right> <Space><BS><Right>
+        a different match, use this: >vim
+        	cnoremap <Left> <Space><BS><Left>
+        	cnoremap <Right> <Space><BS><Right>
         <
         |hl-WildMenu| highlights the current match.
       ]=],
       full_name = 'wildmenu',
       scope = { 'global' },
       short_desc = N_('use menu for command line completion'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_wmnu',
     },
     {
@@ -9661,16 +9667,16 @@ return {
         		and sort buffers by time last used (other than the
         		current buffer).
 
-        Examples: >
-        	:set wildmode=full
-        <	Complete first full match, next match, etc.  (the default) >
-        	:set wildmode=longest,full
-        <	Complete longest common string, then each full match >
-        	:set wildmode=list:full
-        <	List all matches and complete each full match >
-        	:set wildmode=list,full
-        <	List all matches without completing, then each full match >
-        	:set wildmode=longest,list
+        Examples: >vim
+        	set wildmode=full
+        <	Complete first full match, next match, etc.  (the default) >vim
+        	set wildmode=longest,full
+        <	Complete longest common string, then each full match >vim
+        	set wildmode=list:full
+        <	List all matches and complete each full match >vim
+        	set wildmode=list,full
+        <	List all matches without completing, then each full match >vim
+        	set wildmode=longest,list
         <	Complete longest common string, then list alternatives.
         More info here: |cmdline-completion|.
       ]=],
@@ -9782,10 +9788,109 @@ return {
         UI-dependent. Works best with RGB colors. 'termguicolors'
       ]=],
       full_name = 'winblend',
-      redraw = { 'current_window' },
+      redraw = { 'current_window', 'highlight_only' },
       scope = { 'window' },
       short_desc = N_('Controls transparency level for floating windows'),
       type = 'number',
+    },
+    {
+      abbreviation = 'wi',
+      cb = 'did_set_window',
+      defaults = {
+        if_true = 0,
+        doc = 'screen height - 1',
+      },
+      desc = [=[
+        Window height used for |CTRL-F| and |CTRL-B| when there is only one
+        window and the value is smaller than 'lines' minus one.  The screen
+        will scroll 'window' minus two lines, with a minimum of one.
+        When 'window' is equal to 'lines' minus one CTRL-F and CTRL-B scroll
+        in a much smarter way, taking care of wrapping lines.
+        When resizing the Vim window, and the value is smaller than 1 or more
+        than or equal to 'lines' it will be set to 'lines' minus 1.
+        Note: Do not confuse this with the height of the Vim window, use
+        'lines' for that.
+      ]=],
+      full_name = 'window',
+      scope = { 'global' },
+      short_desc = N_('nr of lines to scroll for CTRL-F and CTRL-B'),
+      type = 'number',
+      varname = 'p_window',
+    },
+    {
+      abbreviation = 'wfb',
+      defaults = { if_true = false },
+      desc = [=[
+        If enabled, the window and the buffer it is displaying are paired.
+        For example, attempting to change the buffer with |:edit| will fail.
+        Other commands which change a window's buffer such as |:cnext| will
+        also skip any window with 'winfixbuf' enabled.  However if an Ex
+        command has a "!" modifier, it can force switching buffers.
+      ]=],
+      full_name = 'winfixbuf',
+      pv_name = 'p_wfb',
+      redraw = { 'current_window' },
+      scope = { 'window' },
+      short_desc = N_('pin a window to a specific buffer'),
+      type = 'boolean',
+    },
+    {
+      abbreviation = 'wfh',
+      defaults = { if_true = false },
+      desc = [=[
+        Keep the window height when windows are opened or closed and
+        'equalalways' is set.  Also for |CTRL-W_=|.  Set by default for the
+        |preview-window| and |quickfix-window|.
+        The height may be changed anyway when running out of room.
+      ]=],
+      full_name = 'winfixheight',
+      redraw = { 'statuslines' },
+      scope = { 'window' },
+      short_desc = N_('keep window height when opening/closing windows'),
+      type = 'boolean',
+    },
+    {
+      abbreviation = 'wfw',
+      defaults = { if_true = false },
+      desc = [=[
+        Keep the window width when windows are opened or closed and
+        'equalalways' is set.  Also for |CTRL-W_=|.
+        The width may be changed anyway when running out of room.
+      ]=],
+      full_name = 'winfixwidth',
+      redraw = { 'statuslines' },
+      scope = { 'window' },
+      short_desc = N_('keep window width when opening/closing windows'),
+      type = 'boolean',
+    },
+    {
+      abbreviation = 'wh',
+      cb = 'did_set_winheight',
+      defaults = { if_true = 1 },
+      desc = [=[
+        Minimal number of lines for the current window.  This is not a hard
+        minimum, Vim will use fewer lines if there is not enough room.  If the
+        focus goes to a window that is smaller, its size is increased, at the
+        cost of the height of other windows.
+        Set 'winheight' to a small number for normal editing.
+        Set it to 999 to make the current window fill most of the screen.
+        Other windows will be only 'winminheight' high.  This has the drawback
+        that ":all" will create only two windows.  To avoid "vim -o 1 2 3 4"
+        to create only two windows, set the option after startup is done,
+        using the |VimEnter| event: >vim
+        	au VimEnter * set winheight=999
+        <	Minimum value is 1.
+        The height is not adjusted after one of the commands that change the
+        height of the current window.
+        'winheight' applies to the current window.  Use 'winminheight' to set
+        the minimal height for other windows.
+      ]=],
+      full_name = 'winheight',
+      scope = { 'global' },
+      short_desc = N_('minimum number of lines for the current window'),
+      tags = { 'E591' },
+      type = 'number',
+      varname = 'p_wh',
     },
     {
       abbreviation = 'winhl',
@@ -9808,99 +9913,17 @@ return {
         the popupmenu are determined by the current window.  Highlights in the
         message area cannot be overridden.
 
-        Example: show a different color for non-current windows: >
+        Example: show a different color for non-current windows: >vim
         	set winhighlight=Normal:MyNormal,NormalNC:MyNormalNC
         <
       ]=],
       expand_cb = 'expand_set_winhighlight',
       full_name = 'winhighlight',
       list = 'onecommacolon',
-      redraw = { 'current_window' },
+      redraw = { 'current_window', 'highlight_only' },
       scope = { 'window' },
       short_desc = N_('Setup window-local highlights'),
       type = 'string',
-    },
-    {
-      abbreviation = 'wi',
-      cb = 'did_set_window',
-      defaults = {
-        if_true = 0,
-        doc = 'screen height - 1',
-      },
-      desc = [=[
-        Window height used for |CTRL-F| and |CTRL-B| when there is only one
-        window and the value is smaller than 'lines' minus one.  The screen
-        will scroll 'window' minus two lines, with a minimum of one.
-        When 'window' is equal to 'lines' minus one CTRL-F and CTRL-B scroll
-        in a much smarter way, taking care of wrapping lines.
-        When resizing the Vim window, the value is smaller than 1 or more than
-        or equal to 'lines' it will be set to 'lines' minus 1.
-        Note: Do not confuse this with the height of the Vim window, use
-        'lines' for that.
-      ]=],
-      full_name = 'window',
-      scope = { 'global' },
-      short_desc = N_('nr of lines to scroll for CTRL-F and CTRL-B'),
-      type = 'number',
-      varname = 'p_window',
-    },
-    {
-      abbreviation = 'wh',
-      cb = 'did_set_winheight',
-      defaults = { if_true = 1 },
-      desc = [=[
-        Minimal number of lines for the current window.  This is not a hard
-        minimum, Vim will use fewer lines if there is not enough room.  If the
-        focus goes to a window that is smaller, its size is increased, at the
-        cost of the height of other windows.
-        Set 'winheight' to a small number for normal editing.
-        Set it to 999 to make the current window fill most of the screen.
-        Other windows will be only 'winminheight' high.  This has the drawback
-        that ":all" will create only two windows.  To avoid "vim -o 1 2 3 4"
-        to create only two windows, set the option after startup is done,
-        using the |VimEnter| event: >
-        	au VimEnter * set winheight=999
-        <	Minimum value is 1.
-        The height is not adjusted after one of the commands that change the
-        height of the current window.
-        'winheight' applies to the current window.  Use 'winminheight' to set
-        the minimal height for other windows.
-      ]=],
-      full_name = 'winheight',
-      scope = { 'global' },
-      short_desc = N_('minimum number of lines for the current window'),
-      tags = { 'E591' },
-      type = 'number',
-      varname = 'p_wh',
-    },
-    {
-      abbreviation = 'wfh',
-      defaults = { if_true = false },
-      desc = [=[
-        Keep the window height when windows are opened or closed and
-        'equalalways' is set.  Also for |CTRL-W_=|.  Set by default for the
-        |preview-window| and |quickfix-window|.
-        The height may be changed anyway when running out of room.
-      ]=],
-      full_name = 'winfixheight',
-      redraw = { 'statuslines' },
-      scope = { 'window' },
-      short_desc = N_('keep window height when opening/closing windows'),
-      type = 'bool',
-    },
-    {
-      abbreviation = 'wfw',
-      defaults = { if_true = false },
-      desc = [=[
-        Keep the window width when windows are opened or closed and
-        'equalalways' is set.  Also for |CTRL-W_=|.
-        The width may be changed anyway when running out of room.
-      ]=],
-      full_name = 'winfixwidth',
-      redraw = { 'statuslines' },
-      scope = { 'window' },
-      short_desc = N_('keep window width when opening/closing windows'),
-      type = 'bool',
     },
     {
       abbreviation = 'wmh',
@@ -9980,9 +10003,9 @@ return {
         horizontally.
         The line will be broken in the middle of a word if necessary.  See
         'linebreak' to get the break at a word boundary.
-        To make scrolling horizontally a bit more useful, try this: >
-        	:set sidescroll=5
-        	:set listchars+=precedes:<,extends:>
+        To make scrolling horizontally a bit more useful, try this: >vim
+        	set sidescroll=5
+        	set listchars+=precedes:<,extends:>
         <	See 'sidescroll', 'listchars' and |wrap-off|.
         This option can't be set from a |modeline| when the 'diff' option is
         on.
@@ -9991,7 +10014,7 @@ return {
       redraw = { 'current_window' },
       scope = { 'window' },
       short_desc = N_('lines wrap and continue on the next line'),
-      type = 'bool',
+      type = 'boolean',
     },
     {
       abbreviation = 'wm',
@@ -10022,7 +10045,7 @@ return {
       scope = { 'global' },
       short_desc = N_('searches wrap around the end of the file'),
       tags = { 'E384', 'E385' },
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_ws',
     },
     {
@@ -10037,7 +10060,7 @@ return {
       full_name = 'write',
       scope = { 'global' },
       short_desc = N_('to a file is allowed'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_write',
     },
     {
@@ -10049,7 +10072,7 @@ return {
       full_name = 'writeany',
       scope = { 'global' },
       short_desc = N_('write to file with no need for "!" override'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_wa',
     },
     {
@@ -10072,7 +10095,7 @@ return {
       full_name = 'writebackup',
       scope = { 'global' },
       short_desc = N_('make a backup before overwriting a file'),
-      type = 'bool',
+      type = 'boolean',
       varname = 'p_wb',
     },
     {

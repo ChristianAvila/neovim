@@ -274,14 +274,6 @@ CTRL-P		command-line completion (see |cmdline-completion|)
 CTRL-A		command-line completion (see |cmdline-completion|)
 CTRL-L		command-line completion (see |cmdline-completion|)
 
-							*c_CTRL-_*
-CTRL-_		Switch between Hebrew and English keyboard mode, which is
-		private to the command-line and not related to hkmap.
-		This is useful when Hebrew text entry is required in the
-		command-line, searches, abbreviations, etc.  Applies only if
-		the 'allowrevins' option is set.
-		See |rileft.txt|.
-
 							*c_CTRL-^*
 CTRL-^		Toggle the use of language |:lmap| mappings and/or Input
 		Method.
@@ -439,9 +431,8 @@ CTRL-T		When 'incsearch' is set, entering a search pattern for "/" or
 		keyboard T is above G.
 
 The 'wildchar' option defaults to <Tab> (CTRL-E when in Vi compatible mode; in
-a previous version <Esc> was used).  In the pattern standard wildcards "*" and
-'?' are accepted when matching file names.  "*" matches any string, '?'
-matches exactly one character.
+a previous version <Esc> was used).  In the pattern standard |wildcards| are
+accepted when matching file names.
 
 When repeating 'wildchar' or CTRL-N you cycle through the matches, eventually
 ending up back to what was typed.  If the first match is not what you wanted,

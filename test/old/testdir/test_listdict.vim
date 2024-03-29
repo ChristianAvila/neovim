@@ -456,6 +456,25 @@ func Test_dict_func_remove()
   call CheckLegacyAndVim9Failure(lines, 'E716:')
 
   let lines =<< trim END
+      let d = {'a-b': 55}
+      echo d.a-b
+  END
+  call CheckScriptFailure(lines, 'E716: Key not present in Dictionary: "a"')
+
+  let lines =<< trim END
+      vim9script
+      var d = {'a-b': 55}
+      echo d.a-b
+  END
+  call CheckScriptFailure(lines, 'E716: Key not present in Dictionary: "a"')
+
+  let lines =<< trim END
+      var d = {'a-b': 55}
+      echo d.a-b
+  END
+  call CheckDefFailure(lines, 'E1004: White space required before and after ''-''')
+
+  let lines =<< trim END
       let d = {1: 'a', 3: 'c'}
       call remove(d, [])
   END
@@ -1302,7 +1321,7 @@ func Test_listdict_index()
   call CheckLegacyAndVim9Failure(['VAR l = [1, 2, 3]', 'LET l[1.1] = 4'], ['E805:', 'E1012:', 'E805:'])
   call CheckLegacyAndVim9Failure(['VAR l = [1, 2, 3]', 'LET l[: i] = [4, 5]'], ['E121:', 'E1001:', 'E121:'])
   call CheckLegacyAndVim9Failure(['VAR l = [1, 2, 3]', 'LET l[: 3.2] = [4, 5]'], ['E805:', 'E1012:', 'E805:'])
-  " call CheckLegacyAndVim9Failure(['VAR t = test_unknown()', 'echo t[0]'], 'E685:')
+  " call CheckLegacyAndVim9Failure(['VAR t = test_unknown()', 'echo t[0]'], ['E685:', 'E909:', 'E685:'])
 endfunc
 
 " Test for a null list

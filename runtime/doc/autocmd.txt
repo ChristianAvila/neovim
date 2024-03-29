@@ -784,9 +784,6 @@ OptionSet			After setting an option (except during
 				are not global-local it is the old local
 				value.
 
-				OptionSet is not triggered on startup and for
-				the 'key' option for obvious reasons.
-
 				Usage example: Check for the existence of the
 				directory in the 'backupdir' and 'undodir'
 				options, create the directory if it doesn't
@@ -799,6 +796,8 @@ OptionSet			After setting an option (except during
 
 				Non-recursive: |:set| in the autocommand does
 				not trigger OptionSet again.
+
+				Not triggered on startup.
 
 							*QuickFixCmdPre*
 QuickFixCmdPre			Before a quickfix command is run (|:make|,
@@ -874,7 +873,7 @@ SafeState			When nothing is pending, going to wait for the
 				- Command line completion is active
 				You can use `mode()` to find out what state
 				Vim is in.  That may be:
-				- VIsual mode
+				- Visual mode
 				- Normal mode
 				- Insert mode
 				- Command-line mode
@@ -884,6 +883,9 @@ SafeState			When nothing is pending, going to wait for the
 
 							*SessionLoadPost*
 SessionLoadPost			After loading the session file created using
+				the |:mksession| command.
+							*SessionWritePost*
+SessionWritePost		After writing a session file by calling
 				the |:mksession| command.
 							*ShellCmdPost*
 ShellCmdPost			After executing a shell command with |:!cmd|,
@@ -986,6 +988,11 @@ TermLeave			After leaving |Terminal-mode|.
 TermClose			When a |terminal| job ends.
 				Sets these |v:event| keys:
 				    status
+							*TermRequest*
+TermRequest			When a |terminal| job emits an OSC or DCS
+				sequence. Sets |v:termrequest|. When used from
+				Lua, the request string is included in the
+				"data" field of the autocommand callback.
 							*TermResponse*
 TermResponse			When Nvim receives an OSC or DCS response from
 				the terminal.  Sets |v:termresponse|. When used
@@ -1001,10 +1008,10 @@ TermResponse			When Nvim receives an OSC or DCS response from
 				  once = true,
 				  callback = function(args)
 				    local resp = args.data
-				    local r, g, b = resp:match("\x1b%]4;1;rgb:(%w+)/(%w+)/(%w+)")
+				    local r, g, b = resp:match("\027%]4;1;rgb:(%w+)/(%w+)/(%w+)")
 				  end,
 				})
-				io.stdout:write("\x1b]4;1;?\x1b\\")
+				io.stdout:write("\027]4;1;?\027\\")
 <
 							*TextChanged*
 TextChanged			After a change was made to the text in the

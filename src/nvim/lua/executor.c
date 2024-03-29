@@ -15,7 +15,9 @@
 #include "nvim/api/extmark.h"
 #include "nvim/api/private/defs.h"
 #include "nvim/api/private/helpers.h"
-#include "nvim/ascii.h"
+#include "nvim/api/ui.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/buffer_defs.h"
 #include "nvim/change.h"
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/cursor.h"
@@ -33,33 +35,42 @@
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_getln.h"
 #include "nvim/garray.h"
+#include "nvim/garray_defs.h"
 #include "nvim/getchar.h"
-#include "nvim/gettext.h"
+#include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
 #include "nvim/keycodes.h"
 #include "nvim/lua/converter.h"
 #include "nvim/lua/executor.h"
 #include "nvim/lua/stdlib.h"
 #include "nvim/lua/treesitter.h"
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 #include "nvim/main.h"
 #include "nvim/memline.h"
 #include "nvim/memory.h"
+#include "nvim/memory_defs.h"
 #include "nvim/message.h"
 #include "nvim/msgpack_rpc/channel.h"
 #include "nvim/option_vars.h"
 #include "nvim/os/fileio.h"
+#include "nvim/os/fileio_defs.h"
 #include "nvim/os/os.h"
 #include "nvim/path.h"
-#include "nvim/pos.h"
+#include "nvim/pos_defs.h"
 #include "nvim/profile.h"
 #include "nvim/runtime.h"
+#include "nvim/runtime_defs.h"
 #include "nvim/strings.h"
 #include "nvim/ui.h"
+#include "nvim/ui_defs.h"
 #include "nvim/undo.h"
 #include "nvim/usercmd.h"
-#include "nvim/vim.h"
+#include "nvim/vim_defs.h"
 #include "nvim/window.h"
+
+#ifndef MSWIN
+# include <pthread.h>
+#endif
 
 static int in_fast_callback = 0;
 static bool in_script = false;
@@ -115,7 +126,7 @@ lua_State *get_global_lstate(void)
 /// Convert lua error into a Vim error message
 ///
 /// @param  lstate  Lua interpreter state.
-/// @param[in]  msg  Message base, must contain one `%s`.
+/// @param[in]  msg  Message base, must contain one `%.*s`.
 void nlua_error(lua_State *const lstate, const char *const msg)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -208,7 +219,7 @@ static int nlua_luv_cfpcall(lua_State *lstate, int nargs, int nresult, int flags
     const char *error = lua_tostring(lstate, -1);
 
     multiqueue_put(main_loop.events, nlua_luv_error_event,
-                   2, xstrdup(error), (intptr_t)kCallback);
+                   xstrdup(error), (void *)(intptr_t)kCallback);
     lua_pop(lstate, 1);  // error message
     retval = -status;
   } else {  // LUA_OK
@@ -254,8 +265,7 @@ static int nlua_luv_thread_common_cfpcall(lua_State *lstate, int nargs, int nres
     if (status == LUA_ERRMEM && !(flags & LUVF_CALLBACK_NOEXIT)) {
       // Terminate this thread, as the main thread may be able to continue
       // execution.
-      os_errmsg(e_outofmem);
-      os_errmsg("\n");
+      fprintf(stderr, "%s\n", e_outofmem);
       lua_close(lstate);
 #ifdef MSWIN
       ExitThread(0);
@@ -266,11 +276,11 @@ static int nlua_luv_thread_common_cfpcall(lua_State *lstate, int nargs, int nres
     const char *error = lua_tostring(lstate, -1);
 
     loop_schedule_deferred(&main_loop,
-                           event_create(nlua_luv_error_event, 2,
+                           event_create(nlua_luv_error_event,
                                         xstrdup(error),
-                                        is_callback
-                                        ? (intptr_t)kThreadCallback
-                                        : (intptr_t)kThread));
+                                        (void *)(intptr_t)(is_callback
+                                                           ? kThreadCallback
+                                                           : kThread)));
     lua_pop(lstate, 1);  // error message
     retval = -status;
   } else {  // LUA_OK
@@ -302,7 +312,10 @@ static int nlua_thr_api_nvim__get_runtime(lua_State *lstate)
   lua_pop(lstate, 1);
 
   Error err = ERROR_INIT;
-  const Array pat = nlua_pop_Array(lstate, &err);
+  // TODO(bfredl): we could use an arena here for both "pat" and "ret", but then
+  // we need a path to not use the freelist but a private block local to the thread.
+  // We do not want mutex contentionery for the main arena freelist.
+  const Array pat = nlua_pop_Array(lstate, NULL, &err);
   if (ERROR_SET(&err)) {
     luaL_where(lstate, 1);
     lua_pushstring(lstate, err.msg);
@@ -379,8 +392,7 @@ static int nlua_schedule(lua_State *const lstate)
 
   LuaRef cb = nlua_ref_global(lstate, 1);
 
-  multiqueue_put(main_loop.events, nlua_schedule_event,
-                 1, (void *)(ptrdiff_t)cb);
+  multiqueue_put(main_loop.events, nlua_schedule_event, (void *)(ptrdiff_t)cb);
   return 0;
 }
 
@@ -411,6 +423,10 @@ static bool nlua_wait_condition(lua_State *lstate, int *status, bool *callback_r
 static int nlua_wait(lua_State *lstate)
   FUNC_ATTR_NONNULL_ALL
 {
+  if (in_fast_callback) {
+    return luaL_error(lstate, e_luv_api_disabled, "vim.wait");
+  }
+
   intptr_t timeout = luaL_checkinteger(lstate, 1);
   if (timeout < 0) {
     return luaL_error(lstate, "timeout must be >= 0");
@@ -449,8 +465,7 @@ static int nlua_wait(lua_State *lstate)
     fast_only = lua_toboolean(lstate, 4);
   }
 
-  MultiQueue *loop_events = fast_only || in_fast_callback > 0
-                            ? main_loop.fast_events : main_loop.events;
+  MultiQueue *loop_events = fast_only ? main_loop.fast_events : main_loop.events;
 
   TimeWatcher *tw = xmalloc(sizeof(TimeWatcher));
 
@@ -640,8 +655,7 @@ static bool nlua_init_packages(lua_State *lstate, bool is_standalone)
   lua_getglobal(lstate, "require");
   lua_pushstring(lstate, "vim._init_packages");
   if (nlua_pcall(lstate, 1, 0)) {
-    os_errmsg(lua_tostring(lstate, -1));
-    os_errmsg("\n");
+    fprintf(stderr, "%s\n", lua_tostring(lstate, -1));
     return false;
   }
 
@@ -815,12 +829,12 @@ void nlua_init(char **argv, int argc, int lua_arg0)
 
   lua_State *lstate = luaL_newstate();
   if (lstate == NULL) {
-    os_errmsg(_("E970: Failed to initialize lua interpreter\n"));
+    fprintf(stderr, _("E970: Failed to initialize lua interpreter\n"));
     os_exit(1);
   }
   luaL_openlibs(lstate);
   if (!nlua_state_init(lstate)) {
-    os_errmsg(_("E970: Failed to initialize builtin lua modules\n"));
+    fprintf(stderr, _("E970: Failed to initialize builtin lua modules\n"));
 #ifdef EXITFREE
     nlua_common_free_all_mem(lstate);
 #endif
@@ -1019,15 +1033,14 @@ static int nlua_print(lua_State *const lstate)
 
   if (is_thread) {
     loop_schedule_deferred(&main_loop,
-                           event_create(nlua_print_event, 2,
+                           event_create(nlua_print_event,
                                         msg_ga.ga_data,
-                                        (intptr_t)msg_ga.ga_len));
+                                        (void *)(intptr_t)msg_ga.ga_len));
   } else if (in_fast_callback) {
     multiqueue_put(main_loop.events, nlua_print_event,
-                   2, msg_ga.ga_data, (intptr_t)msg_ga.ga_len);
+                   msg_ga.ga_data, (void *)(intptr_t)msg_ga.ga_len);
   } else {
-    nlua_print_event((void *[]){ msg_ga.ga_data,
-                                 (void *)(intptr_t)msg_ga.ga_len });
+    nlua_print_event((void *[]){ msg_ga.ga_data, (void *)(intptr_t)msg_ga.ga_len });
   }
   return 0;
 
@@ -1233,13 +1246,13 @@ static int nlua_rpc(lua_State *lstate, bool request)
   const char *name = luaL_checklstring(lstate, 2, &name_len);
   int nargs = lua_gettop(lstate) - 2;
   Error err = ERROR_INIT;
-  Array args = ARRAY_DICT_INIT;
+  Arena arena = ARENA_EMPTY;
 
+  Array args = arena_array(&arena, (size_t)nargs);
   for (int i = 0; i < nargs; i++) {
     lua_pushvalue(lstate, i + 3);
-    ADD(args, nlua_pop_Object(lstate, false, &err));
+    ADD(args, nlua_pop_Object(lstate, false, &arena, &err));
     if (ERROR_SET(&err)) {
-      api_free_array(args);
       goto check_err;
     }
   }
@@ -1248,7 +1261,7 @@ static int nlua_rpc(lua_State *lstate, bool request)
     ArenaMem res_mem = NULL;
     Object result = rpc_send_call(chan_id, name, args, &res_mem, &err);
     if (!ERROR_SET(&err)) {
-      nlua_push_Object(lstate, result, false);
+      nlua_push_Object(lstate, &result, false);
       arena_mem_free(res_mem);
     }
   } else {
@@ -1256,10 +1269,11 @@ static int nlua_rpc(lua_State *lstate, bool request)
       api_set_error(&err, kErrorTypeValidation,
                     "Invalid channel: %" PRIu64, chan_id);
     }
-    api_free_array(args);  // TODO(bfredl): no
   }
 
 check_err:
+  arena_mem_free(arena_finish(&arena));
+
   if (ERROR_SET(&err)) {
     lua_pushstring(lstate, err.msg);
     api_clear_error(&err);
@@ -1532,10 +1546,12 @@ int typval_exec_lua_callable(LuaRef lua_cb, int argcount, typval_T *argvars, typ
 ///
 /// @param[in]  str  String to execute.
 /// @param[in]  args array of ... args
+/// @param[in]  mode Whether and how the the return value should be converted to Object
+/// @param[in] arena  can be NULL, then nested allocations are used
 /// @param[out]  err  Location where error will be saved.
 ///
 /// @return Return value of the execution.
-Object nlua_exec(const String str, const Array args, Error *err)
+Object nlua_exec(const String str, const Array args, LuaRetMode mode, Arena *arena, Error *err)
 {
   lua_State *const lstate = global_lstate;
 
@@ -1548,7 +1564,7 @@ Object nlua_exec(const String str, const Array args, Error *err)
   }
 
   for (size_t i = 0; i < args.size; i++) {
-    nlua_push_Object(lstate, args.items[i], false);
+    nlua_push_Object(lstate, &args.items[i], false);
   }
 
   if (nlua_pcall(lstate, (int)args.size, 1)) {
@@ -1559,7 +1575,7 @@ Object nlua_exec(const String str, const Array args, Error *err)
     return NIL;
   }
 
-  return nlua_pop_Object(lstate, false, err);
+  return nlua_call_pop_retval(lstate, mode, arena, err);
 }
 
 bool nlua_ref_is_function(LuaRef ref)
@@ -1580,12 +1596,12 @@ bool nlua_ref_is_function(LuaRef ref)
 /// @param ref     the reference to call (not consumed)
 /// @param name    if non-NULL, sent to callback as first arg
 ///                if NULL, only args are used
-/// @param retval  if true, convert return value to Object
-///                if false, only check if return value is truthy
+/// @param mode    Whether and how the the return value should be converted to Object
+/// @param arena   can be NULL, then nested allocations are used
 /// @param err     Error details, if any (if NULL, errors are echoed)
-/// @return        Return value of function, if retval was set. Otherwise
-/// BOOLEAN_OBJ(true) or NIL.
-Object nlua_call_ref(LuaRef ref, const char *name, Array args, bool retval, Error *err)
+/// @return        Return value of function, as per mode
+Object nlua_call_ref(LuaRef ref, const char *name, Array args, LuaRetMode mode, Arena *arena,
+                     Error *err)
 {
   lua_State *const lstate = global_lstate;
   nlua_pushref(lstate, ref);
@@ -1595,7 +1611,7 @@ Object nlua_call_ref(LuaRef ref, const char *name, Array args, bool retval, Erro
     nargs++;
   }
   for (size_t i = 0; i < args.size; i++) {
-    nlua_push_Object(lstate, args.items[i], false);
+    nlua_push_Object(lstate, &args.items[i], false);
   }
 
   if (nlua_pcall(lstate, nargs, 1)) {
@@ -1611,18 +1627,34 @@ Object nlua_call_ref(LuaRef ref, const char *name, Array args, bool retval, Erro
     return NIL;
   }
 
-  if (retval) {
-    Error dummy = ERROR_INIT;
-    if (err == NULL) {
-      err = &dummy;
-    }
-    return nlua_pop_Object(lstate, false, err);
-  } else {
-    bool value = lua_toboolean(lstate, -1);
+  return nlua_call_pop_retval(lstate, mode, arena, err);
+}
+
+static Object nlua_call_pop_retval(lua_State *lstate, LuaRetMode mode, Arena *arena, Error *err)
+{
+  if (lua_isnil(lstate, -1)) {
+    lua_pop(lstate, 1);
+    return NIL;
+  }
+  Error dummy = ERROR_INIT;
+
+  switch (mode) {
+  case kRetNilBool: {
+    bool bool_value = lua_toboolean(lstate, -1);
     lua_pop(lstate, 1);
 
-    return value ? BOOLEAN_OBJ(true) : NIL;
+    return BOOLEAN_OBJ(bool_value);
   }
+  case kRetLuaref: {
+    LuaRef ref = nlua_ref_global(lstate, -1);
+    lua_pop(lstate, 1);
+
+    return LUAREF_OBJ(ref);
+  }
+  case kRetObject:
+    return nlua_pop_Object(lstate, false, arena, err ? err : &dummy);
+  }
+  UNREACHABLE;
 }
 
 /// check if the current execution context is safe for calling deferred API
@@ -1632,27 +1664,38 @@ bool nlua_is_deferred_safe(void)
   return in_fast_callback == 0;
 }
 
-/// Run lua string
+/// Executes Lua code.
 ///
-/// Used for :lua.
+/// Implements `:lua` and `:lua ={expr}`.
 ///
-/// @param  eap  Vimscript command being run.
+/// @param  eap  Vimscript `:lua {code}`, `:{range}lua`, or `:lua ={expr}` command.
 void ex_lua(exarg_T *const eap)
   FUNC_ATTR_NONNULL_ALL
 {
+  // ":{range}lua", only if no {code}
+  if (*eap->arg == NUL) {
+    if (eap->addr_count > 0) {
+      cmd_source_buffer(eap, true);
+    } else {
+      emsg(_(e_argreq));
+    }
+    return;
+  }
+
   size_t len;
   char *code = script_get(eap, &len);
   if (eap->skip || code == NULL) {
     xfree(code);
     return;
   }
-  // When =expr is used transform it to vim.print(expr)
+
+  // ":lua {code}", ":={expr}" or ":lua ={expr}"
+  //
+  // When "=expr" is used transform it to "vim.print(expr)".
   if (eap->cmdidx == CMD_equal || code[0] == '=') {
     size_t off = (eap->cmdidx == CMD_equal) ? 0 : 1;
     len += sizeof("vim.print()") - 1 - off;
-    // code_buf needs to be 1 char larger then len for null byte in the end.
-    // lua nlua_typval_exec doesn't expect null terminated string so len
-    // needs to end before null byte.
+    // `nlua_typval_exec` doesn't expect NUL-terminated string so `len` must end before NUL byte.
     char *code_buf = xmallocz(len);
     vim_snprintf(code_buf, len + 1, "vim.print(%s)", code + off);
     xfree(code);
@@ -1664,11 +1707,11 @@ void ex_lua(exarg_T *const eap)
   xfree(code);
 }
 
-/// Run lua string for each line in range
+/// Executes Lua code for-each line in a buffer range.
 ///
-/// Used for :luado.
+/// Implements `:luado`.
 ///
-/// @param  eap  Vimscript command being run.
+/// @param  eap  Vimscript `:luado {code}` command.
 void ex_luado(exarg_T *const eap)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -1712,20 +1755,32 @@ void ex_luado(exarg_T *const eap)
     nlua_error(lstate, _("E5110: Error executing lua: %.*s"));
     return;
   }
+
+  buf_T *const was_curbuf = curbuf;
+
   for (linenr_T l = eap->line1; l <= eap->line2; l++) {
+    // Check the line number, the command may have deleted lines.
     if (l > curbuf->b_ml.ml_line_count) {
       break;
     }
+
     lua_pushvalue(lstate, -1);
     const char *const old_line = ml_get_buf(curbuf, l);
     // Get length of old_line here as calling Lua code may free it.
-    const size_t old_line_len = strlen(old_line);
+    const colnr_T old_line_len = ml_get_buf_len(curbuf, l);
     lua_pushstring(lstate, old_line);
     lua_pushnumber(lstate, (lua_Number)l);
     if (nlua_pcall(lstate, 2, 1)) {
       nlua_error(lstate, _("E5111: Error calling lua: %.*s"));
       break;
     }
+
+    // Catch the command switching to another buffer.
+    // Check the line number, the command may have deleted lines.
+    if (curbuf != was_curbuf || l > curbuf->b_ml.ml_line_count) {
+      break;
+    }
+
     if (lua_isstring(lstate, -1)) {
       size_t new_line_len;
       const char *const new_line = lua_tolstring(lstate, -1, &new_line_len);
@@ -1736,20 +1791,21 @@ void ex_luado(exarg_T *const eap)
         }
       }
       ml_replace(l, new_line_transformed, false);
-      inserted_bytes(l, 0, (int)old_line_len, (int)new_line_len);
+      inserted_bytes(l, 0, old_line_len, (int)new_line_len);
     }
     lua_pop(lstate, 1);
   }
+
   lua_pop(lstate, 1);
-  check_cursor();
+  check_cursor(curwin);
   redraw_curbuf_later(UPD_NOT_VALID);
 }
 
-/// Run lua file
+/// Executes Lua code from a file location.
 ///
-/// Used for :luafile.
+/// Implements `:luafile`.
 ///
-/// @param  eap  Vimscript command being run.
+/// @param  eap  Vimscript `:luafile {file}` command.
 void ex_luafile(exarg_T *const eap)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -1773,7 +1829,11 @@ bool nlua_exec_file(const char *path)
     lua_getglobal(lstate, "loadfile");
     lua_pushstring(lstate, path);
   } else {
-    FileDescriptor *stdin_dup = file_open_stdin();
+    FileDescriptor stdin_dup;
+    int error = file_open_stdin(&stdin_dup);
+    if (error) {
+      return false;
+    }
 
     StringBuilder sb = KV_INITIAL_VALUE;
     kv_resize(sb, 64);
@@ -1782,7 +1842,7 @@ bool nlua_exec_file(const char *path)
       if (got_int) {  // User canceled.
         return false;
       }
-      ptrdiff_t read_size = file_read(stdin_dup, IObuff, 64);
+      ptrdiff_t read_size = file_read(&stdin_dup, IObuff, 64);
       if (read_size < 0) {  // Error.
         return false;
       }
@@ -1794,7 +1854,7 @@ bool nlua_exec_file(const char *path)
       }
     }
     kv_push(sb, NUL);
-    file_free(stdin_dup, false);
+    file_close(&stdin_dup, false);
 
     lua_getglobal(lstate, "loadstring");
     lua_pushstring(lstate, sb.items);
@@ -1849,6 +1909,9 @@ static void nlua_add_treesitter(lua_State *const lstate) FUNC_ATTR_NONNULL_ALL
   lua_pushcfunction(lstate, tslua_push_parser);
   lua_setfield(lstate, -2, "_create_ts_parser");
 
+  lua_pushcfunction(lstate, tslua_push_querycursor);
+  lua_setfield(lstate, -2, "_create_ts_querycursor");
+
   lua_pushcfunction(lstate, tslua_add_language);
   lua_setfield(lstate, -2, "_ts_add_language");
 
@@ -1897,13 +1960,14 @@ int nlua_expand_pat(expand_T *xp, char *pat, int *num_results, char ***results)
   *num_results = 0;
   *results = NULL;
 
-  int prefix_len = (int)nlua_pop_Integer(lstate, &err);
+  Arena arena = ARENA_EMPTY;
+  int prefix_len = (int)nlua_pop_Integer(lstate, &arena, &err);
   if (ERROR_SET(&err)) {
     ret = FAIL;
     goto cleanup;
   }
 
-  Array completions = nlua_pop_Array(lstate, &err);
+  Array completions = nlua_pop_Array(lstate, &arena, &err);
   if (ERROR_SET(&err)) {
     ret = FAIL;
     goto cleanup_array;
@@ -1927,7 +1991,7 @@ int nlua_expand_pat(expand_T *xp, char *pat, int *num_results, char ***results)
   *num_results = result_array.ga_len;
 
 cleanup_array:
-  api_free_array(completions);
+  arena_mem_free(arena_finish(&arena));
 
 cleanup:
 
@@ -2175,7 +2239,7 @@ int nlua_do_ucmd(ucmd_T *cmd, exarg_T *eap, bool preview)
   // every possible modifier (with room to spare). If the list of possible
   // modifiers grows this may need to be updated.
   char buf[200] = { 0 };
-  (void)uc_mods(buf, &cmdmod, false);
+  uc_mods(buf, &cmdmod, false);
   lua_pushstring(lstate, buf);
   lua_setfield(lstate, -2, "mods");
 
@@ -2271,11 +2335,9 @@ int nlua_do_ucmd(ucmd_T *cmd, exarg_T *eap, bool preview)
 /// String representation of a Lua function reference
 ///
 /// @return Allocated string
-char *nlua_funcref_str(LuaRef ref)
+char *nlua_funcref_str(LuaRef ref, Arena *arena)
 {
   lua_State *const lstate = global_lstate;
-  StringBuilder str = KV_INITIAL_VALUE;
-  kv_resize(str, 16);
 
   if (!lua_checkstack(lstate, 1)) {
     goto plain;
@@ -2289,14 +2351,13 @@ char *nlua_funcref_str(LuaRef ref)
   lua_Debug ar;
   if (lua_getinfo(lstate, ">S", &ar) && *ar.source == '@' && ar.linedefined >= 0) {
     char *src = home_replace_save(NULL, ar.source + 1);
-    kv_printf(str, "<Lua %d: %s:%d>", ref, src, ar.linedefined);
+    String str = arena_printf(arena, "<Lua %d: %s:%d>", ref, src, ar.linedefined);
     xfree(src);
-    return str.items;
+    return str.data;
   }
 
-plain:
-  kv_printf(str, "<Lua %d>", ref);
-  return str.items;
+plain: {}
+  return arena_printf(arena, "<Lua %d>", ref).data;
 }
 
 /// Execute the vim._defaults module to set up default mappings and autocommands
@@ -2308,7 +2369,23 @@ void nlua_init_defaults(void)
   lua_getglobal(L, "require");
   lua_pushstring(L, "vim._defaults");
   if (nlua_pcall(L, 1, 0)) {
-    os_errmsg(lua_tostring(L, -1));
-    os_errmsg("\n");
+    fprintf(stderr, "%s\n", lua_tostring(L, -1));
   }
+}
+
+/// check lua function exist
+bool nlua_func_exists(const char *lua_funcname)
+{
+  MAXSIZE_TEMP_ARRAY(args, 1);
+  size_t length = strlen(lua_funcname) + 8;
+  char *str = xmalloc(length);
+  vim_snprintf(str, length, "return %s", lua_funcname);
+  ADD_C(args, CSTR_AS_OBJ(str));
+  Error err = ERROR_INIT;
+  Object result = NLUA_EXEC_STATIC("return type(loadstring(...)()) == 'function'", args,
+                                   kRetNilBool, NULL, &err);
+  xfree(str);
+
+  api_clear_error(&err);
+  return LUARET_TRUTHY(result);
 }

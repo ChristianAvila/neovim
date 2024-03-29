@@ -24,7 +24,7 @@
 #include <lua.h>
 #include <luaconf.h>
 
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 
 #include "lmpack.h"
 
@@ -882,7 +882,9 @@ static int lmpack_session_receive(lua_State *L)
   luaL_argcheck(L, (size_t)startpos <= len, 3,
       "start position must be less than or equal to the input string length");
 
-  str += (size_t)startpos - 1;
+  size_t offset = (size_t)startpos - 1 ;
+  str += offset;
+  len -= offset;
 
   if (session->unpacker != LUA_REFNIL) {
     lmpack_geti(L, session->reg, session->unpacker);

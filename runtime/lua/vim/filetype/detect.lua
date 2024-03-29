@@ -419,6 +419,55 @@ function M.dtrace(_, bufnr)
   return 'd'
 end
 
+--- @param bufnr integer
+--- @return boolean
+local function is_modula2(bufnr)
+  return matchregex(nextnonblank(bufnr, 1), [[\<MODULE\s\+\w\+\s*\%(\[.*]\s*\)\=;\|^\s*(\*]])
+end
+
+--- @param bufnr integer
+--- @return string, fun(b: integer)
+local function modula2(bufnr)
+  local dialect = vim.g.modula2_default_dialect or 'pim'
+  local extension = vim.g.modula2_default_extension or ''
+
+  -- ignore unknown dialects or badly formatted tags
+  for _, line in ipairs(getlines(bufnr, 1, 200)) do
+    local matched_dialect, matched_extension = line:match('%(%*!m2(%w+)%+(%w+)%*%)')
+    if not matched_dialect then
+      matched_dialect = line:match('%(%*!m2(%w+)%*%)')
+    end
+    if matched_dialect then
+      if vim.tbl_contains({ 'iso', 'pim', 'r10' }, matched_dialect) then
+        dialect = matched_dialect
+      end
+      if vim.tbl_contains({ 'gm2' }, matched_extension) then
+        extension = matched_extension
+      end
+      break
+    end
+  end
+
+  return 'modula2',
+    function(b)
+      vim.api.nvim_buf_call(b, function()
+        fn['modula2#SetDialect'](dialect, extension)
+      end)
+    end
+end
+
+--- @type vim.filetype.mapfn
+function M.def(_, bufnr)
+  if vim.g.filetype_def == 'modula2' or is_modula2(bufnr) then
+    return modula2(bufnr)
+  end
+
+  if vim.g.filetype_def then
+    return vim.g.filetype_def
+  end
+  return 'def'
+end
+
 --- @type vim.filetype.mapfn
 function M.e(_, bufnr)
   if vim.g.filetype_euphoria then
@@ -617,6 +666,31 @@ function M.hw(_, bufnr)
     return 'php'
   end
   return 'virata'
+end
+
+-- This function checks for an assembly comment or a SWIG keyword or verbatim
+-- block in the first 50 lines.
+-- If not found, assume Progress.
+--- @type vim.filetype.mapfn
+function M.i(path, bufnr)
+  if vim.g.filetype_i then
+    return vim.g.filetype_i
+  end
+
+  -- These include the leading '%' sign
+  local ft_swig_keywords =
+    [[^\s*%\%(addmethods\|apply\|beginfile\|clear\|constant\|define\|echo\|enddef\|endoffile\|extend\|feature\|fragment\|ignore\|import\|importfile\|include\|includefile\|inline\|insert\|keyword\|module\|name\|namewarn\|native\|newobject\|parms\|pragma\|rename\|template\|typedef\|typemap\|types\|varargs\|warn\)]]
+  -- This is the start/end of a block that is copied literally to the processor file (C/C++)
+  local ft_swig_verbatim_block_start = '^%s*%%{'
+
+  for _, line in ipairs(getlines(bufnr, 1, 50)) do
+    if line:find('^%s*;') or line:find('^%*') then
+      return M.asm(path, bufnr)
+    elseif matchregex(line, ft_swig_keywords) or line:find(ft_swig_verbatim_block_start) then
+      return 'swig'
+    end
+  end
+  return 'progress'
 end
 
 --- @type vim.filetype.mapfn
@@ -881,14 +955,16 @@ end
 --- Determine if *.mod is ABB RAPID, LambdaProlog, Modula-2, Modsim III or go.mod
 --- @type vim.filetype.mapfn
 function M.mod(path, bufnr)
+  if vim.g.filetype_mod == 'modula2' or is_modula2(bufnr) then
+    return modula2(bufnr)
+  end
+
   if vim.g.filetype_mod then
     return vim.g.filetype_mod
   elseif matchregex(path, [[\c\<go\.mod$]]) then
     return 'gomod'
   elseif is_lprolog(bufnr) then
     return 'lprolog'
-  elseif matchregex(nextnonblank(bufnr, 1), [[\%(\<MODULE\s\+\w\+\s*;\|^\s*(\*\)]]) then
-    return 'modula2'
   elseif is_rapid(bufnr) then
     return 'rapid'
   end
@@ -1014,26 +1090,6 @@ function M.printcap(ptcap_type)
       vim.b[bufnr].ptcap_type = ptcap_type
     end
   end
-end
-
--- This function checks for an assembly comment in the first ten lines.
--- If not found, assume Progress.
---- @type vim.filetype.mapfn
-function M.progress_asm(path, bufnr)
-  if vim.g.filetype_i then
-    return vim.g.filetype_i
-  end
-
-  for _, line in ipairs(getlines(bufnr, 1, 10)) do
-    if line:find('^%s*;') or line:find('^/%*') then
-      return M.asm(path, bufnr)
-    elseif not line:find('^%s*$') or line:find('^/%*') then
-      -- Not an empty line: doesn't look like valid assembly code
-      -- or it looks like a Progress /* comment.
-      break
-    end
-  end
-  return 'progress'
 end
 
 --- @type vim.filetype.mapfn
@@ -1525,12 +1581,26 @@ function M.v(_, bufnr)
     -- Filetype was already detected
     return
   end
+  if vim.g.filetype_v then
+    return vim.g.filetype_v
+  end
+  local in_comment = 0
   for _, line in ipairs(getlines(bufnr, 1, 200)) do
-    if not line:find('^%s*/') then
-      if findany(line, { ';%s*$', ';%s*/' }) then
-        return 'verilog'
-      elseif findany(line, { '%.%s*$', '%.%s*%(%*' }) then
+    if line:find('^%s*/%*') then
+      in_comment = 1
+    end
+    if in_comment == 1 then
+      if line:find('%*/') then
+        in_comment = 0
+      end
+    elseif not line:find('^%s*//') then
+      if
+        line:find('%.%s*$') and not line:find('/[/*]')
+        or line:find('%(%*') and not line:find('/[/*].*%(%*')
+      then
         return 'coq'
+      elseif findany(line, { ';%s*$', ';%s*/[/*]' }) then
+        return 'verilog'
       end
     end
   end
@@ -1656,6 +1726,7 @@ local patterns_hashbang = {
   ['^\\%(rexx\\|regina\\)\\>'] = { 'rexx', { vim_regex = true } },
   ['^janet\\>'] = { 'janet', { vim_regex = true } },
   ['^dart\\>'] = { 'dart', { vim_regex = true } },
+  ['^execlineb\\>'] = { 'execline', { vim_regex = true } },
 }
 
 ---@private

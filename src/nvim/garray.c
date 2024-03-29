@@ -12,7 +12,7 @@
 #include "nvim/strings.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "garray.c.generated.h"  // IWYU pragma: export
+# include "garray.c.generated.h"
 #endif
 
 /// Clear an allocated growing array.
@@ -216,4 +216,13 @@ void ga_concat_len(garray_T *const gap, const char *restrict s, const size_t len
 void ga_append(garray_T *gap, uint8_t c)
 {
   GA_APPEND(uint8_t, gap, c);
+}
+
+void *ga_append_via_ptr(garray_T *gap, size_t item_size)
+{
+  if ((int)item_size != gap->ga_itemsize) {
+    WLOG("wrong item size (%zu), should be %d", item_size, gap->ga_itemsize);
+  }
+  ga_grow(gap, 1);
+  return ((char *)gap->ga_data) + (item_size * (size_t)gap->ga_len++);
 }
