@@ -1,8 +1,10 @@
-local helpers = require('test.functional.helpers')(after_each)
-local child_session = require('test.functional.terminal.helpers')
-local ok = helpers.ok
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 
-if helpers.skip(helpers.is_os('win')) then
+local tt = require('test.functional.testterm')
+local ok = t.ok
+
+if t.skip(t.is_os('win')) then
   return
 end
 
@@ -11,9 +13,9 @@ describe('api', function()
   local socket_name = './Xtest_functional_api.sock'
 
   before_each(function()
-    helpers.clear()
+    n.clear()
     os.remove(socket_name)
-    screen = child_session.setup_child_nvim({
+    screen = tt.setup_child_nvim({
       '-u',
       'NONE',
       '-i',
@@ -21,7 +23,7 @@ describe('api', function()
       '--cmd',
       'colorscheme vim',
       '--cmd',
-      helpers.nvim_set .. ' notermguicolors',
+      n.nvim_set .. ' notermguicolors',
     })
   end)
   after_each(function()
@@ -31,7 +33,7 @@ describe('api', function()
   it('qa! RPC request during insert-mode', function()
     screen:expect {
       grid = [[
-      {1: }                                                 |
+      ^                                                  |
       {4:~                                                 }|*4
                                                         |
       {3:-- TERMINAL --}                                    |
@@ -39,23 +41,23 @@ describe('api', function()
     }
 
     -- Start the socket from the child nvim.
-    child_session.feed_data(":echo serverstart('" .. socket_name .. "')\n")
+    tt.feed_data(":echo serverstart('" .. socket_name .. "')\n")
 
     -- Wait for socket creation.
     screen:expect([[
-      {1: }                                                 |
+      ^                                                  |
       {4:~                                                 }|*4
       ]] .. socket_name .. [[                       |
       {3:-- TERMINAL --}                                    |
     ]])
 
-    local socket_session1 = helpers.connect(socket_name)
-    local socket_session2 = helpers.connect(socket_name)
+    local socket_session1 = n.connect(socket_name)
+    local socket_session2 = n.connect(socket_name)
 
-    child_session.feed_data('i[tui] insert-mode')
+    tt.feed_data('i[tui] insert-mode')
     -- Wait for stdin to be processed.
     screen:expect([[
-      [tui] insert-mode{1: }                                |
+      [tui] insert-mode^                                 |
       {4:~                                                 }|*4
       {3:-- INSERT --}                                      |
       {3:-- TERMINAL --}                                    |
@@ -71,7 +73,7 @@ describe('api', function()
       [tui] insert-mode                                 |
       [socket 1] this is more t                         |
       han 25 columns                                    |
-      [socket 2] input{1: }                                 |
+      [socket 2] input^                                  |
       {4:~                        }                         |
       {3:-- INSERT --}                                      |
       {3:-- TERMINAL --}                                    |

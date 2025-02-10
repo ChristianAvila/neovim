@@ -1,8 +1,9 @@
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local exec = helpers.exec
-local feed = helpers.feed
+
+local clear = n.clear
+local exec = n.exec
+local feed = n.feed
 
 before_each(clear)
 
@@ -11,7 +12,6 @@ describe('tabline', function()
 
   before_each(function()
     screen = Screen.new(50, 7)
-    screen:attach()
   end)
 
   -- oldtest: Test_tabline_showcmd()

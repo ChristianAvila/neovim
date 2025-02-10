@@ -110,7 +110,8 @@ local tests = {}
 
 function tests.basic_init()
   skeleton {
-    on_init = function(_)
+    on_init = function(params)
+      assert_eq(params.workDoneToken, '1')
       return {
         capabilities = {
           textDocumentSync = protocol.TextDocumentSyncKind.None,
@@ -378,6 +379,21 @@ function tests.check_forward_content_modified()
     body = function()
       expect_request('error_code_test', function()
         return { code = -32801 }, nil, { method = 'error_code_test', client_id = 1 }
+      end)
+      expect_notification('finish')
+      notify('finish')
+    end,
+  }
+end
+
+function tests.check_forward_server_cancelled()
+  skeleton {
+    on_init = function()
+      return { capabilities = {} }
+    end,
+    body = function()
+      expect_request('error_code_test', function()
+        return { code = -32802 }, nil, { method = 'error_code_test', client_id = 1 }
       end)
       expect_notification('finish')
       notify('finish')
@@ -931,6 +947,48 @@ function tests.basic_formatting()
     body = function()
       notify('start')
       expect_request('textDocument/formatting', function()
+        return nil, {}
+      end)
+      notify('shutdown')
+    end,
+  }
+end
+
+function tests.range_formatting()
+  skeleton {
+    on_init = function()
+      return {
+        capabilities = {
+          documentFormattingProvider = true,
+          documentRangeFormattingProvider = true,
+        },
+      }
+    end,
+    body = function()
+      notify('start')
+      expect_request('textDocument/rangeFormatting', function()
+        return nil, {}
+      end)
+      notify('shutdown')
+    end,
+  }
+end
+
+function tests.ranges_formatting()
+  skeleton {
+    on_init = function()
+      return {
+        capabilities = {
+          documentFormattingProvider = true,
+          documentRangeFormattingProvider = {
+            rangesSupport = true,
+          },
+        },
+      }
+    end,
+    body = function()
+      notify('start')
+      expect_request('textDocument/rangesFormatting', function()
         return nil, {}
       end)
       notify('shutdown')

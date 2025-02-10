@@ -1,13 +1,15 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 local os = require('os')
-local clear, feed, insert = helpers.clear, helpers.feed, helpers.insert
-local command, exec = helpers.command, helpers.exec
-local eval = helpers.eval
-local feed_command, eq = helpers.feed_command, helpers.eq
-local fn = helpers.fn
-local api = helpers.api
-local exec_lua = helpers.exec_lua
+
+local clear, feed, insert = n.clear, n.feed, n.insert
+local command, exec = n.command, n.exec
+local eval = n.eval
+local feed_command, eq = n.feed_command, t.eq
+local fn = n.fn
+local api = n.api
+local exec_lua = n.exec_lua
 
 describe('colorscheme compatibility', function()
   before_each(function()
@@ -30,13 +32,7 @@ describe('highlight: `:syntax manual`', function()
   before_each(function()
     clear()
     screen = Screen.new(20, 5)
-    screen:attach()
     -- syntax highlight for vimscript's "echo"
-    screen:set_default_attr_ids({
-      [0] = { bold = true, foreground = Screen.colors.Blue },
-      [1] = { bold = true, foreground = Screen.colors.Brown },
-      [2] = { foreground = Screen.colors.Magenta1 },
-    })
   end)
 
   after_each(function()
@@ -57,8 +53,8 @@ describe('highlight: `:syntax manual`', function()
     command('bn')
     feed_command('bp')
     screen:expect([[
-      {1:^echo} {2:1}              |
-      {0:~                   }|*3
+      {15:^echo} {26:1}              |
+      {1:~                   }|*3
       :bp                 |
     ]])
   end)
@@ -79,8 +75,8 @@ describe('highlight: `:syntax manual`', function()
     feed_command('silent bp')
     eq('Xtest-functional-ui-highlight.tmp.vim', eval("fnamemodify(bufname('%'), ':t')"))
     screen:expect([[
-      {1:^echo} {2:1}              |
-      {0:~                   }|*3
+      {15:^echo} {26:1}              |
+      {1:~                   }|*3
       :silent bp          |
     ]])
   end)
@@ -92,29 +88,20 @@ describe('highlight defaults', function()
   before_each(function()
     clear()
     screen = Screen.new()
-    screen:set_default_attr_ids {
-      [0] = { bold = true, foreground = Screen.colors.Blue },
-      [1] = { reverse = true, bold = true },
-      [2] = { reverse = true },
-      [3] = { bold = true },
-      [4] = { bold = true, foreground = Screen.colors.SeaGreen },
-      [5] = { foreground = Screen.colors.Red1, background = Screen.colors.WebGreen },
-      [6] = { background = Screen.colors.Red1, foreground = Screen.colors.Grey100 },
-      [7] = { foreground = Screen.colors.Red },
-      [8] = { foreground = Screen.colors.Blue },
-      [9] = { italic = true },
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.Red, background = Screen.colors.WebGreen },
+      [101] = { italic = true },
     }
-    screen:attach()
   end)
 
   it('window status bar', function()
     feed_command('sp', 'vsp', 'vsp')
     screen:expect([[
       ^                    │                │               |
-      {0:~                   }│{0:~               }│{0:~              }|*5
-      {1:[No Name]            }{2:[No Name]        [No Name]      }|
+      {1:~                   }│{1:~               }│{1:~              }|*5
+      {3:[No Name]            }{2:[No Name]        [No Name]      }|
                                                            |
-      {0:~                                                    }|*4
+      {1:~                                                    }|*4
       {2:[No Name]                                            }|
       :vsp                                                 |
     ]])
@@ -122,11 +109,11 @@ describe('highlight defaults', function()
     feed('<c-w>j')
     screen:expect([[
                           │                │               |
-      {0:~                   }│{0:~               }│{0:~              }|*5
+      {1:~                   }│{1:~               }│{1:~              }|*5
       {2:[No Name]            [No Name]        [No Name]      }|
       ^                                                     |
-      {0:~                                                    }|*4
-      {1:[No Name]                                            }|
+      {1:~                                                    }|*4
+      {3:[No Name]                                            }|
       :vsp                                                 |
     ]])
     -- note that when moving to a window with small width nvim will increase
@@ -135,30 +122,30 @@ describe('highlight defaults', function()
     feed('<c-w>k<c-w>l')
     screen:expect([[
                           │^                    │           |
-      {0:~                   }│{0:~                   }│{0:~          }|*5
-      {2:[No Name]            }{1:[No Name]            }{2:[No Name]  }|
+      {1:~                   }│{1:~                   }│{1:~          }|*5
+      {2:[No Name]            }{3:[No Name]            }{2:[No Name]  }|
                                                            |
-      {0:~                                                    }|*4
+      {1:~                                                    }|*4
       {2:[No Name]                                            }|
       :vsp                                                 |
     ]])
     feed('<c-w>l')
     screen:expect([[
                           │           │^                    |
-      {0:~                   }│{0:~          }│{0:~                   }|*5
-      {2:[No Name]            [No Name]   }{1:[No Name]           }|
+      {1:~                   }│{1:~          }│{1:~                   }|*5
+      {2:[No Name]            [No Name]   }{3:[No Name]           }|
                                                            |
-      {0:~                                                    }|*4
+      {1:~                                                    }|*4
       {2:[No Name]                                            }|
       :vsp                                                 |
     ]])
     feed('<c-w>h<c-w>h')
     screen:expect([[
       ^                    │                    │           |
-      {0:~                   }│{0:~                   }│{0:~          }|*5
-      {1:[No Name]            }{2:[No Name]            [No Name]  }|
+      {1:~                   }│{1:~                   }│{1:~          }|*5
+      {3:[No Name]            }{2:[No Name]            [No Name]  }|
                                                            |
-      {0:~                                                    }|*4
+      {1:~                                                    }|*4
       {2:[No Name]                                            }|
       :vsp                                                 |
     ]])
@@ -169,8 +156,8 @@ describe('highlight defaults', function()
     screen:try_resize(53, 4)
     screen:expect([[
       ^                                                     |
-      {0:~                                                    }|*2
-      {3:-- INSERT --}                                         |
+      {1:~                                                    }|*2
+      {5:-- INSERT --}                                         |
     ]])
   end)
 
@@ -178,7 +165,7 @@ describe('highlight defaults', function()
     screen:try_resize(53, 4)
     screen:expect([[
       ^                                                     |
-      {0:~                                                    }|*2
+      {1:~                                                    }|*2
                                                            |
     ]])
   end)
@@ -187,10 +174,10 @@ describe('highlight defaults', function()
     screen:try_resize(53, 4)
     feed(':ls<cr>')
     screen:expect([[
-      {1:                                                     }|
+      {3:                                                     }|
       :ls                                                  |
         1 %a   "[No Name]"                    line 1       |
-      {4:Press ENTER or type command to continue}^              |
+      {6:Press ENTER or type command to continue}^              |
     ]])
     feed('<cr>') --  skip the "Press ENTER..." state or tests will hang
   end)
@@ -201,7 +188,7 @@ describe('highlight defaults', function()
     feed('i')
     screen:expect([[
       ^                                                     |
-      {0:~                                                    }|*2
+      {1:~                                                    }|*2
       -- INSERT --                                         |
     ]])
     feed('<esc>')
@@ -210,8 +197,8 @@ describe('highlight defaults', function()
     feed('i')
     screen:expect([[
       ^                                                     |
-      {0:~                                                    }|*2
-      {5:-- INSERT --}                                         |
+      {1:~                                                    }|*2
+      {100:-- INSERT --}                                         |
     ]])
   end)
 
@@ -221,8 +208,8 @@ describe('highlight defaults', function()
     feed_command('hi link TmpKeyword ErrorMsg')
     insert('neovim')
     screen:expect([[
-      {6:neovi^m}                                               |
-      {0:~                                                    }|*2
+      {9:neovi^m}                                               |
+      {1:~                                                    }|*2
                                                            |
     ]])
     feed_command(
@@ -231,7 +218,7 @@ describe('highlight defaults', function()
     )
     screen:expect([[
       neovi^m                                               |
-      {0:~                                                    }|*2
+      {1:~                                                    }|*2
                                                            |
     ]])
   end)
@@ -240,19 +227,16 @@ describe('highlight defaults', function()
     screen:try_resize(53, 4)
     screen:expect([[
       ^                                                     |
-      {0:~                                                    }|*2
+      {1:~                                                    }|*2
                                                            |
     ]])
     feed_command('hi NonTextAlt guifg=Red')
     feed_command('hi! link NonText NonTextAlt')
-    screen:expect(
-      [[
+    screen:expect([[
       ^                                                     |
-      {0:~                                                    }|*2
+      {19:~                                                    }|*2
       :hi! link NonText NonTextAlt                         |
-    ]],
-      { [0] = { foreground = Screen.colors.Red } }
-    )
+    ]])
   end)
 
   it('Cursor after `:hi clear|syntax reset` #6508', function()
@@ -266,47 +250,48 @@ describe('highlight defaults', function()
     feed_command('set listchars=space:.,tab:>-,trail:*,eol:¬ list')
     insert('   ne \t o\tv  im  ')
     screen:expect([[
-      ne{7:.>----.}o{7:>-----}v{7:..}im{7:*^*¬}                             |
-      {7:~                                                    }|*2
+      ne{19:.>----.}o{19:>-----}v{19:..}im{19:*^*¬}                             |
+      {19:~                                                    }|*2
                                                            |
     ]])
     feed_command('highlight Whitespace gui=NONE guifg=#0000FF')
     screen:expect([[
-      ne{8:.>----.}o{8:>-----}v{8:..}im{8:*^*}{7:¬}                             |
-      {7:~                                                    }|*2
+      ne{18:.>----.}o{18:>-----}v{18:..}im{18:*^*}{19:¬}                             |
+      {19:~                                                    }|*2
       :highlight Whitespace gui=NONE guifg=#0000FF         |
     ]])
   end)
 
   it('are sent to UIs', function()
     screen:try_resize(53, 4)
+
     screen:expect {
       grid = [[
       ^                                                     |
-      {0:~                                                    }|*2
+      {1:~                                                    }|*2
                                                            |
     ]],
-      hl_groups = { EndOfBuffer = 0, MsgSeparator = 1 },
+      hl_groups = { EndOfBuffer = 1, MsgSeparator = 3 },
     }
 
     command('highlight EndOfBuffer gui=italic')
     screen:expect {
       grid = [[
       ^                                                     |
-      {9:~                                                    }|*2
+      {101:~                                                    }|*2
                                                            |
     ]],
-      hl_groups = { EndOfBuffer = 9, MsgSeparator = 1 },
+      hl_groups = { EndOfBuffer = 101, MsgSeparator = 3 },
     }
 
     command('highlight clear EndOfBuffer')
     screen:expect {
       grid = [[
       ^                                                     |
-      {0:~                                                    }|*2
+      {1:~                                                    }|*2
                                                            |
     ]],
-      hl_groups = { EndOfBuffer = 0, MsgSeparator = 1 },
+      hl_groups = { EndOfBuffer = 1, MsgSeparator = 3 },
     }
   end)
 end)
@@ -316,15 +301,6 @@ describe('highlight', function()
 
   it('Visual', function()
     local screen = Screen.new(45, 5)
-    screen:attach()
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.Black, background = Screen.colors.LightGrey },
-      [2] = { bold = true, foreground = Screen.colors.Blue },
-      [3] = { bold = true },
-      [4] = { reverse = true, bold = true },
-      [5] = { reverse = true },
-      [6] = { background = Screen.colors.Grey90 },
-    })
     insert([[
       line1 foo bar
     abcdefghijklmnopqrs
@@ -337,137 +313,135 @@ describe('highlight', function()
     command('set guicursor=a:block-blinkon0')
     feed('V')
     screen:expect([[
-      {1:  }^l{1:ine1 foo bar}       │{1:  line1 foo bar}       |
+      {17:  }^l{17:ine1 foo bar}       │{17:  line1 foo bar}       |
       abcdefghijklmnopqrs   │abcdefghijklmnopqrs   |
       ABCDEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL LINE --}                            |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL LINE --}                            |
     ]])
 
     feed('<Esc>$vhhh')
     screen:expect([[
-        line1 foo^ {1:bar}       │  line1 foo{1: bar}       |
+        line1 foo^ {17:bar}       │  line1 foo{17: bar}       |
       abcdefghijklmnopqrs   │abcdefghijklmnopqrs   |
       ABCDEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL --}                                 |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL --}                                 |
     ]])
 
     -- Vertical cursor: highlights char-at-cursor. #8983
     command('set guicursor=a:block-blinkon175')
     screen:expect([[
-        line1 foo{1:^ bar}       │  line1 foo{1: bar}       |
+        line1 foo{17:^ bar}       │  line1 foo{17: bar}       |
       abcdefghijklmnopqrs   │abcdefghijklmnopqrs   |
       ABCDEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL --}                                 |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL --}                                 |
     ]])
 
     command('set selection=exclusive')
     screen:expect([[
-        line1 foo{1:^ ba}r       │  line1 foo{1: ba}r       |
+        line1 foo{17:^ ba}r       │  line1 foo{17: ba}r       |
       abcdefghijklmnopqrs   │abcdefghijklmnopqrs   |
       ABCDEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL --}                                 |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL --}                                 |
     ]])
 
     feed('o')
     screen:expect([[
-        line1 foo{1: ba}^r       │  line1 foo{1: ba}r       |
+        line1 foo{17: ba}^r       │  line1 foo{17: ba}r       |
       abcdefghijklmnopqrs   │abcdefghijklmnopqrs   |
       ABCDEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL --}                                 |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL --}                                 |
     ]])
 
     feed('V')
     screen:expect([[
-      {1:  line1 foo ba^r}       │{1:  line1 foo bar}       |
+      {17:  line1 foo ba^r}       │{17:  line1 foo bar}       |
       abcdefghijklmnopqrs   │abcdefghijklmnopqrs   |
       ABCDEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL LINE --}                            |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL LINE --}                            |
     ]])
 
     command('set cursorcolumn')
     feed('<C-V>')
     screen:expect([[
-        line1 foo{1: ba}^r       │  line1 foo{1: ba}r       |
-      abcdefghijklmn{6:o}pqrs   │abcdefghijklmnopqrs   |
-      ABCDEFGHIJKLMN{6:O}PQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL BLOCK --}                           |
+        line1 foo{17: ba}^r       │  line1 foo{17: ba}r       |
+      abcdefghijklmn{21:o}pqrs   │abcdefghijklmnopqrs   |
+      ABCDEFGHIJKLMN{21:O}PQRS   │ABCDEFGHIJKLMNOPQRS   |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL BLOCK --}                           |
     ]])
 
     command('set selection&')
     screen:expect([[
-        line1 foo{1: ba^r}       │  line1 foo{1: bar}       |
-      abcdefghijklmn{6:o}pqrs   │abcdefghijklmnopqrs   |
-      ABCDEFGHIJKLMN{6:O}PQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL BLOCK --}                           |
+        line1 foo{17: ba^r}       │  line1 foo{17: bar}       |
+      abcdefghijklmn{21:o}pqrs   │abcdefghijklmnopqrs   |
+      ABCDEFGHIJKLMN{21:O}PQRS   │ABCDEFGHIJKLMNOPQRS   |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL BLOCK --}                           |
     ]])
 
     feed('^')
     screen:expect([[
-        {1:^line1 foo }bar       │  {1:line1 foo }bar       |
-      ab{6:c}defghijklmnopqrs   │abcdefghijklmnopqrs   |
-      AB{6:C}DEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL BLOCK --}                           |
+        {17:^line1 foo }bar       │  {17:line1 foo }bar       |
+      ab{21:c}defghijklmnopqrs   │abcdefghijklmnopqrs   |
+      AB{21:C}DEFGHIJKLMNOPQRS   │ABCDEFGHIJKLMNOPQRS   |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL BLOCK --}                           |
     ]])
 
     feed('2j')
     screen:expect([[
-        {1:line1 foo }bar       │  {1:line1 foo }bar       |
-      ab{1:cdefghijkl}mnopqrs   │ab{1:cdefghijkl}mnopqrs   |
-      AB{1:^CDEFGHIJKL}MNOPQRS   │AB{1:CDEFGHIJKL}MNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL BLOCK --}                           |
+        {17:line1 foo }bar       │  {17:line1 foo }bar       |
+      ab{17:cdefghijkl}mnopqrs   │ab{17:cdefghijkl}mnopqrs   |
+      AB{17:^CDEFGHIJKL}MNOPQRS   │AB{17:CDEFGHIJKL}MNOPQRS   |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL BLOCK --}                           |
     ]])
 
     command('set nocursorcolumn')
     feed('O')
     screen:expect([[
-        {1:line1 foo }bar       │  {1:line1 foo }bar       |
-      ab{1:cdefghijkl}mnopqrs   │ab{1:cdefghijkl}mnopqrs   |
-      AB{1:CDEFGHIJK^L}MNOPQRS   │AB{1:CDEFGHIJKL}MNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL BLOCK --}                           |
+        {17:line1 foo }bar       │  {17:line1 foo }bar       |
+      ab{17:cdefghijkl}mnopqrs   │ab{17:cdefghijkl}mnopqrs   |
+      AB{17:CDEFGHIJK^L}MNOPQRS   │AB{17:CDEFGHIJKL}MNOPQRS   |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL BLOCK --}                           |
     ]])
 
     command('set selection=exclusive')
     screen:expect([[
-        {1:line1 foo} bar       │  {1:line1 foo} bar       |
-      ab{1:cdefghijk}lmnopqrs   │ab{1:cdefghijk}lmnopqrs   |
-      AB{1:CDEFGHIJK}^LMNOPQRS   │AB{1:CDEFGHIJK}LMNOPQRS   |
-      {4:[No Name] [+]          }{5:[No Name] [+]         }|
-      {3:-- VISUAL BLOCK --}                           |
+        {17:line1 foo} bar       │  {17:line1 foo} bar       |
+      ab{17:cdefghijk}lmnopqrs   │ab{17:cdefghijk}lmnopqrs   |
+      AB{17:CDEFGHIJK}^LMNOPQRS   │AB{17:CDEFGHIJK}LMNOPQRS   |
+      {3:[No Name] [+]          }{2:[No Name] [+]         }|
+      {5:-- VISUAL BLOCK --}                           |
     ]])
   end)
 
   it('cterm=standout gui=standout', function()
     local screen = Screen.new(20, 5)
-    screen:attach()
-    screen:set_default_attr_ids({
-      [1] = { bold = true, foreground = Screen.colors.Blue1 },
-      [2] = {
-        standout = true,
-        bold = true,
-        underline = true,
-        background = Screen.colors.Gray90,
+    screen:add_extra_attr_ids {
+      [100] = {
         foreground = Screen.colors.Blue1,
+        bold = true,
+        background = Screen.colors.Grey90,
+        underline = true,
+        standout = true,
       },
-      [3] = { standout = true, underline = true, background = Screen.colors.Gray90 },
-    })
+      [101] = { underline = true, standout = true, background = Screen.colors.Grey90 },
+    }
     feed_command('hi CursorLine cterm=standout,underline gui=standout,underline')
     feed_command('set cursorline')
     feed_command('set listchars=space:.,eol:¬,tab:>-,extends:>,precedes:<,trail:* list')
     feed('i\t abcd <cr>\t abcd <cr><esc>k')
     screen:expect([[
     {1:>-------.}abcd{1:*¬}     |
-    {2:^>-------.}{3:abcd}{2:*¬}{3:     }|
+    {100:^>-------.}{101:abcd}{100:*¬}{101:     }|
     {1:¬}                   |
     {1:~                   }|
                         |
@@ -476,7 +450,6 @@ describe('highlight', function()
 
   it('strikethrough', function()
     local screen = Screen.new(25, 6)
-    screen:attach()
     feed_command('syntax on')
     feed_command('syn keyword TmpKeyword foo')
     feed_command('hi! Awesome cterm=strikethrough gui=strikethrough')
@@ -504,18 +477,14 @@ describe('highlight', function()
 
   it('nocombine', function()
     local screen = Screen.new(25, 6)
-    screen:set_default_attr_ids {
-      [1] = { foreground = Screen.colors.SlateBlue, underline = true },
-      [2] = { bold = true, foreground = Screen.colors.Blue1 },
-      [3] = { underline = true, reverse = true, foreground = Screen.colors.SlateBlue },
-      [4] = {
-        background = Screen.colors.Yellow,
-        reverse = true,
+    screen:add_extra_attr_ids {
+      [100] = { underline = true, reverse = true, foreground = Screen.colors.SlateBlue },
+      [101] = {
         foreground = Screen.colors.SlateBlue,
+        reverse = true,
+        background = Screen.colors.Yellow,
       },
-      [5] = { foreground = Screen.colors.Red },
     }
-    screen:attach()
     feed_command('syntax on')
     feed_command('hi! Underlined cterm=underline gui=underline')
     feed_command('syn keyword Underlined foobar')
@@ -526,9 +495,9 @@ describe('highlight', function()
       ]])
     screen:expect {
       grid = [[
-      {1:foobar}                   |*2
+      {28:foobar}                   |*2
       ^                         |
-      {2:~                        }|*2
+      {1:~                        }|*2
                                |
     ]],
     }
@@ -536,28 +505,27 @@ describe('highlight', function()
     feed('/foo')
     screen:expect {
       grid = [[
-      {3:foo}{1:bar}                   |
-      {4:foo}{1:bar}                   |
+      {100:foo}{28:bar}                   |
+      {101:foo}{28:bar}                   |
                                |
-      {2:~                        }|*2
+      {1:~                        }|*2
       /foo^                     |
     ]],
     }
     feed('<cr>')
     screen:expect {
       grid = [[
-      {4:^foo}{1:bar}                   |
-      {4:foo}{1:bar}                   |
+      {101:^foo}{28:bar}                   |
+      {101:foo}{28:bar}                   |
                                |
-      {2:~                        }|*2
-      {5:search hit...uing at TOP} |
+      {1:~                        }|*2
+      {19:search hit...uing at TOP} |
     ]],
     }
   end)
 
   it('guisp (special/undercurl)', function()
     local screen = Screen.new(25, 10)
-    screen:attach()
     feed_command('syntax on')
     feed_command('syn keyword TmpKeyword neovim')
     feed_command('syn keyword TmpKeyword1 special')
@@ -610,7 +578,6 @@ describe('highlight', function()
 
   it("'diff', syntax and extmark #23722", function()
     local screen = Screen.new(25, 10)
-    screen:attach()
     exec([[
       new
       call setline(1, ['', '01234 6789'])
@@ -621,13 +588,13 @@ describe('highlight', function()
     ]])
     screen:expect(
       [[
-      {1:  }^                       |
+      {1:  }{5:^                       }|
       {1:  }{2:01}{3:234 67}{2:89}{5:             }|
       {4:~                        }|*2
       {7:[No Name] [+]            }|
-      {1:  }                       |
       {1:  }{6:-----------------------}|
-      {4:~                        }|
+      {1:  }{6:-----------------------}|
+      {1:  }                       |
       {8:[No Name]                }|
                                |
     ]],
@@ -656,48 +623,43 @@ describe("'listchars' highlight", function()
   before_each(function()
     clear()
     screen = Screen.new(20, 5)
-    screen:attach()
   end)
 
   it("'cursorline' and 'cursorcolumn'", function()
-    screen:set_default_attr_ids({
-      [0] = { bold = true, foreground = Screen.colors.Blue },
-      [1] = { background = Screen.colors.Grey90 },
-    })
     feed_command('highlight clear ModeMsg')
     feed_command('set cursorline')
     feed('i')
     screen:expect([[
-      {1:^                    }|
-      {0:~                   }|*3
+      {21:^                    }|
+      {1:~                   }|*3
       -- INSERT --        |
     ]])
     feed('abcdefg<cr>kkasdf')
     screen:expect([[
       abcdefg             |
-      {1:kkasdf^              }|
-      {0:~                   }|*2
+      {21:kkasdf^              }|
+      {1:~                   }|*2
       -- INSERT --        |
     ]])
     feed('<esc>')
     screen:expect([[
       abcdefg             |
-      {1:kkasd^f              }|
-      {0:~                   }|*2
+      {21:kkasd^f              }|
+      {1:~                   }|*2
                           |
     ]])
     feed_command('set nocursorline')
     screen:expect([[
       abcdefg             |
       kkasd^f              |
-      {0:~                   }|*2
+      {1:~                   }|*2
       :set nocursorline   |
     ]])
     feed('k')
     screen:expect([[
       abcde^fg             |
       kkasdf              |
-      {0:~                   }|*2
+      {1:~                   }|*2
       :set nocursorline   |
     ]])
     feed('jjji<cr><cr><cr><esc>')
@@ -711,42 +673,27 @@ describe("'listchars' highlight", function()
     feed_command('set cursorcolumn')
     feed('kkiabcdefghijk<esc>hh')
     screen:expect([[
-      kkasd   {1: }           |
-      {1:abcdefgh^ijk         }|
-              {1: }           |
-      f       {1: }           |
+      kkasd   {21: }           |
+      {21:abcdefgh^ijk         }|
+              {21: }           |
+      f       {21: }           |
                           |
     ]])
     feed('khh')
     screen:expect([[
-      {1:kk^asd               }|
-      ab{1:c}defghijk         |
-        {1: }                 |
-      f {1: }                 |
+      {21:kk^asd               }|
+      ab{21:c}defghijk         |
+        {21: }                 |
+      f {21: }                 |
                           |
     ]])
   end)
 
   it("'cursorline' and with 'listchars' option", function()
-    screen:set_default_attr_ids({
-      [1] = { background = Screen.colors.Grey90 },
-      [2] = {
-        foreground = Screen.colors.Red,
-        background = Screen.colors.Grey90,
-      },
-      [3] = {
-        background = Screen.colors.Grey90,
-        foreground = Screen.colors.Blue,
-        bold = true,
-      },
-      [4] = {
-        foreground = Screen.colors.Blue,
-        bold = true,
-      },
-      [5] = {
-        foreground = Screen.colors.Red,
-      },
-    })
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.Red, background = Screen.colors.Grey90 },
+      [101] = { foreground = Screen.colors.Blue1, bold = true, background = Screen.colors.Grey90 },
+    }
     feed_command('highlight clear ModeMsg')
     feed_command('highlight Whitespace guifg=#FF0000')
     feed_command('set cursorline')
@@ -754,73 +701,70 @@ describe("'listchars' highlight", function()
     feed_command('set listchars=space:.,eol:¬,tab:>-,extends:>,precedes:<,trail:* list')
     feed('i\t abcd <cr>\t abcd <cr><esc>k')
     screen:expect([[
-      {5:>-------.}abcd{5:*}{4:¬}     |
-      {2:^>-------.}{1:abcd}{2:*}{3:¬}{1:     }|
-      {4:¬}                   |
-      {4:~                   }|
+      {19:>-------.}abcd{19:*}{1:¬}     |
+      {100:^>-------.}{21:abcd}{100:*}{101:¬}{21:     }|
+      {1:¬}                   |
+      {1:~                   }|
                           |
     ]])
     feed('k')
     screen:expect([[
-      {2:^>-------.}{1:abcd}{2:*}{3:¬}{1:     }|
-      {5:>-------.}abcd{5:*}{4:¬}     |
-      {4:¬}                   |
-      {4:~                   }|
+      {100:^>-------.}{21:abcd}{100:*}{101:¬}{21:     }|
+      {19:>-------.}abcd{19:*}{1:¬}     |
+      {1:¬}                   |
+      {1:~                   }|
                           |
     ]])
     feed_command('set nocursorline')
     screen:expect([[
-      {5:^>-------.}abcd{5:*}{4:¬}     |
-      {5:>-------.}abcd{5:*}{4:¬}     |
-      {4:¬}                   |
-      {4:~                   }|
+      {19:^>-------.}abcd{19:*}{1:¬}     |
+      {19:>-------.}abcd{19:*}{1:¬}     |
+      {1:¬}                   |
+      {1:~                   }|
       :set nocursorline   |
     ]])
     feed_command('set nowrap')
     feed('ALorem ipsum dolor sit amet<ESC>0')
     screen:expect([[
-      {5:^>-------.}abcd{5:.}Lorem{4:>}|
-      {5:>-------.}abcd{5:*}{4:¬}     |
-      {4:¬}                   |
-      {4:~                   }|
+      {19:^>-------.}abcd{19:.}Lorem{1:>}|
+      {19:>-------.}abcd{19:*}{1:¬}     |
+      {1:¬}                   |
+      {1:~                   }|
                           |
     ]])
     feed_command('set cursorline')
     screen:expect([[
-      {2:^>-------.}{1:abcd}{2:.}{1:Lorem}{3:>}|
-      {5:>-------.}abcd{5:*}{4:¬}     |
-      {4:¬}                   |
-      {4:~                   }|
+      {100:^>-------.}{21:abcd}{100:.}{21:Lorem}{101:>}|
+      {19:>-------.}abcd{19:*}{1:¬}     |
+      {1:¬}                   |
+      {1:~                   }|
       :set cursorline     |
     ]])
     feed('$')
     screen:expect([[
-      {3:<}{1:r}{2:.}{1:sit}{2:.}{1:ame^t}{3:¬}{1:        }|
-      {4:<}                   |*2
-      {4:~                   }|
+      {101:<}{21:r}{100:.}{21:sit}{100:.}{21:ame^t}{101:¬}{21:        }|
+      {1:<}                   |*2
+      {1:~                   }|
       :set cursorline     |
     ]])
     feed('G')
     screen:expect([[
-      {5:>-------.}abcd{5:.}Lorem{4:>}|
-      {5:>-------.}abcd{5:*}{4:¬}     |
-      {3:^¬}{1:                   }|
-      {4:~                   }|
+      {19:>-------.}abcd{19:.}Lorem{1:>}|
+      {19:>-------.}abcd{19:*}{1:¬}     |
+      {101:^¬}{21:                   }|
+      {1:~                   }|
       :set cursorline     |
     ]])
   end)
 
   it("'listchar' with wrap", function()
-    screen:set_default_attr_ids({
-      [0] = { bold = true, foreground = Screen.colors.Blue },
-    })
     feed_command('set wrap')
     feed_command('set listchars=eol:¬,precedes:< list')
     feed('90ia<esc>')
     screen:expect([[
-      {0:<}aaaaaaaaaaaaaaaaaaa|
+      {1:<}aaaaaaaaaaaaaaaaaaa|
       aaaaaaaaaaaaaaaaaaaa|*2
-      aaaaaaaaa^a{0:¬}         |
+      aaaaaaaaa^a{1:¬}         |
                           |
     ]])
     feed('0')
@@ -832,16 +776,16 @@ describe("'listchars' highlight", function()
   end)
 
   it("'listchar' in visual mode", function()
-    screen:set_default_attr_ids({
-      [1] = { background = Screen.colors.Grey90 },
-      [2] = { foreground = Screen.colors.Red, background = Screen.colors.Grey90 },
-      [3] = { background = Screen.colors.Grey90, foreground = Screen.colors.Blue, bold = true },
-      [4] = { foreground = Screen.colors.Blue, bold = true },
-      [5] = { foreground = Screen.colors.Red },
-      [6] = { background = Screen.colors.LightGrey, foreground = Screen.colors.Black },
-      [7] = { background = Screen.colors.LightGrey, foreground = Screen.colors.Red },
-      [8] = { background = Screen.colors.LightGrey, foreground = Screen.colors.Blue, bold = true },
-    })
+    screen:add_extra_attr_ids {
+      [100] = {
+        foreground = Screen.colors.Blue1,
+        bold = true,
+        background = Screen.colors.LightGray,
+      },
+      [101] = { foreground = Screen.colors.Red, background = Screen.colors.Grey90 },
+      [102] = { foreground = Screen.colors.Blue1, bold = true, background = Screen.colors.Grey90 },
+      [103] = { foreground = Screen.colors.Red, background = Screen.colors.LightGray },
+    }
     command('highlight clear ModeMsg')
     command('highlight Whitespace guifg=#FF0000')
     command('set cursorline')
@@ -850,45 +794,42 @@ describe("'listchars' highlight", function()
     command('set listchars=space:.,eol:¬,tab:>-,extends:>,precedes:<,trail:* list')
     feed('i\t abcd <cr>\t abcd Lorem ipsum dolor sit amet<cr><esc>kkk0')
     screen:expect([[
-      {2:^>-------.}{1:abcd}{2:*}{3:¬}{1:     }|
-      {5:>-------.}abcd{5:.}Lorem{4:>}|
-      {4:¬}                   |
-      {4:~                   }|
+      {101:^>-------.}{21:abcd}{101:*}{102:¬}{21:     }|
+      {19:>-------.}abcd{19:.}Lorem{1:>}|
+      {1:¬}                   |
+      {1:~                   }|
                           |
     ]])
     feed('lllvj')
     screen:expect([[
-      {5:>-------.}a{6:bcd}{7:*}{8:¬}     |
-      {7:>-------.}{6:a}^bcd{5:.}Lorem{4:>}|
-      {4:¬}                   |
-      {4:~                   }|
+      {19:>-------.}a{17:bcd}{103:*}{100:¬}     |
+      {103:>-------.}{17:a}^bcd{19:.}Lorem{1:>}|
+      {1:¬}                   |
+      {1:~                   }|
       -- VISUAL --        |
     ]])
     feed('<esc>V')
     screen:expect([[
-      {5:>-------.}abcd{5:*}{4:¬}     |
-      {7:>-------.}{6:a}^b{6:cd}{7:.}{6:Lorem}{4:>}|
-      {4:¬}                   |
-      {4:~                   }|
+      {19:>-------.}abcd{19:*}{1:¬}     |
+      {103:>-------.}{17:a}^b{17:cd}{103:.}{17:Lorem}{1:>}|
+      {1:¬}                   |
+      {1:~                   }|
       -- VISUAL LINE --   |
     ]])
     feed('<esc>$')
     screen:expect([[
-      {4:<}                   |
-      {3:<}{1:r}{2:.}{1:sit}{2:.}{1:ame^t}{3:¬}{1:        }|
-      {4:<}                   |
-      {4:~                   }|
+      {1:<}                   |
+      {102:<}{21:r}{101:.}{21:sit}{101:.}{21:ame^t}{102:¬}{21:        }|
+      {1:<}                   |
+      {1:~                   }|
                           |
     ]])
   end)
 
   it("'cursorline' with :match", function()
-    screen:set_default_attr_ids({
-      [0] = { bold = true, foreground = Screen.colors.Blue },
-      [1] = { background = Screen.colors.Grey90 },
-      [2] = { foreground = Screen.colors.Red },
-      [3] = { foreground = Screen.colors.X11Green, background = Screen.colors.Red1 },
-    })
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.Lime, background = Screen.colors.Red },
+    }
     feed_command('highlight clear ModeMsg')
     feed_command('highlight Whitespace guifg=#FF0000')
     feed_command('highlight Error guifg=#00FF00')
@@ -896,19 +837,19 @@ describe("'listchars' highlight", function()
     feed('ia \t bc \t  <esc>')
     screen:expect([[
       a        bc      ^   |
-      {0:~                   }|*3
+      {1:~                   }|*3
                           |
     ]])
     feed_command('set listchars=space:.,eol:¬,tab:>-,extends:>,precedes:<,trail:* list')
     screen:expect([[
-      a{2:.>-----.}bc{2:*>---*^*}{0:¬} |
-      {0:~                   }|*3
+      a{19:.>-----.}bc{19:*>---*^*}{1:¬} |
+      {1:~                   }|*3
                           |
     ]])
     feed_command('match Error /\\s\\+$/')
     screen:expect([[
-      a{2:.>-----.}bc{3:*>---*^*}{0:¬} |
-      {0:~                   }|*3
+      a{19:.>-----.}bc{100:*>---*^*}{1:¬} |
+      {1:~                   }|*3
                           |
     ]])
   end)
@@ -919,49 +860,42 @@ describe('CursorLine and CursorLineNr highlights', function()
 
   it('overridden by Error, ColorColumn if fg not set', function()
     local screen = Screen.new(50, 5)
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.SlateBlue },
-      [2] = { bold = true, foreground = Screen.colors.Brown },
-      [3] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-      [4] = { foreground = Screen.colors.SlateBlue, background = Screen.colors.Gray90 },
-      [5] = { background = Screen.colors.Gray90 },
-      [6] = { bold = true, foreground = Screen.colors.Blue1 },
-      [7] = { background = Screen.colors.LightRed },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { background = Screen.colors.LightRed },
+      [101] = { foreground = Screen.colors.SlateBlue, background = Screen.colors.Grey90 },
+    }
 
     command('filetype on')
     command('syntax on')
     command('set cursorline ft=json')
     feed('i{<cr>"a" : abc // 10;<cr>}<cr><esc>')
     screen:expect([[
-      {1:{}                                                 |
-      "{2:a}" : {3:abc} {3:// 10;}                                  |
-      {1:}}                                                 |
-      {5:^                                                  }|
+      {16:{}                                                 |
+      "{15:a}" : {9:abc} {9:// 10;}                                  |
+      {16:}}                                                 |
+      {21:^                                                  }|
                                                         |
     ]])
 
     command('set colorcolumn=3')
     feed('i  <esc>')
     screen:expect([[
-      {1:{} {7: }                                               |
-      "{2:a}{7:"} : {3:abc} {3:// 10;}                                  |
-      {1:}} {7: }                                               |
-      {5: ^ }{7: }{5:                                               }|
+      {16:{} {100: }                                               |
+      "{15:a}{100:"} : {9:abc} {9:// 10;}                                  |
+      {16:}} {100: }                                               |
+      {21: ^ }{100: }{21:                                               }|
                                                         |
     ]])
   end)
 
   it("overridden by NonText in 'showbreak' characters", function()
     local screen = Screen.new(20, 5)
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.Yellow, background = Screen.colors.Blue },
-      [2] = { foreground = Screen.colors.Black, background = Screen.colors.White },
-      [3] = { foreground = Screen.colors.Yellow, background = Screen.colors.White },
-      [4] = { foreground = Screen.colors.Yellow },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.Yellow1 },
+      [101] = { foreground = Screen.colors.Yellow1, background = Screen.colors.Blue },
+      [102] = { foreground = Screen.colors.Grey0, background = Screen.colors.Grey100 },
+      [103] = { foreground = Screen.colors.Yellow1, background = Screen.colors.Grey100 },
+    }
 
     feed_command('set wrap cursorline')
     feed_command('set showbreak=>>>')
@@ -973,47 +907,45 @@ describe('CursorLine and CursorLineNr highlights', function()
     feed('30iø<esc>o<esc>30ia<esc>')
     screen:expect([[
       øøøøøøøøøøøøøøøøøøøø|
-      {1:>>>}øøøøøøøøøø       |
-      {2:aaaaaaaaaaaaaaaaaaaa}|
-      {1:>>>}{2:aaaaaaaaa^a       }|
+      {101:>>>}øøøøøøøøøø       |
+      {102:aaaaaaaaaaaaaaaaaaaa}|
+      {101:>>>}{102:aaaaaaaaa^a       }|
                           |
     ]])
     feed('k')
     screen:expect([[
-      {2:øøøøøøøøøøøøøøøøøøøø}|
-      {1:>>>}{2:øøøøøøøøø^ø       }|
+      {102:øøøøøøøøøøøøøøøøøøøø}|
+      {101:>>>}{102:øøøøøøøøø^ø       }|
       aaaaaaaaaaaaaaaaaaaa|
-      {1:>>>}aaaaaaaaaa       |
+      {101:>>>}aaaaaaaaaa       |
                           |
     ]])
     feed_command('highlight NonText guibg=NONE')
     screen:expect([[
-      {2:øøøøøøøøøøøøøøøøøøøø}|
-      {3:>>>}{2:øøøøøøøøø^ø       }|
+      {102:øøøøøøøøøøøøøøøøøøøø}|
+      {103:>>>}{102:øøøøøøøøø^ø       }|
       aaaaaaaaaaaaaaaaaaaa|
-      {4:>>>}aaaaaaaaaa       |
+      {100:>>>}aaaaaaaaaa       |
                           |
     ]])
     feed_command('set nocursorline')
     screen:expect([[
       øøøøøøøøøøøøøøøøøøøø|
-      {4:>>>}øøøøøøøøø^ø       |
+      {100:>>>}øøøøøøøøø^ø       |
       aaaaaaaaaaaaaaaaaaaa|
-      {4:>>>}aaaaaaaaaa       |
+      {100:>>>}aaaaaaaaaa       |
       :set nocursorline   |
     ]])
   end)
 
   it("'cursorlineopt' screenline", function()
     local screen = Screen.new(20, 5)
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.Black, background = Screen.colors.White },
-      [2] = { foreground = Screen.colors.Yellow },
-      [3] = { foreground = Screen.colors.Red, background = Screen.colors.Green },
-      [4] = { foreground = Screen.colors.Green, background = Screen.colors.Red },
-      [5] = { bold = true }, -- ModeMsg
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.Yellow },
+      [101] = { foreground = Screen.colors.Red, background = Screen.colors.WebGreen },
+      [102] = { foreground = Screen.colors.Black, background = Screen.colors.Grey100 },
+      [103] = { foreground = Screen.colors.WebGreen, background = Screen.colors.Red },
+    }
 
     command('set wrap cursorline cursorlineopt=screenline')
     command('set showbreak=>>>')
@@ -1029,130 +961,160 @@ describe('CursorLine and CursorLineNr highlights', function()
     -- CursorLine should not apply to 'showbreak' when 'cursorlineopt' contains "screenline"
     screen:expect([[
       øøøøøøøøøøøøøøøøøøøø|
-      {2:>>>}øøøøøøøøøø       |
+      {100:>>>}øøøøøøøøøø       |
       aaaaaaaaaaaaaaaaaaaa|
-      {2:>>>}{1:aaaaaaaaa^a       }|
+      {100:>>>}{102:aaaaaaaaa^a       }|
                           |
     ]])
     feed('gk')
     screen:expect([[
       øøøøøøøøøøøøøøøøøøøø|
-      {2:>>>}øøøøøøøøøø       |
-      {1:aaaaaaaaaaaa^aaaaaaaa}|
-      {2:>>>}aaaaaaaaaa       |
+      {100:>>>}øøøøøøøøøø       |
+      {102:aaaaaaaaaaaa^aaaaaaaa}|
+      {100:>>>}aaaaaaaaaa       |
                           |
     ]])
     feed('k')
     screen:expect([[
-      {1:øøøøøøøøøøøø^øøøøøøøø}|
-      {2:>>>}øøøøøøøøøø       |
+      {102:øøøøøøøøøøøø^øøøøøøøø}|
+      {100:>>>}øøøøøøøøøø       |
       aaaaaaaaaaaaaaaaaaaa|
-      {2:>>>}aaaaaaaaaa       |
+      {100:>>>}aaaaaaaaaa       |
                           |
     ]])
 
     -- CursorLineNr should not apply to line number when 'cursorlineopt' does not contain "number"
     command('set relativenumber numberwidth=2')
     screen:expect([[
-      {3:0 }{1:øøøøøøøøøøøø^øøøøøø}|
-      {3:  }{2:>>>}øøøøøøøøøøøø   |
-      {3:1 }aaaaaaaaaaaaaaaaaa|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {101:0 }{102:øøøøøøøøøøøø^øøøøøø}|
+      {101:  }{100:>>>}øøøøøøøøøøøø   |
+      {101:1 }aaaaaaaaaaaaaaaaaa|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
                           |
     ]])
 
     -- CursorLineNr should apply to line number when 'cursorlineopt' contains "number"
     command('set cursorlineopt+=number')
     screen:expect([[
-      {4:0 }{1:øøøøøøøøøøøø^øøøøøø}|
-      {3:  }{2:>>>}øøøøøøøøøøøø   |
-      {3:1 }aaaaaaaaaaaaaaaaaa|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {103:0 }{102:øøøøøøøøøøøø^øøøøøø}|
+      {101:  }{100:>>>}øøøøøøøøøøøø   |
+      {101:1 }aaaaaaaaaaaaaaaaaa|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
                           |
     ]])
     feed('gj')
     screen:expect([[
-      {4:0 }øøøøøøøøøøøøøøøøøø|
-      {3:  }{2:>>>}{1:øøøøøøøøø^øøø   }|
-      {3:1 }aaaaaaaaaaaaaaaaaa|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {103:0 }øøøøøøøøøøøøøøøøøø|
+      {101:  }{100:>>>}{102:øøøøøøøøø^øøø   }|
+      {101:1 }aaaaaaaaaaaaaaaaaa|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
                           |
     ]])
     feed('gj')
     screen:expect([[
-      {3:1 }øøøøøøøøøøøøøøøøøø|
-      {3:  }{2:>>>}øøøøøøøøøøøø   |
-      {4:0 }{1:aaaaaaaaaaaa^aaaaaa}|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {101:1 }øøøøøøøøøøøøøøøøøø|
+      {101:  }{100:>>>}øøøøøøøøøøøø   |
+      {103:0 }{102:aaaaaaaaaaaa^aaaaaa}|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
                           |
     ]])
     feed('gj')
     screen:expect([[
-      {3:1 }øøøøøøøøøøøøøøøøøø|
-      {3:  }{2:>>>}øøøøøøøøøøøø   |
-      {4:0 }aaaaaaaaaaaaaaaaaa|
-      {3:  }{2:>>>}{1:aaaaaaaaa^aaa   }|
+      {101:1 }øøøøøøøøøøøøøøøøøø|
+      {101:  }{100:>>>}øøøøøøøøøøøø   |
+      {103:0 }aaaaaaaaaaaaaaaaaa|
+      {101:  }{100:>>>}{102:aaaaaaaaa^aaa   }|
                           |
     ]])
 
     -- updated in Insert mode
     feed('I')
     screen:expect([[
-      {3:1 }øøøøøøøøøøøøøøøøøø|
-      {3:  }{2:>>>}øøøøøøøøøøøø   |
-      {4:0 }{1:^aaaaaaaaaaaaaaaaaa}|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {101:1 }øøøøøøøøøøøøøøøøøø|
+      {101:  }{100:>>>}øøøøøøøøøøøø   |
+      {103:0 }{102:^aaaaaaaaaaaaaaaaaa}|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
       {5:-- INSERT --}        |
     ]])
 
     feed('<Esc>gg')
     screen:expect([[
-      {4:0 }{1:^øøøøøøøøøøøøøøøøøø}|
-      {3:  }{2:>>>}øøøøøøøøøøøø   |
-      {3:1 }aaaaaaaaaaaaaaaaaa|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {103:0 }{102:^øøøøøøøøøøøøøøøøøø}|
+      {101:  }{100:>>>}øøøøøøøøøøøø   |
+      {101:1 }aaaaaaaaaaaaaaaaaa|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
                           |
     ]])
 
     command('inoremap <F2> <Cmd>call cursor(1, 1)<CR>')
     feed('A')
     screen:expect([[
-      {4:0 }øøøøøøøøøøøøøøøøøø|
-      {3:  }{2:>>>}{1:øøøøøøøøøøøø^   }|
-      {3:1 }aaaaaaaaaaaaaaaaaa|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {103:0 }øøøøøøøøøøøøøøøøøø|
+      {101:  }{100:>>>}{102:øøøøøøøøøøøø^   }|
+      {101:1 }aaaaaaaaaaaaaaaaaa|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
       {5:-- INSERT --}        |
     ]])
 
     feed('<F2>')
     screen:expect([[
-      {4:0 }{1:^øøøøøøøøøøøøøøøøøø}|
-      {3:  }{2:>>>}øøøøøøøøøøøø   |
-      {3:1 }aaaaaaaaaaaaaaaaaa|
-      {3:  }{2:>>>}aaaaaaaaaaaa   |
+      {103:0 }{102:^øøøøøøøøøøøøøøøøøø}|
+      {101:  }{100:>>>}øøøøøøøøøøøø   |
+      {101:1 }aaaaaaaaaaaaaaaaaa|
+      {101:  }{100:>>>}aaaaaaaaaaaa   |
       {5:-- INSERT --}        |
+    ]])
+  end)
+
+  -- oldtest: Test_cursorline_screenline_resize()
+  it("'cursorlineopt' screenline is updated on window resize", function()
+    local screen = Screen.new(75, 8)
+    exec([[
+      50vnew
+      call setline(1, repeat('xyz ', 30))
+      setlocal number cursorline cursorlineopt=screenline
+      normal! $
+    ]])
+    screen:expect([[
+      {8:  1 }xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz xy│                        |
+      {8:    }z xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz │{1:~                       }|
+      {8:    }{21:xyz xyz xyz xyz xyz xyz xyz^                   }│{1:~                       }|
+      {1:~                                                 }│{1:~                       }|*3
+      {3:[No Name] [+]                                      }{2:[No Name]               }|
+                                                                                 |
+    ]])
+    command('vertical resize -4')
+    screen:expect([[
+      {8:  1 }xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz xy│                            |
+      {8:    }z xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz │{1:~                           }|
+      {8:    }{21:xyz xyz xyz xyz xyz xyz xyz xyz xyz^       }│{1:~                           }|
+      {1:~                                             }│{1:~                           }|*3
+      {3:[No Name] [+]                                  }{2:[No Name]                   }|
+                                                                                 |
+    ]])
+    command('set cpoptions+=n')
+    screen:expect([[
+      {8:  1 }xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz xy│                            |
+      z xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz xyz │{1:~                           }|
+      {21:xyz xyz xyz xyz xyz xyz xyz xyz^               }│{1:~                           }|
+      {1:~                                             }│{1:~                           }|*3
+      {3:[No Name] [+]                                  }{2:[No Name]                   }|
+                                                                                 |
     ]])
   end)
 
   -- oldtest: Test_cursorline_after_yank()
   it('always updated. vim-patch:8.1.0849', function()
     local screen = Screen.new(50, 5)
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.SlateBlue },
-      [2] = { bold = true, foreground = Screen.colors.Brown },
-      [3] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-      [4] = { foreground = Screen.colors.SlateBlue, background = Screen.colors.Gray90 },
-      [5] = { background = Screen.colors.Gray90 },
-      [6] = { bold = true, foreground = Screen.colors.Blue1 },
-      [7] = { background = Screen.colors.LightRed },
-      [8] = { foreground = Screen.colors.Brown },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { background = Screen.colors.LightRed },
+      [101] = { foreground = Screen.colors.SlateBlue, background = Screen.colors.Grey90 },
+    }
     command('set cursorline relativenumber')
     command('call setline(1, ["","1","2","3",""])')
     feed('Gy3k')
     screen:expect([[
-      {2:  0 }{5:^1                                             }|
+      {15:  0 }{21:^1                                             }|
       {8:  1 }2                                             |
       {8:  2 }3                                             |
       {8:  3 }                                              |
@@ -1162,7 +1124,7 @@ describe('CursorLine and CursorLineNr highlights', function()
     screen:expect([[
       {8:  2 }1                                             |
       {8:  1 }2                                             |
-      {2:  0 }{5:^3                                             }|
+      {15:  0 }{21:^3                                             }|
       {8:  1 }                                              |
       4 lines yanked                                    |
     ]])
@@ -1171,38 +1133,24 @@ describe('CursorLine and CursorLineNr highlights', function()
   -- oldtest: Test_cursorline_with_visualmode()
   it('with visual area. vim-patch:8.1.1001', function()
     local screen = Screen.new(50, 5)
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.SlateBlue },
-      [2] = { bold = true, foreground = Screen.colors.Brown },
-      [3] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-      [4] = { foreground = Screen.colors.SlateBlue, background = Screen.colors.Gray90 },
-      [5] = { background = Screen.colors.Gray90 },
-      [6] = { bold = true, foreground = Screen.colors.Blue1 },
-      [7] = { background = Screen.colors.LightRed },
-      [8] = { foreground = Screen.colors.Brown },
-      [9] = { foreground = Screen.colors.Black, background = Screen.colors.LightGrey },
-      [10] = { bold = true },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.SlateBlue, background = Screen.colors.Grey90 },
+      [101] = { background = Screen.colors.LightRed },
+    }
     command('set cursorline')
     command('call setline(1, repeat(["abc"], 50))')
     feed('V<C-f>zbkkjk')
     screen:expect([[
-      {9:abc}                                               |
-      ^a{9:bc}                                               |
+      {17:abc}                                               |
+      ^a{17:bc}                                               |
       abc                                               |*2
-      {10:-- VISUAL LINE --}                                 |
+      {5:-- VISUAL LINE --}                                 |
     ]])
   end)
 
   -- oldtest: Test_cursorline_callback()
   it('is updated if cursor is moved up from timer vim-patch:8.2.4591', function()
     local screen = Screen.new(50, 8)
-    screen:set_default_attr_ids({
-      [1] = { background = Screen.colors.Gray90 }, -- CursorLine
-      [2] = { bold = true, foreground = Screen.colors.Blue1 }, -- NonText
-    })
-    screen:attach()
     exec([[
       call setline(1, ['aaaaa', 'bbbbb', 'ccccc', 'ddddd'])
       set cursorline
@@ -1219,8 +1167,8 @@ describe('CursorLine and CursorLineNr highlights', function()
       aaaaa                                             |
       bbbbb                                             |
       ccccc                                             |
-      {1:^ddddd                                             }|
-      {2:~                                                 }|*3
+      {21:^ddddd                                             }|
+      {1:~                                                 }|*3
                                                         |
     ]],
       timeout = 100,
@@ -1228,10 +1176,10 @@ describe('CursorLine and CursorLineNr highlights', function()
     screen:expect({
       grid = [[
       aaaaa                                             |
-      {1:^bbbbb                                             }|
+      {21:^bbbbb                                             }|
       ccccc                                             |
       ddddd                                             |
-      {2:~                                                 }|*3
+      {1:~                                                 }|*3
                                                         |
     ]],
     })
@@ -1239,18 +1187,10 @@ describe('CursorLine and CursorLineNr highlights', function()
 
   it('with split windows in diff mode', function()
     local screen = Screen.new(50, 12)
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.DarkBlue, background = Screen.colors.WebGray },
-      [2] = { bold = true, background = Screen.colors.Red },
-      [3] = { background = Screen.colors.LightMagenta },
-      [4] = { reverse = true },
-      [5] = { background = Screen.colors.LightBlue },
-      [6] = { background = Screen.colors.LightCyan1, bold = true, foreground = Screen.colors.Blue1 },
-      [7] = { background = Screen.colors.Red, foreground = Screen.colors.White },
-      [8] = { bold = true, foreground = Screen.colors.Blue1 },
-      [9] = { bold = true, reverse = true },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { background = Screen.colors.Plum1, underline = true },
+      [101] = { background = Screen.colors.Red1, bold = true, underline = true },
+    }
 
     command('hi CursorLine ctermbg=red ctermfg=white guibg=red guifg=white')
     command('set cursorline')
@@ -1264,26 +1204,26 @@ describe('CursorLine and CursorLineNr highlights', function()
     feed('<esc>gg')
     command('windo diffthis')
     screen:expect([[
-      {1:  }{7:line 1 some text       }│{1:  }{7:^line 1 some text      }|
-      {1:  }{3:line 2 mo}{2:Re text!}{3:      }│{1:  }{3:line 2 mo}{2:re text}{3:      }|
-      {1:  }{5:extra line!            }│{1:  }{6:----------------------}|
-      {1:  }extra line!            │{1:  }extra line!           |*2
-      {1:  }last line ...          │{1:  }last line ...         |
-      {1:  }                       │{1:  }                      |
-      {8:~                        }│{8:~                       }|*3
-      {4:[No Name] [+]             }{9:[No Name] [+]           }|
+      {7:  }{9:line 1 some text       }│{7:  }{9:^line 1 some text      }|
+      {7:  }{4:line 2 mo}{27:Re text!}{4:      }│{7:  }{4:line 2 mo}{27:re text}{4:      }|
+      {7:  }{22:extra line!            }│{7:  }{23:----------------------}|
+      {7:  }extra line!            │{7:  }extra line!           |*2
+      {7:  }last line ...          │{7:  }last line ...         |
+      {7:  }                       │{7:  }                      |
+      {1:~                        }│{1:~                       }|*3
+      {2:[No Name] [+]             }{3:[No Name] [+]           }|
                                                         |
     ]])
     feed('jjjjj')
     screen:expect([[
-      {1:  }line 1 some text       │{1:  }line 1 some text      |
-      {1:  }{3:line 2 mo}{2:Re text!}{3:      }│{1:  }{3:line 2 mo}{2:re text}{3:      }|
-      {1:  }{5:extra line!            }│{1:  }{6:----------------------}|
-      {1:  }extra line!            │{1:  }extra line!           |*2
-      {1:  }last line ...          │{1:  }last line ...         |
-      {1:  }{7:                       }│{1:  }{7:^                      }|
-      {8:~                        }│{8:~                       }|*3
-      {4:[No Name] [+]             }{9:[No Name] [+]           }|
+      {7:  }line 1 some text       │{7:  }line 1 some text      |
+      {7:  }{4:line 2 mo}{27:Re text!}{4:      }│{7:  }{4:line 2 mo}{27:re text}{4:      }|
+      {7:  }{22:extra line!            }│{7:  }{23:----------------------}|
+      {7:  }extra line!            │{7:  }extra line!           |*2
+      {7:  }last line ...          │{7:  }last line ...         |
+      {7:  }{9:                       }│{7:  }{9:^                      }|
+      {1:~                        }│{1:~                       }|*3
+      {2:[No Name] [+]             }{3:[No Name] [+]           }|
                                                         |
     ]])
 
@@ -1291,54 +1231,25 @@ describe('CursorLine and CursorLineNr highlights', function()
     -- Rendered as underline in a diff-line. #9028
     command('hi CursorLine ctermbg=red ctermfg=NONE guibg=red guifg=NONE')
     feed('kkkk')
-    screen:expect(
-      [[
-      {1:  }line 1 some text       │{1:  }line 1 some text      |
-      {1:  }{11:line 2 mo}{12:Re text!}{11:      }│{1:  }{11:^line 2 mo}{12:re text}{11:      }|
-      {1:  }{5:extra line!            }│{1:  }{6:----------------------}|
-      {1:  }extra line!            │{1:  }extra line!           |*2
-      {1:  }last line ...          │{1:  }last line ...         |
-      {1:  }                       │{1:  }                      |
-      {8:~                        }│{8:~                       }|*3
-      {4:[No Name] [+]             }{9:[No Name] [+]           }|
+    screen:expect([[
+      {7:  }line 1 some text       │{7:  }line 1 some text      |
+      {7:  }{100:line 2 mo}{101:Re text!}{100:      }│{7:  }{100:^line 2 mo}{101:re text}{100:      }|
+      {7:  }{22:extra line!            }│{7:  }{23:----------------------}|
+      {7:  }extra line!            │{7:  }extra line!           |*2
+      {7:  }last line ...          │{7:  }last line ...         |
+      {7:  }                       │{7:  }                      |
+      {1:~                        }│{1:~                       }|*3
+      {2:[No Name] [+]             }{3:[No Name] [+]           }|
                                                         |
-    ]],
-      {
-        [1] = { foreground = Screen.colors.DarkBlue, background = Screen.colors.WebGray },
-        [2] = { bold = true, background = Screen.colors.Red },
-        [3] = { background = Screen.colors.LightMagenta },
-        [4] = { reverse = true },
-        [5] = { background = Screen.colors.LightBlue },
-        [6] = {
-          background = Screen.colors.LightCyan1,
-          bold = true,
-          foreground = Screen.colors.Blue1,
-        },
-        [7] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-        [8] = { bold = true, foreground = Screen.colors.Blue1 },
-        [9] = { bold = true, reverse = true },
-        [10] = { bold = true },
-        [11] = { underline = true, background = Screen.colors.LightMagenta },
-        [12] = { bold = true, underline = true, background = Screen.colors.Red },
-      }
-    )
+    ]])
   end)
 
   -- oldtest: Test_diff_with_cursorline_number()
   it('CursorLineNr shows correctly just below filler lines', function()
     local screen = Screen.new(50, 12)
-    screen:set_default_attr_ids({
-      [1] = { foreground = Screen.colors.DarkBlue, background = Screen.colors.WebGray },
-      [2] = { background = Screen.colors.LightCyan1, bold = true, foreground = Screen.colors.Blue1 },
-      [3] = { reverse = true },
-      [4] = { background = Screen.colors.LightBlue },
-      [5] = { background = Screen.colors.Red, foreground = Screen.colors.White },
-      [6] = { background = Screen.colors.White, bold = true, foreground = Screen.colors.Black },
-      [7] = { bold = true, foreground = Screen.colors.Blue1 },
-      [8] = { bold = true, reverse = true },
-      [9] = { foreground = Screen.colors.Brown },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.Black, bold = true, background = Screen.colors.Grey100 },
+    }
 
     command('hi CursorLine guibg=red guifg=white')
     command('hi CursorLineNr guibg=white guifg=black gui=bold')
@@ -1350,22 +1261,22 @@ describe('CursorLine and CursorLineNr highlights', function()
     command('windo diffthis')
     command('1wincmd w')
     screen:expect([[
-      {1:  }{9:    }{2:-------------------}│{1:  }{9:  1 }{4:baz               }|
-      {1:  }{6:  1 }{5:^foo                }│{1:  }{6:  2 }{5:foo               }|
-      {1:  }{9:  2 }foo                │{1:  }{9:  3 }foo               |
-      {1:  }{9:  3 }bar                │{1:  }{9:  4 }bar               |
-      {7:~                        }│{7:~                       }|*6
-      {8:[No Name] [+]             }{3:[No Name] [+]           }|
+      {7:  }{8:    }{23:-------------------}│{7:  }{8:  1 }{22:baz               }|
+      {7:  }{100:  1 }{9:^foo                }│{7:  }{100:  2 }{9:foo               }|
+      {7:  }{8:  2 }foo                │{7:  }{8:  3 }foo               |
+      {7:  }{8:  3 }bar                │{7:  }{8:  4 }bar               |
+      {1:~                        }│{1:~                       }|*6
+      {3:[No Name] [+]             }{2:[No Name] [+]           }|
                                                         |
     ]])
     command('set cursorlineopt=number')
     screen:expect([[
-      {1:  }{9:    }{2:-------------------}│{1:  }{9:  1 }{4:baz               }|
-      {1:  }{6:  1 }^foo                │{1:  }{6:  2 }{5:foo               }|
-      {1:  }{9:  2 }foo                │{1:  }{9:  3 }foo               |
-      {1:  }{9:  3 }bar                │{1:  }{9:  4 }bar               |
-      {7:~                        }│{7:~                       }|*6
-      {8:[No Name] [+]             }{3:[No Name] [+]           }|
+      {7:  }{8:    }{23:-------------------}│{7:  }{8:  1 }{22:baz               }|
+      {7:  }{100:  1 }^foo                │{7:  }{100:  2 }{9:foo               }|
+      {7:  }{8:  2 }foo                │{7:  }{8:  3 }foo               |
+      {7:  }{8:  3 }bar                │{7:  }{8:  4 }bar               |
+      {1:~                        }│{1:~                       }|*6
+      {3:[No Name] [+]             }{2:[No Name] [+]           }|
                                                         |
     ]])
   end)
@@ -1376,14 +1287,9 @@ describe('CursorColumn highlight', function()
   before_each(function()
     clear()
     screen = Screen.new(50, 8)
-    screen:set_default_attr_ids({
-      [1] = { background = Screen.colors.Gray90 }, -- CursorColumn
-      [2] = { bold = true, foreground = Screen.colors.Blue1 }, -- NonText
-      [3] = { bold = true }, -- ModeMsg
-      [4] = { background = Screen.colors.Red },
-      [5] = { background = Screen.colors.Blue },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { background = Screen.colors.Blue1 },
+    }
   end)
 
   it('is updated when pressing "i" on a TAB character', function()
@@ -1393,31 +1299,31 @@ describe('CursorColumn highlight', function()
       call cursor(2, 2)
     ]])
     screen:expect([[
-      1234567{1:8}9                                         |
+      1234567{21:8}9                                         |
       a      ^ b                                         |
-      {2:~                                                 }|*5
+      {1:~                                                 }|*5
                                                         |
     ]])
     feed('i')
     screen:expect([[
-      1{1:2}3456789                                         |
+      1{21:2}3456789                                         |
       a^       b                                         |
-      {2:~                                                 }|*5
-      {3:-- INSERT --}                                      |
+      {1:~                                                 }|*5
+      {5:-- INSERT --}                                      |
     ]])
     feed('<C-O>')
     screen:expect([[
-      1234567{1:8}9                                         |
+      1234567{21:8}9                                         |
       a      ^ b                                         |
-      {2:~                                                 }|*5
-      {3:-- (insert) --}                                    |
+      {1:~                                                 }|*5
+      {5:-- (insert) --}                                    |
     ]])
     feed('i')
     screen:expect([[
-      1{1:2}3456789                                         |
+      1{21:2}3456789                                         |
       a^       b                                         |
-      {2:~                                                 }|*5
-      {3:-- INSERT --}                                      |
+      {1:~                                                 }|*5
+      {5:-- INSERT --}                                      |
     ]])
   end)
 
@@ -1436,11 +1342,11 @@ describe('CursorColumn highlight', function()
     ]])
     screen:expect({
       grid = [[
-      aaaa{1:a}                                             |
-      bbbb{1:b}                                             |
-      cccc{1:c}                                             |
+      aaaa{21:a}                                             |
+      bbbb{21:b}                                             |
+      cccc{21:c}                                             |
       dddd^d                                             |
-      {2:~                                                 }|*3
+      {1:~                                                 }|*3
                                                         |
     ]],
       timeout = 100,
@@ -1448,10 +1354,10 @@ describe('CursorColumn highlight', function()
     screen:expect({
       grid = [[
       ^aaaaa                                             |
-      {1:b}bbbb                                             |
-      {1:c}cccc                                             |
-      {1:d}dddd                                             |
-      {2:~                                                 }|*3
+      {21:b}bbbb                                             |
+      {21:c}cccc                                             |
+      {21:d}dddd                                             |
+      {1:~                                                 }|*3
                                                         |
     ]],
     })
@@ -1466,34 +1372,34 @@ describe('CursorColumn highlight', function()
     insert('line 1\nline 2\nline 3')
     feed('k')
     screen:expect([[
-      line {4:1}                                            |
-      {5:line ^2                                            }|
-      line {4:3}                                            |
-      {2:~                                                 }|*4
+      line {30:1}                                            |
+      {100:line ^2                                            }|
+      line {30:3}                                            |
+      {1:~                                                 }|*4
                                                         |
     ]])
     feed('l')
     screen:expect([[
-      line 1{4: }                                           |
-      {5:line 2^                                            }|
-      line 3{4: }                                           |
-      {2:~                                                 }|*4
+      line 1{30: }                                           |
+      {100:line 2^                                            }|
+      line 3{30: }                                           |
+      {1:~                                                 }|*4
                                                         |
     ]])
     feed('l')
     screen:expect([[
-      line 1 {4: }                                          |
-      {5:line 2 ^                                           }|
-      line 3 {4: }                                          |
-      {2:~                                                 }|*4
+      line 1 {30: }                                          |
+      {100:line 2 ^                                           }|
+      line 3 {30: }                                          |
+      {1:~                                                 }|*4
                                                         |
     ]])
     feed('l')
     screen:expect([[
-      line 1  {4: }                                         |
-      {5:line 2  ^                                          }|
-      line 3  {4: }                                         |
-      {2:~                                                 }|*4
+      line 1  {30: }                                         |
+      {100:line 2  ^                                          }|
+      line 3  {30: }                                         |
+      {1:~                                                 }|*4
                                                         |
     ]])
   end)
@@ -1505,18 +1411,11 @@ describe('ColorColumn highlight', function()
   before_each(function()
     clear()
     screen = Screen.new(40, 15)
-    screen:set_default_attr_ids({
-      [1] = { background = Screen.colors.LightRed }, -- ColorColumn
-      [2] = { background = Screen.colors.Grey90 }, -- CursorLine
-      [3] = { foreground = Screen.colors.Brown }, -- LineNr
-      [4] = { foreground = Screen.colors.Brown, bold = true }, -- CursorLineNr
-      [5] = { foreground = Screen.colors.Blue, bold = true }, -- NonText
-      [6] = { foreground = Screen.colors.Blue, background = Screen.colors.LightRed, bold = true },
-      [7] = { reverse = true, bold = true }, -- StatusLine
-      [8] = { reverse = true }, -- StatusLineNC
-      [9] = { background = Screen.colors.Grey90, foreground = Screen.colors.Red },
-    })
-    screen:attach()
+    screen:add_extra_attr_ids {
+      [100] = { foreground = Screen.colors.Red, background = Screen.colors.Grey90 },
+      [101] = { background = Screen.colors.LightRed },
+      [102] = { foreground = Screen.colors.Blue1, bold = true, background = Screen.colors.LightRed },
+    }
   end)
 
   -- oldtest: Test_colorcolumn()
@@ -1533,16 +1432,16 @@ describe('ColorColumn highlight', function()
       buf X
     ]])
     screen:expect([[
-      {4:  1 }11{1:1}11111{1:1}1                          |
-      {3:  2 }22{1:2}22222{1:2}22                         |
-      {3:  3 }33{1:3}33333{1:3}3                          |
-      {5:~                                       }|*3
-      {8:X                                       }|
-      {4:  1 }^11{1:1}11111{1:1}1                          |
-      {3:  2 }22{1:2}22222{1:2}22                         |
-      {3:  3 }33{1:3}33333{1:3}3                          |
-      {5:~                                       }|*3
-      {7:X                                       }|
+      {15:  1 }11{101:1}11111{101:1}1                          |
+      {8:  2 }22{101:2}22222{101:2}22                         |
+      {8:  3 }33{101:3}33333{101:3}3                          |
+      {1:~                                       }|*3
+      {2:X                                       }|
+      {15:  1 }^11{101:1}11111{101:1}1                          |
+      {8:  2 }22{101:2}22222{101:2}22                         |
+      {8:  3 }33{101:3}33333{101:3}3                          |
+      {1:~                                       }|*3
+      {3:X                                       }|
                                               |
     ]])
   end)
@@ -1554,9 +1453,9 @@ describe('ColorColumn highlight', function()
       set co=40 linebreak bri briopt=shift:2 cc=40,41,43
     ]])
     screen:expect([[
-      ^The quick brown fox jumped over the    {1: }|
-      {1: } {1:l}azy dogs                             |
-      {5:~                                       }|*12
+      ^The quick brown fox jumped over the    {101: }|
+      {101: } {101:l}azy dogs                             |
+      {1:~                                       }|*12
                                               |
     ]])
   end)
@@ -1568,9 +1467,9 @@ describe('ColorColumn highlight', function()
       set co=40 showbreak=+++>\\  cc=40,41,43
     ]])
     screen:expect([[
-      ^The quick brown fox jumped over the laz{1:y}|
-      {6:+}{5:+}{6:+}{5:>\} dogs                              |
-      {5:~                                       }|*12
+      ^The quick brown fox jumped over the laz{101:y}|
+      {102:+}{1:+}{102:+}{1:>\} dogs                              |
+      {1:~                                       }|*12
                                               |
     ]])
   end)
@@ -1579,17 +1478,17 @@ describe('ColorColumn highlight', function()
     screen:try_resize(40, 2)
     command('set colorcolumn=30 cursorline')
     screen:expect([[
-      {2:^                             }{1: }{2:          }|
+      {21:^                             }{101: }{21:          }|
                                               |
     ]])
     command('hi clear ColorColumn')
     screen:expect([[
-      {2:^                                        }|
+      {21:^                                        }|
                                               |
     ]])
     command('hi ColorColumn guifg=Red')
     screen:expect([[
-      {2:^                             }{9: }{2:          }|
+      {21:^                             }{100: }{21:          }|
                                               |
     ]])
   end)
@@ -1619,7 +1518,6 @@ describe('MsgSeparator highlight and msgsep fillchar', function()
       [12] = { background = Screen.colors.Gray60, bold = true, foreground = tonumber('0x297d4e') },
       [13] = { background = tonumber('0xff4cff'), bold = true, foreground = tonumber('0xb200ff') },
     })
-    screen:attach()
   end)
 
   it('works', function()
@@ -1734,7 +1632,6 @@ describe("'winhighlight' highlight", function()
   before_each(function()
     clear()
     screen = Screen.new(20, 8)
-    screen:attach()
     screen:set_default_attr_ids {
       [0] = { bold = true, foreground = Screen.colors.Blue },
       [1] = { background = Screen.colors.DarkBlue },
@@ -1772,6 +1669,7 @@ describe("'winhighlight' highlight", function()
       [29] = { foreground = Screen.colors.Blue1, background = Screen.colors.Red, bold = true },
       [30] = { background = tonumber('0xff8800') },
       [31] = { background = tonumber('0xff8800'), bold = true, foreground = Screen.colors.Blue },
+      [32] = { bold = true, reverse = true, background = Screen.colors.DarkGreen },
     }
     command('hi Background1 guibg=DarkBlue')
     command('hi Background2 guibg=DarkGreen')
@@ -2317,7 +2215,7 @@ describe("'winhighlight' highlight", function()
     ]],
     }
 
-    helpers.assert_alive()
+    n.assert_alive()
   end)
 
   it('can redraw statusline on cursor movement', function()
@@ -2334,10 +2232,10 @@ describe("'winhighlight' highlight", function()
       some text                               |
       more tex^t                               |
       {0:~                                       }|
-      {3:[No Name]                        }{1:2,9 All}|
+      {3:[No Name]                        }{11:2,9 All}|
       some text                               |
       more text                               |
-      {4:[No Name]                        }{1:1,1 All}|
+      {4:[No Name]                        }{14:1,1 All}|
                                               |
     ]],
     }
@@ -2348,10 +2246,10 @@ describe("'winhighlight' highlight", function()
       some text                               |
       more tex^t                               |
       {0:~                                       }|
-      {3:[No Name]                        }{5:2,9 All}|
+      {3:[No Name]                        }{32:2,9 All}|
       some text                               |
       more text                               |
-      {4:[No Name]                        }{1:1,1 All}|
+      {4:[No Name]                        }{14:1,1 All}|
                                               |
     ]],
     }
@@ -2362,10 +2260,10 @@ describe("'winhighlight' highlight", function()
       some tex^t                               |
       more text                               |
       {0:~                                       }|
-      {3:[No Name]                        }{5:1,9 All}|
+      {3:[No Name]                        }{32:1,9 All}|
       some text                               |
       more text                               |
-      {4:[No Name]                        }{1:1,1 All}|
+      {4:[No Name]                        }{14:1,1 All}|
                                               |
     ]],
     }
@@ -2397,7 +2295,6 @@ describe('highlight namespaces', function()
   before_each(function()
     clear()
     screen = Screen.new(25, 10)
-    screen:attach()
     screen:set_default_attr_ids {
       [1] = { foreground = Screen.colors.Blue, bold = true },
       [2] = { background = Screen.colors.DarkGrey },
@@ -2506,16 +2403,24 @@ describe('highlight namespaces', function()
   end)
 
   it('winhl does not accept invalid value #24586', function()
-    local res = exec_lua([[
-      local curwin = vim.api.nvim_get_current_win()
-      vim.api.nvim_command("set winhl=Normal:Visual")
-      local _, msg = pcall(vim.api.nvim_command,"set winhl='Normal:Wrong'")
-      return { msg, vim.wo[curwin].winhl }
-    ]])
-    eq({
-      'Vim(set):E5248: Invalid character in group name',
-      'Normal:Visual',
-    }, res)
+    command('set winhl=Normal:Visual')
+    for _, cmd in ipairs({
+      [[set winhl='Normal:Wrong']],
+      [[set winhl=Normal:Wrong']],
+      [[set winhl='Normal:Wrong]],
+    }) do
+      local res = exec_lua(
+        [[
+          local _, msg = pcall(vim.api.nvim_command, ...)
+          return { msg, vim.wo.winhl }
+        ]],
+        cmd
+      )
+      eq({
+        'Vim(set):E5248: Invalid character in group name',
+        'Normal:Visual',
+      }, res)
+    end
   end)
 
   it('Normal in set_hl #25474', function()
@@ -2539,10 +2444,8 @@ describe('highlight namespaces', function()
 end)
 
 describe('synIDattr()', function()
-  local screen
   before_each(function()
     clear()
-    screen = Screen.new(50, 7)
     command('highlight Normal ctermfg=252 guifg=#ff0000 guibg=Black')
     -- Salmon #fa8072 Maroon #800000
     command(
@@ -2567,7 +2470,7 @@ describe('synIDattr()', function()
   end)
 
   it('returns gui-color if RGB-capable UI is attached', function()
-    screen:attach({ rgb = true })
+    local _ = Screen.new(50, 7, { rgb = true })
     eq('#ff0000', eval('synIDattr(hlID("Normal"),  "fg")'))
     eq('Black', eval('synIDattr(hlID("Normal"),  "bg")'))
     eq('Salmon', eval('synIDattr(hlID("Keyword"), "fg")'))
@@ -2575,15 +2478,15 @@ describe('synIDattr()', function()
   end)
 
   it('returns #RRGGBB value for fg#/bg#/sp#', function()
-    screen:attach({ rgb = true })
+    local _ = Screen.new(50, 7, { rgb = true })
     eq('#ff0000', eval('synIDattr(hlID("Normal"),  "fg#")'))
     eq('#000000', eval('synIDattr(hlID("Normal"),  "bg#")'))
     eq('#fa8072', eval('synIDattr(hlID("Keyword"), "fg#")'))
     eq('#800000', eval('synIDattr(hlID("Keyword"), "sp#")'))
   end)
 
-  it('returns color number if non-GUI', function()
-    screen:attach({ rgb = false })
+  it('returns color number if non-RGB GUI', function()
+    local _ = Screen.new(50, 7, { rgb = false })
     eq('252', eval('synIDattr(hlID("Normal"), "fg")'))
     eq('79', eval('synIDattr(hlID("Keyword"), "fg")'))
   end)
@@ -2608,10 +2511,8 @@ describe('synIDattr()', function()
 end)
 
 describe('fg/bg special colors', function()
-  local screen
   before_each(function()
     clear()
-    screen = Screen.new(50, 7)
     command('highlight Normal ctermfg=145 ctermbg=16 guifg=#ff0000 guibg=Black')
     command('highlight Visual ctermfg=bg ctermbg=fg guifg=bg guibg=fg guisp=bg')
   end)
@@ -2630,7 +2531,7 @@ describe('fg/bg special colors', function()
   end)
 
   it('resolve to "Normal" values in RGB-capable UI', function()
-    screen:attach({ rgb = true })
+    local _ = Screen.new(50, 7, { rgb = true })
     eq('bg', eval('synIDattr(hlID("Visual"), "fg")'))
     eq(eval('synIDattr(hlID("Normal"), "bg#")'), eval('synIDattr(hlID("Visual"), "fg#")'))
     eq('fg', eval('synIDattr(hlID("Visual"), "bg")'))
@@ -2640,7 +2541,7 @@ describe('fg/bg special colors', function()
   end)
 
   it('resolve after the "Normal" group is modified', function()
-    screen:attach({ rgb = true })
+    local _ = Screen.new(50, 7, { rgb = true })
     local new_guibg = '#282c34'
     local new_guifg = '#abb2bf'
     command('highlight Normal guifg=' .. new_guifg .. ' guibg=' .. new_guibg)

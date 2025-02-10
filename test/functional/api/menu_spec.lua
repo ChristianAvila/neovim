@@ -1,9 +1,9 @@
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
-local clear = helpers.clear
-local command = helpers.command
-local feed = helpers.feed
+local clear = n.clear
+local command = n.command
+local feed = n.feed
 
 describe('update_menu notification', function()
   local screen
@@ -11,7 +11,6 @@ describe('update_menu notification', function()
   before_each(function()
     clear()
     screen = Screen.new()
-    screen:attach()
   end)
 
   local function expect_sent(expected)

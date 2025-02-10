@@ -1,40 +1,41 @@
-local helpers = require('test.functional.helpers')(after_each)
-local thelpers = require('test.functional.terminal.helpers')
-
-local clear = helpers.clear
-local eq = helpers.eq
-local eval = helpers.eval
-local exc_exec = helpers.exc_exec
-local feed_command = helpers.feed_command
-local feed = helpers.feed
-local insert = helpers.insert
-local neq = helpers.neq
-local next_msg = helpers.next_msg
-local testprg = helpers.testprg
-local ok = helpers.ok
-local source = helpers.source
-local write_file = helpers.write_file
-local mkdir = helpers.mkdir
-local rmdir = helpers.rmdir
-local assert_alive = helpers.assert_alive
-local command = helpers.command
-local fn = helpers.fn
-local os_kill = helpers.os_kill
-local retry = helpers.retry
-local api = helpers.api
-local NIL = vim.NIL
-local poke_eventloop = helpers.poke_eventloop
-local get_pathsep = helpers.get_pathsep
-local pathroot = helpers.pathroot
-local exec_lua = helpers.exec_lua
-local nvim_set = helpers.nvim_set
-local expect_twostreams = helpers.expect_twostreams
-local expect_msg_seq = helpers.expect_msg_seq
-local pcall_err = helpers.pcall_err
-local matches = helpers.matches
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local skip = helpers.skip
-local is_os = helpers.is_os
+local tt = require('test.functional.testterm')
+
+local clear = n.clear
+local eq = t.eq
+local eval = n.eval
+local exc_exec = n.exc_exec
+local feed_command = n.feed_command
+local feed = n.feed
+local insert = n.insert
+local neq = t.neq
+local next_msg = n.next_msg
+local testprg = n.testprg
+local ok = t.ok
+local source = n.source
+local write_file = t.write_file
+local mkdir = t.mkdir
+local rmdir = n.rmdir
+local assert_alive = n.assert_alive
+local command = n.command
+local fn = n.fn
+local os_kill = n.os_kill
+local retry = t.retry
+local api = n.api
+local NIL = vim.NIL
+local poke_eventloop = n.poke_eventloop
+local get_pathsep = n.get_pathsep
+local pathroot = n.pathroot
+local exec_lua = n.exec_lua
+local nvim_set = n.nvim_set
+local expect_twostreams = n.expect_twostreams
+local expect_msg_seq = n.expect_msg_seq
+local pcall_err = t.pcall_err
+local matches = t.matches
+local skip = t.skip
+local is_os = t.is_os
 
 describe('jobs', function()
   local channel
@@ -64,6 +65,39 @@ describe('jobs', function()
     ]])
   end)
 
+  it('validation', function()
+    matches(
+      "E475: Invalid argument: job cannot have both 'pty' and 'rpc' options set",
+      pcall_err(command, "call jobstart(['cat', '-'], { 'pty': v:true, 'rpc': v:true })")
+    )
+    matches(
+      'E475: Invalid argument: expected valid directory',
+      pcall_err(command, "call jobstart(['cat', '-'], { 'cwd': 9313843 })")
+    )
+    matches(
+      'E475: Invalid argument: expected valid directory',
+      pcall_err(command, "call jobstart(['cat', '-'], { 'cwd': 'bogusssssss/bogus' })")
+    )
+    matches(
+      "E475: Invalid argument: 'term' must be Boolean",
+      pcall_err(command, "call jobstart(['cat', '-'], { 'term': 'bogus' })")
+    )
+    matches(
+      "E475: Invalid argument: 'term' must be Boolean",
+      pcall_err(command, "call jobstart(['cat', '-'], { 'term': 1 })")
+    )
+    command('set modified')
+    matches(
+      vim.pesc('jobstart(...,{term=true}) requires unmodified buffer'),
+      pcall_err(command, "call jobstart(['cat', '-'], { 'term': v:true })")
+    )
+
+    -- Non-failure cases:
+    command('set nomodified')
+    command("call jobstart(['cat', '-'], { 'term': v:true })")
+    command("call jobstart(['cat', '-'], { 'term': v:false })")
+  end)
+
   it('must specify env option as a dict', function()
     command('let g:job_opts.env = v:true')
     local _, err = pcall(function()
@@ -73,7 +107,7 @@ describe('jobs', function()
         command("let j = jobstart('env', g:job_opts)")
       end
     end)
-    ok(string.find(err, 'E475: Invalid argument: env') ~= nil)
+    matches('E475: Invalid argument: env', err)
   end)
 
   it('append environment #env', function()
@@ -227,7 +261,7 @@ describe('jobs', function()
         command("let j = jobstart('pwd', g:job_opts)")
       end
     end)
-    ok(string.find(err, 'E475: Invalid argument: expected valid directory$') ~= nil)
+    matches('E475: Invalid argument: expected valid directory$', err)
   end)
 
   it('error on non-executable `cwd`', function()
@@ -307,7 +341,7 @@ describe('jobs', function()
 
   it('preserves NULs', function()
     -- Make a file with NULs in it.
-    local filename = helpers.tmpname()
+    local filename = t.tmpname()
     write_file(filename, 'abc\0def\n')
 
     command("let j = jobstart(['cat', '" .. filename .. "'], g:job_opts)")
@@ -497,7 +531,6 @@ describe('jobs', function()
 
   it('can redefine callbacks being used by a job', function()
     local screen = Screen.new()
-    screen:attach()
     screen:set_default_attr_ids({
       [1] = { bold = true, foreground = Screen.colors.Blue },
     })
@@ -523,7 +556,6 @@ describe('jobs', function()
 
   it('requires funcrefs for script-local (s:) functions', function()
     local screen = Screen.new(60, 5)
-    screen:attach()
     screen:set_default_attr_ids({
       [1] = { bold = true, foreground = Screen.colors.Blue1 },
       [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
@@ -732,7 +764,7 @@ describe('jobs', function()
   describe('jobwait()', function()
     before_each(function()
       if is_os('win') then
-        helpers.set_shell_powershell()
+        n.set_shell_powershell()
       end
     end)
 
@@ -909,12 +941,6 @@ describe('jobs', function()
 
     it('hides cursor and flushes messages before blocking', function()
       local screen = Screen.new(50, 6)
-      screen:set_default_attr_ids({
-        [0] = { foreground = Screen.colors.Blue, bold = true }, -- NonText
-        [1] = { bold = true, reverse = true }, -- MsgSeparator
-        [2] = { bold = true, foreground = Screen.colors.SeaGreen }, -- MoreMsg
-      })
-      screen:attach()
       command([[let g:id = jobstart([v:progpath, '--clean', '--headless'])]])
       source([[
         func PrintAndWait()
@@ -927,8 +953,8 @@ describe('jobs', function()
       screen:expect {
         grid = [[
                                                           |
-        {0:~                                                 }|*2
-        {1:                                                  }|
+        {1:~                                                 }|*2
+        {3:                                                  }|
         aaa                                               |
         bbb                                               |
       ]],
@@ -937,15 +963,48 @@ describe('jobs', function()
       screen:expect {
         grid = [[
                                                           |
-        {1:                                                  }|
+        {3:                                                  }|
         aaa                                               |
         bbb                                               |
         ccc                                               |
-        {2:Press ENTER or type command to continue}^           |
+        {6:Press ENTER or type command to continue}^           |
       ]],
       }
       feed('<CR>')
       fn.jobstop(api.nvim_get_var('id'))
+    end)
+
+    it('does not set UI busy with zero timeout #31712', function()
+      local screen = Screen.new(50, 6)
+      command([[let g:id = jobstart(['sleep', '0.3'])]])
+      local busy = 0
+      screen._handle_busy_start = (function(orig)
+        return function()
+          orig(screen)
+          busy = busy + 1
+        end
+      end)(screen._handle_busy_start)
+      source([[
+        func PrintAndPoll()
+          echon "aaa\nbbb"
+          call jobwait([g:id], 0)
+          echon "\nccc"
+        endfunc
+      ]])
+      feed_command('call PrintAndPoll()')
+      screen:expect {
+        grid = [[
+                                                          |
+        {3:                                                  }|
+        aaa                                               |
+        bbb                                               |
+        ccc                                               |
+        {6:Press ENTER or type command to continue}^           |
+      ]],
+      }
+      feed('<CR>')
+      fn.jobstop(api.nvim_get_var('id'))
+      eq(0, busy)
     end)
   end)
 
@@ -974,16 +1033,6 @@ describe('jobs', function()
       }
     )
     eq({ 'notification', 'exit', { 0, 143 } }, next_msg())
-  end)
-
-  it('cannot have both rpc and pty options', function()
-    command('let g:job_opts.pty = v:true')
-    command('let g:job_opts.rpc = v:true')
-    local _, err = pcall(command, "let j = jobstart(['cat', '-'], g:job_opts)")
-    ok(
-      string.find(err, "E475: Invalid argument: job cannot have both 'pty' and 'rpc' options set")
-        ~= nil
-    )
   end)
 
   it('does not crash when repeatedly failing to start shell', function()
@@ -1185,7 +1234,7 @@ describe('jobs', function()
   end)
 
   it('does not close the same handle twice on exit #25086', function()
-    local filename = string.format('%s.lua', helpers.tmpname())
+    local filename = string.format('%s.lua', t.tmpname())
     write_file(
       filename,
       [[
@@ -1198,7 +1247,7 @@ describe('jobs', function()
     ]]
     )
 
-    local screen = thelpers.setup_child_nvim({
+    local screen = tt.setup_child_nvim({
       '--cmd',
       'set notermguicolors',
       '-i',
@@ -1208,7 +1257,7 @@ describe('jobs', function()
     })
     -- Wait for startup to complete, so that all terminal responses are received.
     screen:expect([[
-      {1: }                                                 |
+      ^                                                  |
       ~                                                 |*3
       {1:[No Name]                       0,0-1          All}|
                                                         |
@@ -1218,7 +1267,7 @@ describe('jobs', function()
     feed(':q<CR>')
     screen:expect([[
                                                         |
-      [Process exited 0]{1: }                               |
+      [Process exited 0]^                                |
                                                         |*4
       {3:-- TERMINAL --}                                    |
     ]])
@@ -1230,7 +1279,6 @@ describe('pty process teardown', function()
   before_each(function()
     clear()
     screen = Screen.new(30, 6)
-    screen:attach()
     screen:expect([[
       ^                              |
       {1:~                             }|*4
@@ -1239,9 +1287,10 @@ describe('pty process teardown', function()
   end)
 
   it('does not prevent/delay exit. #4798 #4900', function()
+    skip(fn.executable('sleep') == 0, 'missing "sleep" command')
     -- Use a nested nvim (in :term) to test without --headless.
-    fn.termopen({
-      helpers.nvim_prog,
+    fn.jobstart({
+      n.nvim_prog,
       '-u',
       'NONE',
       '-i',
@@ -1253,7 +1302,10 @@ describe('pty process teardown', function()
       '+terminal',
       '+!(sleep 300 &)',
       '+qa',
-    }, { env = { VIMRUNTIME = os.getenv('VIMRUNTIME') } })
+    }, {
+      term = true,
+      env = { VIMRUNTIME = os.getenv('VIMRUNTIME') },
+    })
 
     -- Exiting should terminate all descendants (PTY, its children, ...).
     screen:expect([[

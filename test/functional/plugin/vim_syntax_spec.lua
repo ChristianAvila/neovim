@@ -1,15 +1,16 @@
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local exec = helpers.exec
-local api = helpers.api
+
+local clear = n.clear
+local exec = n.exec
+local api = n.api
 
 describe('Vimscript syntax highlighting', function()
   local screen --- @type test.functional.ui.screen
 
   before_each(function()
     clear()
-    helpers.add_builddir_to_rtp()
+    n.add_builddir_to_rtp()
     exec([[
       setfiletype vim
       syntax on
@@ -20,7 +21,6 @@ describe('Vimscript syntax highlighting', function()
       [1] = { foreground = Screen.colors.Brown, bold = true },
       [2] = { foreground = tonumber('0x6a0dad') },
     })
-    screen:attach()
   end)
 
   it('prefixed boolean options are highlighted properly', function()

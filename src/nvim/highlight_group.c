@@ -1,5 +1,6 @@
 // highlight_group.c: code for managing highlight groups
 
+#include <assert.h>
 #include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -22,6 +23,7 @@
 #include "nvim/cursor_shape.h"
 #include "nvim/decoration_provider.h"
 #include "nvim/drawscreen.h"
+#include "nvim/errors.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/vars.h"
@@ -30,6 +32,7 @@
 #include "nvim/garray_defs.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
+#include "nvim/grid_defs.h"
 #include "nvim/highlight.h"
 #include "nvim/highlight_group.h"
 #include "nvim/lua/executor.h"
@@ -143,41 +146,46 @@ static const char e_missing_argument_str[]
 static const char *highlight_init_both[] = {
   "Cursor            guifg=bg      guibg=fg",
   "CursorLineNr      gui=bold      cterm=bold",
+  "PmenuMatch        gui=bold      cterm=bold",
+  "PmenuMatchSel     gui=bold      cterm=bold",
+  "PmenuSel          gui=reverse   cterm=reverse,underline blend=0",
   "RedrawDebugNormal gui=reverse   cterm=reverse",
-  "TabLineSel        gui=bold      cterm=bold",
+  "TabLineSel        gui=bold      cterm=NONE",
   "TermCursor        gui=reverse   cterm=reverse",
   "Underlined        gui=underline cterm=underline",
   "lCursor           guifg=bg      guibg=fg",
 
   // UI
-  "default link CursorIM       Cursor",
-  "default link CursorLineFold FoldColumn",
-  "default link CursorLineSign SignColumn",
-  "default link EndOfBuffer    NonText",
-  "default link FloatBorder    NormalFloat",
-  "default link FloatFooter    FloatTitle",
-  "default link FloatTitle     Title",
-  "default link FoldColumn     SignColumn",
-  "default link IncSearch      CurSearch",
-  "default link LineNrAbove    LineNr",
-  "default link LineNrBelow    LineNr",
-  "default link MsgSeparator   StatusLine",
-  "default link MsgArea        NONE",
-  "default link NormalNC       NONE",
-  "default link PmenuExtra     Pmenu",
-  "default link PmenuExtraSel  PmenuSel",
-  "default link PmenuKind      Pmenu",
-  "default link PmenuKindSel   PmenuSel",
-  "default link PmenuSbar      Pmenu",
-  "default link Substitute     Search",
-  "default link TabLine        StatusLineNC",
-  "default link TabLineFill    TabLine",
-  "default link TermCursorNC   NONE",
-  "default link VertSplit      WinSeparator",
-  "default link VisualNOS      Visual",
-  "default link Whitespace     NonText",
-  "default link WildMenu       PmenuSel",
-  "default link WinSeparator   Normal",
+  "default link CursorIM         Cursor",
+  "default link CursorLineFold   FoldColumn",
+  "default link CursorLineSign   SignColumn",
+  "default link EndOfBuffer      NonText",
+  "default link FloatBorder      NormalFloat",
+  "default link FloatFooter      FloatTitle",
+  "default link FloatTitle       Title",
+  "default link FoldColumn       SignColumn",
+  "default link IncSearch        CurSearch",
+  "default link LineNrAbove      LineNr",
+  "default link LineNrBelow      LineNr",
+  "default link MsgSeparator     StatusLine",
+  "default link MsgArea          NONE",
+  "default link NormalNC         NONE",
+  "default link PmenuExtra       Pmenu",
+  "default link PmenuExtraSel    PmenuSel",
+  "default link PmenuKind        Pmenu",
+  "default link PmenuKindSel     PmenuSel",
+  "default link PmenuSbar        Pmenu",
+  "default link ComplMatchIns    NONE",
+  "default link Substitute       Search",
+  "default link StatusLineTerm   StatusLine",
+  "default link StatusLineTermNC StatusLineNC",
+  "default link TabLine          StatusLineNC",
+  "default link TabLineFill      TabLine",
+  "default link VertSplit        WinSeparator",
+  "default link VisualNOS        Visual",
+  "default link Whitespace       NonText",
+  "default link WildMenu         PmenuSel",
+  "default link WinSeparator     Normal",
 
   // Syntax
   "default link Character      Constant",
@@ -201,8 +209,17 @@ static const char *highlight_init_both[] = {
   "default link SpecialComment Special",
   "default link Debug          Special",
   "default link Ignore         Normal",
-  "default link LspInlayHint   NonText",
-  "default link SnippetTabstop Visual",
+
+  // Built-in LSP
+  "default link LspCodeLens                 NonText",
+  "default link LspCodeLensSeparator        LspCodeLens",
+  "default link LspInlayHint                NonText",
+  "default link LspReferenceRead            LspReferenceText",
+  "default link LspReferenceText            Visual",
+  "default link LspReferenceWrite           LspReferenceText",
+  "default link LspReferenceTarget          LspReferenceText",
+  "default link LspSignatureActiveParameter Visual",
+  "default link SnippetTabstop              Visual",
 
   // Diagnostic
   "default link DiagnosticFloatingError    DiagnosticError",
@@ -215,6 +232,11 @@ static const char *highlight_init_both[] = {
   "default link DiagnosticVirtualTextInfo  DiagnosticInfo",
   "default link DiagnosticVirtualTextHint  DiagnosticHint",
   "default link DiagnosticVirtualTextOk    DiagnosticOk",
+  "default link DiagnosticVirtualLinesError DiagnosticError",
+  "default link DiagnosticVirtualLinesWarn  DiagnosticWarn",
+  "default link DiagnosticVirtualLinesInfo  DiagnosticInfo",
+  "default link DiagnosticVirtualLinesHint  DiagnosticHint",
+  "default link DiagnosticVirtualLinesOk    DiagnosticOk",
   "default link DiagnosticSignError        DiagnosticError",
   "default link DiagnosticSignWarn         DiagnosticWarn",
   "default link DiagnosticSignInfo         DiagnosticInfo",
@@ -287,6 +309,11 @@ static const char *highlight_init_both[] = {
   "default link @tag         Tag",
   "default link @tag.builtin Special",
 
+  // :help
+  // Highlight "===" and "---" heading delimiters specially.
+  "default @markup.heading.1.delimiter.vimdoc guibg=bg guifg=bg guisp=fg gui=underdouble,nocombine ctermbg=NONE ctermfg=NONE cterm=underdouble,nocombine",
+  "default @markup.heading.2.delimiter.vimdoc guibg=bg guifg=bg guisp=fg gui=underline,nocombine ctermbg=NONE ctermfg=NONE cterm=underline,nocombine",
+
   // LSP semantic tokens
   "default link @lsp.type.class         @type",
   "default link @lsp.type.comment       @comment",
@@ -337,7 +364,7 @@ static const char *highlight_init_light[] = {
   "ErrorMsg             guifg=NvimDarkRed                                    ctermfg=1",
   "FloatShadow                               guibg=NvimLightGrey4            ctermbg=0 blend=80",
   "FloatShadowThrough                        guibg=NvimLightGrey4            ctermbg=0 blend=100",
-  "Folded               guifg=NvimDarkGrey4  guibg=NvimLightGrey3",
+  "Folded               guifg=NvimDarkGrey4  guibg=NvimLightGrey1",
   "LineNr               guifg=NvimLightGrey4",
   "MatchParen                                guibg=NvimLightGrey4  gui=bold  cterm=bold,underline",
   "ModeMsg              guifg=NvimDarkGreen                                  ctermfg=2",
@@ -345,7 +372,6 @@ static const char *highlight_init_light[] = {
   "NonText              guifg=NvimLightGrey4",
   "NormalFloat                               guibg=NvimLightGrey1",
   "Pmenu                                     guibg=NvimLightGrey3            cterm=reverse",
-  "PmenuSel             guifg=NvimLightGrey3 guibg=NvimDarkGrey2             cterm=reverse,underline blend=0",
   "PmenuThumb                                guibg=NvimLightGrey4",
   "Question             guifg=NvimDarkCyan                                   ctermfg=6",
   "QuickFixLine         guifg=NvimDarkCyan                                   ctermfg=6",
@@ -361,7 +387,7 @@ static const char *highlight_init_light[] = {
   "SpellLocal           guisp=NvimDarkGreen  gui=undercurl                   cterm=undercurl",
   "SpellRare            guisp=NvimDarkCyan   gui=undercurl                   cterm=undercurl",
   "StatusLine           guifg=NvimLightGrey3 guibg=NvimDarkGrey3             cterm=reverse",
-  "StatusLineNC         guifg=NvimDarkGrey3  guibg=NvimLightGrey3            cterm=bold",
+  "StatusLineNC         guifg=NvimDarkGrey2  guibg=NvimLightGrey4            cterm=bold,underline",
   "Title                guifg=NvimDarkGrey2                        gui=bold  cterm=bold",
   "Visual                                    guibg=NvimLightGrey4            ctermfg=15 ctermbg=0",
   "WarningMsg           guifg=NvimDarkYellow                                 ctermfg=3",
@@ -422,7 +448,7 @@ static const char *highlight_init_dark[] = {
   "ErrorMsg             guifg=NvimLightRed                                  ctermfg=9",
   "FloatShadow                                guibg=NvimDarkGrey4           ctermbg=0 blend=80",
   "FloatShadowThrough                         guibg=NvimDarkGrey4           ctermbg=0 blend=100",
-  "Folded               guifg=NvimLightGrey4  guibg=NvimDarkGrey3",
+  "Folded               guifg=NvimLightGrey4  guibg=NvimDarkGrey1",
   "LineNr               guifg=NvimDarkGrey4",
   "MatchParen                                 guibg=NvimDarkGrey4  gui=bold cterm=bold,underline",
   "ModeMsg              guifg=NvimLightGreen                                ctermfg=10",
@@ -430,7 +456,6 @@ static const char *highlight_init_dark[] = {
   "NonText              guifg=NvimDarkGrey4",
   "NormalFloat                                guibg=NvimDarkGrey1",
   "Pmenu                                      guibg=NvimDarkGrey3           cterm=reverse",
-  "PmenuSel             guifg=NvimDarkGrey3   guibg=NvimLightGrey2          cterm=reverse,underline blend=0",
   "PmenuThumb                                 guibg=NvimDarkGrey4",
   "Question             guifg=NvimLightCyan                                 ctermfg=14",
   "QuickFixLine         guifg=NvimLightCyan                                 ctermfg=14",
@@ -446,7 +471,7 @@ static const char *highlight_init_dark[] = {
   "SpellLocal           guisp=NvimLightGreen  gui=undercurl                 cterm=undercurl",
   "SpellRare            guisp=NvimLightCyan   gui=undercurl                 cterm=undercurl",
   "StatusLine           guifg=NvimDarkGrey3   guibg=NvimLightGrey3          cterm=reverse",
-  "StatusLineNC         guifg=NvimLightGrey3  guibg=NvimDarkGrey3           cterm=bold",
+  "StatusLineNC         guifg=NvimLightGrey2  guibg=NvimDarkGrey4           cterm=bold,underline",
   "Title                guifg=NvimLightGrey2                       gui=bold cterm=bold",
   "Visual                                     guibg=NvimDarkGrey4           ctermfg=0 ctermbg=15",
   "WarningMsg           guifg=NvimLightYellow                               ctermfg=11",
@@ -840,7 +865,7 @@ static int color_numbers_8[28] = { 0, 4, 2, 6,
 // color_names[].
 // "boldp" will be set to kTrue or kFalse for a foreground color when using 8
 // colors, otherwise it will be unchanged.
-int lookup_color(const int idx, const bool foreground, TriState *const boldp)
+static int lookup_color(const int idx, const bool foreground, TriState *const boldp)
 {
   int color = color_numbers_16[idx];
 
@@ -889,11 +914,13 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
     g->sg_link = link_id;
     g->sg_script_ctx = current_sctx;
     g->sg_script_ctx.sc_lnum += SOURCING_LNUM;
+    nlua_set_sctx(&g->sg_script_ctx);
     g->sg_set |= SG_LINK;
     if (is_default) {
       g->sg_deflink = link_id;
       g->sg_deflink_sctx = current_sctx;
       g->sg_deflink_sctx.sc_lnum += SOURCING_LNUM;
+      nlua_set_sctx(&g->sg_deflink_sctx);
     }
   } else {
     g->sg_link = 0;
@@ -934,6 +961,7 @@ void set_hl_group(int id, HlAttrs attrs, Dict(highlight) *dict, int link_id)
 
   g->sg_script_ctx = current_sctx;
   g->sg_script_ctx.sc_lnum += SOURCING_LNUM;
+  nlua_set_sctx(&g->sg_script_ctx);
 
   g->sg_attr = hl_get_syn_attr(0, id, attrs);
 
@@ -980,6 +1008,7 @@ void do_highlight(const char *line, const bool forceit, const bool init)
 {
   // If no argument, list current highlighting.
   if (!init && ends_excmd((uint8_t)(*line))) {
+    msg_ext_set_kind("list_cmd");
     for (int i = 1; i <= highlight_ga.ga_len && !got_int; i++) {
       // TODO(brammool): only call when the group has attributes set
       highlight_list_one(i);
@@ -1017,6 +1046,7 @@ void do_highlight(const char *line, const bool forceit, const bool init)
     if (id == 0) {
       semsg(_(e_highlight_group_name_not_found_str), line);
     } else {
+      msg_ext_set_kind("list_cmd");
       highlight_list_one(id);
     }
     return;
@@ -1162,7 +1192,7 @@ void do_highlight(const char *line, const bool forceit, const bool init)
         break;
       }
       vim_memcpy_up(key, key_start, key_len);
-      key[key_len] = '\0';
+      key[key_len] = NUL;
       linep = skipwhite(linep);
 
       if (strcmp(key, "NONE") == 0) {
@@ -1601,9 +1631,9 @@ static void highlight_list_one(const int id)
   if (sgp->sg_link && !got_int) {
     syn_list_header(didh, 0, id, true);
     didh = true;
-    msg_puts_attr("links to", HL_ATTR(HLF_D));
+    msg_puts_hl("links to", HLF_D, false);
     msg_putchar(' ');
-    msg_outtrans(hl_table[hl_table[id - 1].sg_link - 1].sg_name, 0);
+    msg_outtrans(hl_table[hl_table[id - 1].sg_link - 1].sg_name, 0, false);
   }
 
   if (!didh) {
@@ -1614,7 +1644,7 @@ static void highlight_list_one(const int id)
   }
 }
 
-static bool hlgroup2dict(Dictionary *hl, NS ns_id, int hl_id, Arena *arena)
+static bool hlgroup2dict(Dict *hl, NS ns_id, int hl_id, Arena *arena)
 {
   HlGroup *sgp = &hl_table[hl_id - 1];
   int link = ns_id == 0 ? sgp->sg_link : ns_get_hl(&ns_id, hl_id, true, sgp->sg_set);
@@ -1632,18 +1662,19 @@ static bool hlgroup2dict(Dictionary *hl, NS ns_id, int hl_id, Arena *arena)
     PUT_C(*hl, "default", BOOLEAN_OBJ(true));
   }
   if (link > 0) {
+    assert(1 <= link && link <= highlight_ga.ga_len);
     PUT_C(*hl, "link", CSTR_AS_OBJ(hl_table[link - 1].sg_name));
   }
-  Dictionary hl_cterm = arena_dict(arena, HLATTRS_DICT_SIZE);
+  Dict hl_cterm = arena_dict(arena, HLATTRS_DICT_SIZE);
   hlattrs2dict(hl, NULL, attr, true, true);
   hlattrs2dict(hl, &hl_cterm, attr, false, true);
   if (kv_size(hl_cterm)) {
-    PUT_C(*hl, "cterm", DICTIONARY_OBJ(hl_cterm));
+    PUT_C(*hl, "cterm", DICT_OBJ(hl_cterm));
   }
   return true;
 }
 
-Dictionary ns_get_hl_defs(NS ns_id, Dict(get_highlight) *opts, Arena *arena, Error *err)
+Dict ns_get_hl_defs(NS ns_id, Dict(get_highlight) *opts, Arena *arena, Error *err)
 {
   Boolean link = GET_BOOL_OR_TRUE(opts, get_highlight, link);
   int id = -1;
@@ -1652,7 +1683,7 @@ Dictionary ns_get_hl_defs(NS ns_id, Dict(get_highlight) *opts, Arena *arena, Err
     id = create ? syn_check_group(opts->name.data, opts->name.size)
                 : syn_name2id_len(opts->name.data, opts->name.size);
     if (id == 0 && !create) {
-      Dictionary attrs = ARRAY_DICT_INIT;
+      Dict attrs = ARRAY_DICT_INIT;
       return attrs;
     }
   } else if (HAS_KEY(opts, get_highlight, id)) {
@@ -1663,7 +1694,7 @@ Dictionary ns_get_hl_defs(NS ns_id, Dict(get_highlight) *opts, Arena *arena, Err
     VALIDATE(1 <= id && id <= highlight_ga.ga_len, "%s", "Highlight id out of bounds", {
       goto cleanup;
     });
-    Dictionary attrs = ARRAY_DICT_INIT;
+    Dict attrs = ARRAY_DICT_INIT;
     hlgroup2dict(&attrs, ns_id, link ? id : syn_get_final_id(id), arena);
     return attrs;
   }
@@ -1671,19 +1702,19 @@ Dictionary ns_get_hl_defs(NS ns_id, Dict(get_highlight) *opts, Arena *arena, Err
     goto cleanup;
   }
 
-  Dictionary rv = arena_dict(arena, (size_t)highlight_ga.ga_len);
+  Dict rv = arena_dict(arena, (size_t)highlight_ga.ga_len);
   for (int i = 1; i <= highlight_ga.ga_len; i++) {
-    Dictionary attrs = ARRAY_DICT_INIT;
+    Dict attrs = ARRAY_DICT_INIT;
     if (!hlgroup2dict(&attrs, ns_id, i, arena)) {
       continue;
     }
-    PUT_C(rv, hl_table[(link ? i : syn_get_final_id(i)) - 1].sg_name, DICTIONARY_OBJ(attrs));
+    PUT_C(rv, hl_table[(link ? i : syn_get_final_id(i)) - 1].sg_name, DICT_OBJ(attrs));
   }
 
   return rv;
 
 cleanup:
-  return (Dictionary)ARRAY_DICT_INIT;
+  return (Dict)ARRAY_DICT_INIT;
 }
 
 /// Outputs a highlight when doing ":hi MyHighlight"
@@ -1730,10 +1761,10 @@ static bool highlight_list_arg(const int id, bool didh, const int type, int iarg
   didh = true;
   if (!got_int) {
     if (*name != NUL) {
-      msg_puts_attr(name, HL_ATTR(HLF_D));
-      msg_puts_attr("=", HL_ATTR(HLF_D));
+      msg_puts_hl(name, HLF_D, false);
+      msg_puts_hl("=", HLF_D, false);
     }
-    msg_outtrans(ts, 0);
+    msg_outtrans(ts, 0, false);
   }
   return didh;
 }
@@ -1863,8 +1894,7 @@ bool syn_list_header(const bool did_header, const int outlen, const int id, bool
     if (got_int) {
       return true;
     }
-    msg_outtrans(hl_table[id - 1].sg_name, 0);
-    name_col = msg_col;
+    msg_col = name_col = msg_outtrans(hl_table[id - 1].sg_name, 0, false);
     endcol = 15;
   } else if ((ui_has(kUIMessages) || msg_silent) && !force_newline) {
     msg_putchar(' ');
@@ -1894,7 +1924,7 @@ bool syn_list_header(const bool did_header, const int outlen, const int id, bool
     if (endcol == Columns - 1 && endcol <= name_col) {
       msg_putchar(' ');
     }
-    msg_puts_attr("xxx", syn_id2attr(id));
+    msg_puts_hl("xxx", id, false);
     msg_putchar(' ');
   }
 
@@ -1914,7 +1944,7 @@ static void set_hl_attr(int idx)
   at_en.cterm_bg_color = (int16_t)sgp->sg_cterm_bg;
   at_en.rgb_ae_attr = (int16_t)sgp->sg_gui;
   // FIXME(tarruda): The "unset value" for rgb is -1, but since hlgroup is
-  // initialized with 0(by garray functions), check for sg_rgb_{f,b}g_name
+  // initialized with 0 (by garray functions), check for sg_rgb_{f,b}g_name
   // before setting attr_entry->{f,g}g_color to a other than -1
   at_en.rgb_fg_color = sgp->sg_rgb_fg_idx != kColorIdxNone ? sgp->sg_rgb_fg : -1;
   at_en.rgb_bg_color = sgp->sg_rgb_bg_idx != kColorIdxNone ? sgp->sg_rgb_bg : -1;
@@ -1952,10 +1982,10 @@ int syn_name2id_len(const char *name, size_t len)
     return 0;
   }
 
-  // Avoid using stricmp() too much, it's slow on some systems */
+  // Avoid using stricmp() too much, it's slow on some systems
   // Avoid alloc()/free(), these are slow too.
   vim_memcpy_up(name_u, name, len);
-  name_u[len] = '\0';
+  name_u[len] = NUL;
 
   // map_get(..., int) returns 0 when no key is present, which is
   // the expected value for missing highlight group.
@@ -2026,7 +2056,7 @@ static int syn_add_group(const char *name, size_t len)
       return 0;
     } else if (!ASCII_ISALNUM(c) && c != '_' && c != '.' && c != '@' && c != '-') {
       // '.' and '@' are allowed characters for use with treesitter capture names.
-      msg_source(HL_ATTR(HLF_W));
+      msg_source(HLF_W);
       emsg(_(e_highlight_group_name_invalid_char));
       return 0;
     }
@@ -2225,8 +2255,11 @@ void highlight_changed(void)
 
   need_highlight_changed = false;
 
+  // sentinel value. used when no highlight is active
+  highlight_attr[HLF_NONE] = 0;
+
   /// Translate builtin highlight groups into attributes for quick lookup.
-  for (int hlf = 0; hlf < HLF_COUNT; hlf++) {
+  for (int hlf = 1; hlf < HLF_COUNT; hlf++) {
     int id = syn_check_group(hlf_names[hlf], strlen(hlf_names[hlf]));
     if (id == 0) {
       abort();
@@ -2254,10 +2287,6 @@ void highlight_changed(void)
     }
   }
 
-  // sentinel value. used when no highlight namespace is active
-  highlight_attr[HLF_COUNT] = 0;
-
-  //
   // Setup the user highlights
   //
   // Temporarily utilize 10 more hl entries:
@@ -2341,16 +2370,16 @@ void set_context_in_highlight_cmd(expand_T *xp, const char *arg)
 static void highlight_list(void)
 {
   for (int i = 10; --i >= 0;) {
-    highlight_list_two(i, HL_ATTR(HLF_D));
+    highlight_list_two(i, HLF_D);
   }
   for (int i = 40; --i >= 0;) {
     highlight_list_two(99, 0);
   }
 }
 
-static void highlight_list_two(int cnt, int attr)
+static void highlight_list_two(int cnt, int id)
 {
-  msg_puts_attr(&("N \bI \b!  \b"[cnt / 11]), attr);
+  msg_puts_hl(&("N \bI \b!  \b"[cnt / 11]), id, false);
   msg_clr_eos();
   ui_flush();
   os_delay(cnt == 99 ? 40 : (uint64_t)cnt * 50, false);
@@ -2472,7 +2501,7 @@ color_name_table_T color_name_table[] = {
   { "Cyan4", RGB_(0x0, 0x8b, 0x8b) },
   { "DarkBlue", RGB_(0x00, 0x00, 0x8b) },
   { "DarkCyan", RGB_(0x00, 0x8b, 0x8b) },
-  { "DarkGoldenRod", RGB_(0xb8, 0x86, 0x0b) },
+  { "DarkGoldenrod", RGB_(0xb8, 0x86, 0x0b) },
   { "DarkGoldenrod1", RGB_(0xff, 0xb9, 0xf) },
   { "DarkGoldenrod2", RGB_(0xee, 0xad, 0xe) },
   { "DarkGoldenrod3", RGB_(0xcd, 0x95, 0xc) },
@@ -2546,7 +2575,7 @@ color_name_table_T color_name_table[] = {
   { "Gold2", RGB_(0xee, 0xc9, 0x0) },
   { "Gold3", RGB_(0xcd, 0xad, 0x0) },
   { "Gold4", RGB_(0x8b, 0x75, 0x0) },
-  { "GoldenRod", RGB_(0xda, 0xa5, 0x20) },
+  { "Goldenrod", RGB_(0xda, 0xa5, 0x20) },
   { "Goldenrod1", RGB_(0xff, 0xc1, 0x25) },
   { "Goldenrod2", RGB_(0xee, 0xb4, 0x22) },
   { "Goldenrod3", RGB_(0xcd, 0x9b, 0x1d) },
@@ -2815,7 +2844,7 @@ color_name_table_T color_name_table[] = {
   { "LightGoldenrod2", RGB_(0xee, 0xdc, 0x82) },
   { "LightGoldenrod3", RGB_(0xcd, 0xbe, 0x70) },
   { "LightGoldenrod4", RGB_(0x8b, 0x81, 0x4c) },
-  { "LightGoldenRodYellow", RGB_(0xfa, 0xfa, 0xd2) },
+  { "LightGoldenrodYellow", RGB_(0xfa, 0xfa, 0xd2) },
   { "LightGray", RGB_(0xd3, 0xd3, 0xd3) },
   { "LightGreen", RGB_(0x90, 0xee, 0x90) },
   { "LightGrey", RGB_(0xd3, 0xd3, 0xd3) },
@@ -2900,6 +2929,10 @@ color_name_table_T color_name_table[] = {
   // for foreground in light/dark color scheme.
   { "NvimDarkBlue", RGB_(0x00, 0x4c, 0x73) },
   { "NvimDarkCyan", RGB_(0x00, 0x73, 0x73) },
+  { "NvimDarkGray1", RGB_(0x07, 0x08, 0x0d) },
+  { "NvimDarkGray2", RGB_(0x14, 0x16, 0x1b) },
+  { "NvimDarkGray3", RGB_(0x2c, 0x2e, 0x33) },
+  { "NvimDarkGray4", RGB_(0x4f, 0x52, 0x58) },
   { "NvimDarkGreen", RGB_(0x00, 0x55, 0x23) },
   { "NvimDarkGrey1", RGB_(0x07, 0x08, 0x0d) },
   { "NvimDarkGrey2", RGB_(0x14, 0x16, 0x1b) },
@@ -2910,6 +2943,10 @@ color_name_table_T color_name_table[] = {
   { "NvimDarkYellow", RGB_(0x6b, 0x53, 0x00) },
   { "NvimLightBlue", RGB_(0xa6, 0xdb, 0xff) },
   { "NvimLightCyan", RGB_(0x8c, 0xf8, 0xf7) },
+  { "NvimLightGray1", RGB_(0xee, 0xf1, 0xf8) },
+  { "NvimLightGray2", RGB_(0xe0, 0xe2, 0xea) },
+  { "NvimLightGray3", RGB_(0xc4, 0xc6, 0xcd) },
+  { "NvimLightGray4", RGB_(0x9b, 0x9e, 0xa4) },
   { "NvimLightGreen", RGB_(0xb3, 0xf6, 0xc0) },
   { "NvimLightGrey1", RGB_(0xee, 0xf1, 0xf8) },
   { "NvimLightGrey2", RGB_(0xe0, 0xe2, 0xea) },
@@ -2940,7 +2977,7 @@ color_name_table_T color_name_table[] = {
   { "Orchid2", RGB_(0xee, 0x7a, 0xe9) },
   { "Orchid3", RGB_(0xcd, 0x69, 0xc9) },
   { "Orchid4", RGB_(0x8b, 0x47, 0x89) },
-  { "PaleGoldenRod", RGB_(0xee, 0xe8, 0xaa) },
+  { "PaleGoldenrod", RGB_(0xee, 0xe8, 0xaa) },
   { "PaleGreen", RGB_(0x98, 0xfb, 0x98) },
   { "PaleGreen1", RGB_(0x9a, 0xff, 0x9a) },
   { "PaleGreen2", RGB_(0x90, 0xee, 0x90) },

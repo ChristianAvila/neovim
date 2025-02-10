@@ -1,24 +1,26 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 local os = require('os')
-local clear, feed = helpers.clear, helpers.feed
-local assert_alive = helpers.assert_alive
-local command, feed_command = helpers.command, helpers.feed_command
-local eval = helpers.eval
-local eq = helpers.eq
-local neq = helpers.neq
-local expect = helpers.expect
-local exec = helpers.exec
-local exec_lua = helpers.exec_lua
-local insert = helpers.insert
-local api = helpers.api
-local fn = helpers.fn
-local run = helpers.run
-local pcall_err = helpers.pcall_err
+
+local clear, feed = n.clear, n.feed
+local assert_alive = n.assert_alive
+local command, feed_command = n.command, n.feed_command
+local eval = n.eval
+local eq = t.eq
+local neq = t.neq
+local expect = n.expect
+local exec = n.exec
+local exec_lua = n.exec_lua
+local insert = n.insert
+local api = n.api
+local fn = n.fn
+local run = n.run
+local pcall_err = t.pcall_err
 local tbl_contains = vim.tbl_contains
-local curbuf = helpers.api.nvim_get_current_buf
-local curwin = helpers.api.nvim_get_current_win
-local curtab = helpers.api.nvim_get_current_tabpage
+local curbuf = n.api.nvim_get_current_buf
+local curwin = n.api.nvim_get_current_win
+local curtab = n.api.nvim_get_current_tabpage
 local NIL = vim.NIL
 
 describe('float window', function()
@@ -325,6 +327,57 @@ describe('float window', function()
     eq(12, pos[2])
   end)
 
+  it('error message when invalid field specified for split', function()
+    local bufnr = api.nvim_create_buf(false, true)
+    eq(
+      "non-float cannot have 'row'",
+      pcall_err(api.nvim_open_win, bufnr, true, { split = 'right', row = 10 })
+    )
+    eq(
+      "non-float cannot have 'col'",
+      pcall_err(api.nvim_open_win, bufnr, true, { split = 'right', col = 10 })
+    )
+    eq(
+      "non-float cannot have 'bufpos'",
+      pcall_err(api.nvim_open_win, bufnr, true, { split = 'right', bufpos = { 0, 0 } })
+    )
+    local winid = api.nvim_open_win(bufnr, true, { split = 'right' })
+    eq(
+      "non-float cannot have 'row'",
+      pcall_err(api.nvim_win_set_config, winid, { split = 'right', row = 10 })
+    )
+    eq(
+      "non-float cannot have 'col'",
+      pcall_err(api.nvim_win_set_config, winid, { split = 'right', col = 10 })
+    )
+    eq(
+      "non-float cannot have 'bufpos'",
+      pcall_err(api.nvim_win_set_config, winid, { split = 'right', bufpos = { 0, 0 } })
+    )
+  end)
+
+  it('error message when reconfig missing relative field', function()
+    local bufnr = api.nvim_create_buf(false, true)
+    local opts = {
+      width = 10,
+      height = 10,
+      col = 5,
+      row = 5,
+      relative = 'editor',
+      style = 'minimal',
+    }
+    local winid = api.nvim_open_win(bufnr, true, opts)
+    eq(
+      "Missing 'relative' field when reconfiguring floating window 1001",
+      pcall_err(api.nvim_win_set_config, winid, {
+        width = 3,
+        height = 3,
+        row = 10,
+        col = 10,
+      })
+    )
+  end)
+
   it('is not operated on by windo when non-focusable #15374', function()
     command([[
       let winids = []
@@ -413,6 +466,25 @@ describe('float window', function()
     eq(winid, eval('win_getid()'))
   end)
 
+  it('is not active after closing window when non-focusable #28454', function()
+    command('copen')
+    local winid = exec_lua([[
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      local opts = {
+        relative = 'editor',
+        focusable = false,
+        height = 5,
+        width = 5,
+        col = 5,
+        row = 5,
+      }
+      return vim.api.nvim_open_win(bufnr, false, opts)
+    ]])
+    command('wincmd t')
+    command('wincmd q')
+    neq(winid, curwin())
+  end)
+
   it('supports windo with focusable and non-focusable floats', function()
     local winids = exec_lua([[
       local result = {vim.api.nvim_get_current_win()}
@@ -490,7 +562,10 @@ describe('float window', function()
     local closed_win = api.nvim_get_current_win()
     command('close')
     local buf = api.nvim_create_buf(false,false)
-    api.nvim_open_win(buf, true, {relative='win', win=closed_win, width=1, height=1, bufpos={0,0}})
+    eq(
+      'Invalid window id: ' .. closed_win,
+      pcall_err(api.nvim_open_win, buf, true, {relative='win', win=closed_win, width=1, height=1, bufpos={0,0}})
+    )
     assert_alive()
   end)
 
@@ -565,8 +640,7 @@ describe('float window', function()
   end)
 
   it('tp_curwin updated if external window is moved into split', function()
-    local screen = Screen.new(20, 7)
-    screen:attach { ext_multigrid = true }
+    local _ = Screen.new(20, 7, { ext_multigrid = true })
 
     command('tabnew')
     local external_win = api.nvim_open_win(0, true, {external = true, width = 5, height = 5})
@@ -583,8 +657,22 @@ describe('float window', function()
     command('tabnext')
     eq(2, fn.tabpagenr())
     neq(external_win, api.nvim_get_current_win())
+  end)
 
-    screen:detach()
+  it('no crash with relative="win" after %bdelete #30569', function()
+    exec([[
+      botright vsplit
+      %bdelete
+    ]])
+    api.nvim_open_win(0, false, {
+      relative = 'win',
+      win = 0,
+      row = 0,
+      col = 5,
+      width = 5,
+      height = 5,
+    })
+    assert_alive()
   end)
 
   describe('with only one tabpage,', function()
@@ -924,11 +1012,101 @@ describe('float window', function()
     end)
   end)
 
+  it('placed relative to tabline and laststatus', function()
+    local screen = Screen.new(20, 10)
+    screen:add_extra_attr_ids({ [100] = { bold = true, foreground = Screen.colors.Magenta } })
+    command('set showtabline=1 laststatus=1')
+    api.nvim_open_win(0, false, {
+      relative = 'laststatus',
+      border = 'single',
+      anchor = 'SE',
+      width = 5,
+      height = 1,
+      row = 0,
+      col = 1000,
+    })
+    local tabwin = api.nvim_open_win(0, false, {
+      relative = 'tabline',
+      border = 'single',
+      width = 5,
+      height = 1,
+      row = 0,
+      col = 1000,
+    })
+    screen:expect([[
+      ^             {2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {1:~                   }|*3
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+    command('tabnew | tabnext')
+    screen:expect([[
+      {5: }{100:3}{5:  Name] }{24: No Name]X}|
+      ^             {2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {1:~                   }|*2
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+    command('vsplit')
+    screen:expect([[
+      {5: }{100:4}{5:  Name] }{24: No Name]X}|
+      ^             {2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {1:~                 }{2:│}{1:~}|
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+      {3:[No Name]          }{2:<}|
+                          |
+    ]])
+    command('quit')
+    api.nvim_win_set_config(tabwin, {
+      relative = 'tabline',
+      border = 'single',
+      width = 5,
+      height = 1,
+      row = 1,
+      col = 0,
+    })
+    screen:expect([[
+      {5: }{100:3}{5:  Name] }{24: No Name]X}|
+      ^                    |
+      {2:┌─────┐}{1:             }|
+      {2:│}{4:     }{2:│}{1:             }|
+      {2:└─────┘}{1:             }|
+      {1:~                   }|
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+    command('tabonly')
+    screen:expect([[
+      ^                    |
+      {2:┌─────┐}{1:             }|
+      {2:│}{4:     }{2:│}{1:             }|
+      {2:└─────┘}{1:             }|
+      {1:~                   }|*2
+      {1:~            }{2:┌─────┐}|
+      {1:~            }{2:│}{4:     }{2:│}|
+      {1:~            }{2:└─────┘}|
+                          |
+    ]])
+  end)
+
   local function with_ext_multigrid(multigrid)
     local screen, attrs
     before_each(function()
-      screen = Screen.new(40,7)
-      screen:attach {ext_multigrid=multigrid}
+      screen = Screen.new(40,7, {ext_multigrid=multigrid})
       attrs = {
         [0] = {bold=true, foreground=Screen.colors.Blue},
         [1] = {background = Screen.colors.LightMagenta},
@@ -959,6 +1137,8 @@ describe('float window', function()
         [26] = {blend = 80, background = Screen.colors.Gray0};
         [27] = {foreground = Screen.colors.Black, background = Screen.colors.LightGrey};
         [28] = {foreground = Screen.colors.DarkBlue, background = Screen.colors.LightGrey};
+        [29] = {background = Screen.colors.Yellow1, foreground = Screen.colors.Blue4};
+        [30] = {background = Screen.colors.Grey, foreground = Screen.colors.Blue4, bold = true};
       }
       screen:set_default_attr_ids(attrs)
     end)
@@ -1187,7 +1367,7 @@ describe('float window', function()
     it('return their configuration', function()
       local buf = api.nvim_create_buf(false, false)
       local win = api.nvim_open_win(buf, false, {relative='editor', width=20, height=2, row=3, col=5, zindex=60})
-      local expected = {anchor='NW', col=5, external=false, focusable=true, height=2, relative='editor', row=3, width=20, zindex=60, hide=false}
+      local expected = {anchor='NW', col=5, external=false, focusable=true, mouse=true, height=2, relative='editor', row=3, width=20, zindex=60, hide=false}
       eq(expected, api.nvim_win_get_config(win))
       eq(true, exec_lua([[
         local expected, win = ...
@@ -1199,11 +1379,11 @@ describe('float window', function()
         end
         return true]], expected, win))
 
-      eq({external=false, focusable=true, hide=false, relative='',split="left",width=40,height=6}, api.nvim_win_get_config(0))
+      eq({external=false, focusable=true, mouse=true, hide=false, relative='',split="left",width=40,height=6}, api.nvim_win_get_config(0))
 
       if multigrid then
         api.nvim_win_set_config(win, {external=true, width=10, height=1})
-        eq({external=true,focusable=true,width=10,height=1,relative='',hide=false}, api.nvim_win_get_config(win))
+        eq({external=true,focusable=true,mouse=true,width=10,height=1,relative='',hide=false}, api.nvim_win_get_config(win))
       end
     end)
 
@@ -1269,6 +1449,53 @@ describe('float window', function()
                                                   |
         ]])
       end
+
+      --
+      -- floating windows inherit NormalFloat from global-ns.
+      --
+      command('fclose')
+      command('hi NormalFloat guibg=LightRed')
+      api.nvim_open_win(0, false, { relative = 'win', row = 3, col = 3, width = 12, height = 3, style = 'minimal' })
+      api.nvim_set_hl_ns(api.nvim_create_namespace('test1'))
+      if multigrid then
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            {14:  1 }^x                                   |
+            {14:  2 }y                                   |
+            {14:  3 }                                    |
+            {0:~                                       }|*3
+          ## grid 3
+                                                    |
+          ## grid 5
+            {22:x           }|
+            {22:y           }|
+            {22:            }|
+          ]], float_pos={
+          [5] = {1002, "NW", 2, 3, 3, true, 50};
+        }, win_viewport={
+          [2] = {win = 1000, topline = 0, botline = 4, curline = 0, curcol = 0, linecount = 3, sum_scroll_delta = 0};
+          [5] = {win = 1002, topline = 0, botline = 3, curline = 0, curcol = 0, linecount = 3, sum_scroll_delta = 0};
+        }, win_viewport_margins={
+          [2] = { bottom = 0, left = 0, right = 0, top = 0, win = 1000 },
+          [5] = { bottom = 0, left = 0, right = 0, top = 0, win = 1002 }
+        }})
+      else
+        screen:expect({
+          grid = [[
+            {14:  1 }^x                                   |
+            {14:  2 }y                                   |
+            {14:  3 }                                    |
+            {0:~  }{22:x           }{0:                         }|
+            {0:~  }{22:y           }{0:                         }|
+            {0:~  }{22:            }{0:                         }|
+                                                    |
+          ]]
+        })
+      end
     end)
 
     it("can use 'minimal' style", function()
@@ -1317,14 +1544,14 @@ describe('float window', function()
           [2:----------------------------------------]|*6
           [3:----------------------------------------]|
         ## grid 2
-          {19: }{17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
+          {19: }{29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
           {19:   }{14:  2 }{22:y}                                |
           {19:   }{14:  3 }{22: }                                |
           {0:~                                       }|*3
         ## grid 3
                                                   |
         ## grid 4
-          {17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }|
+          {29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }|
           {19:  }{15:y                 }|
           {19:  }{15:                  }|
           {15:                    }|
@@ -1332,9 +1559,9 @@ describe('float window', function()
 
       else
         screen:expect([[
-          {19: }{17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
+          {19: }{29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
           {19:   }{14:  2 }{22:y}                                |
-          {19:   }{14:  3 }{22: }  {17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }          |
+          {19:   }{14:  3 }{22: }  {29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }          |
           {0:~         }{19:  }{15:y                 }{0:          }|
           {0:~         }{19:  }{15:                  }{0:          }|
           {0:~         }{15:                    }{0:          }|
@@ -1417,14 +1644,14 @@ describe('float window', function()
           [2:----------------------------------------]|*6
           [3:----------------------------------------]|
         ## grid 2
-          {19: }{17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
+          {19: }{29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
           {19:   }{14:  2 }{22:y}                                |
           {19:   }{14:  3 }{22: }                                |
           {0:~                                       }|*3
         ## grid 3
                                                   |
         ## grid 4
-          {17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }|
+          {29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }|
           {19:  }{15:y                 }|
           {19:  }{15:                  }|
           {15:                    }|
@@ -1432,9 +1659,9 @@ describe('float window', function()
 
       else
         screen:expect([[
-          {19: }{17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
+          {19: }{29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{20:  1 }{22:^x}{21:                                }|
           {19:   }{14:  2 }{22:y}                                |
-          {19:   }{14:  3 }{22: }  {17:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }          |
+          {19:   }{14:  3 }{22: }  {29:𐌢̀́̂̃̅̄𐌢̀́̂̃̅̄}{15:x                 }          |
           {0:~         }{19:  }{15:y                 }{0:          }|
           {0:~         }{19:  }{15:                  }{0:          }|
           {0:~         }{15:                    }{0:          }|
@@ -1482,31 +1709,34 @@ describe('float window', function()
       feed('ix<cr>y<cr><esc>gg')
       api.nvim_open_win(0, false, {relative='editor', width=20, height=4, row=4, col=10, style='minimal'})
       if multigrid then
-        screen:expect{grid=[[
-        ## grid 1
-          [2:----------------------------------------]|*6
-          [3:----------------------------------------]|
-        ## grid 2
-          {20:1}{19:   }{20:   }{22:^x}{21:                                }|
-          {14:2}{19:   }{14:   }{22:y}                                |
-          {14:3}{19:   }{14:   }{22: }                                |
-          {0:~                                       }|*3
-        ## grid 3
-                                                  |
-        ## grid 4
-          {15:x                   }|
-          {15:y                   }|
-          {15:                    }|*2
-        ]], float_pos={[4] = {1001, "NW", 1, 4, 10, true}}}
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            {20:   1}{19:   }{22:^x}{21:                                }|
+            {14:   2}{19:   }{22:y}                                |
+            {14:   3}{19:   }{22: }                                |
+            {0:~                                       }|*3
+          ## grid 3
+                                                    |
+          ## grid 4
+            {15:x                   }|
+            {15:y                   }|
+            {15:                    }|*2
+          ]],
+          float_pos = { [4] = { 1001, "NW", 1, 4, 10, true, 50 } },
+        })
       else
-        screen:expect{grid=[[
-          {20:1}{19:   }{20:   }{22:^x}{21:                                }|
-          {14:2}{19:   }{14:   }{22:y}                                |
-          {14:3}{19:   }{14:   }{22: }  {15:x                   }          |
+        screen:expect([[
+          {20:   1}{19:   }{22:^x}{21:                                }|
+          {14:   2}{19:   }{22:y}                                |
+          {14:   3}{19:   }{22: }  {15:x                   }          |
           {0:~         }{15:y                   }{0:          }|
           {0:~         }{15:                    }{0:          }|*2
                                                   |
-        ]]}
+        ]])
       end
     end)
 
@@ -1536,7 +1766,12 @@ describe('float window', function()
         }, win_viewport={
           [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
           [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
-        }}
+        },
+        win_viewport_margins={
+          [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
+          [4] = {win = 1001, top = 1, bottom = 1, left = 1, right = 1};
+        }
+      }
       else
         screen:expect{grid=[[
           ^                                        |
@@ -1736,7 +1971,12 @@ describe('float window', function()
         }, win_viewport={
           [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
           [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
-        }}
+        },
+        win_viewport_margins={
+          [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
+          [4] = {win = 1001, top = 0, bottom = 0, left = 1, right = 1};
+        }
+      }
       else
         screen:expect{grid=[[
           ^                                        |
@@ -1769,6 +2009,10 @@ describe('float window', function()
         }, win_viewport={
           [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
           [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
+        },
+        win_viewport_margins={
+          [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
+          [4] = {win = 1001, top = 1, bottom = 1, left = 0, right = 0};
         }}
       else
         screen:expect{grid=[[
@@ -1814,6 +2058,10 @@ describe('float window', function()
         }, win_viewport={
           [2] = {win = 1000, topline = 0, botline = 6, curline = 5, curcol = 0, linecount = 6, sum_scroll_delta = 0};
           [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
+        },
+        win_viewport_margins={
+          [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
+          [4] = {win = 1001, top = 0, bottom = 1, left = 0, right = 1};
         }}
       else
         screen:expect{grid=[[
@@ -2064,7 +2312,7 @@ describe('float window', function()
         ## grid 3
                                                   |
         ## grid 4
-          {5:╔═════}🦄BB{5:╗}|
+          {5:╔═════}{11:🦄BB}{5:╗}|
           {5:║}{1: halloj! }{5:║}|
           {5:║}{1: BORDAA  }{5:║}|
           {5:╚═════════╝}|
@@ -2078,12 +2326,67 @@ describe('float window', function()
         screen:expect{grid=[[
           ^                                        |
           {0:~                                       }|
-          {0:~    }{5:╔═════}🦄BB{5:╗}{0:                        }|
+          {0:~    }{5:╔═════}{11:🦄BB}{5:╗}{0:                        }|
           {0:~    }{5:║}{1: halloj! }{5:║}{0:                        }|
           {0:~    }{5:║}{1: BORDAA  }{5:║}{0:                        }|
           {0:~    }{5:╚═════════╝}{0:                        }|
                                                   |
         ]]}
+      end
+
+      -- reuse before title pos
+      api.nvim_win_set_config(win, {title= 'new'})
+      if multigrid then
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            ^                                        |
+            {0:~                                       }|*5
+          ## grid 3
+                                                    |
+          ## grid 4
+            {5:╔══════}{11:new}{5:╗}|
+            {5:║}{1: halloj! }{5:║}|
+            {5:║}{1: BORDAA  }{5:║}|
+            {5:╚═════════╝}|
+          ]],
+          float_pos = {
+          [4] = {1001, "NW", 1, 2, 5, true, 50};
+        },
+          win_viewport = {
+          [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
+        },
+          win_viewport_margins = {
+          [2] = {
+            bottom = 0,
+            left = 0,
+            right = 0,
+            top = 0,
+            win = 1000
+          },
+          [4] = {
+            bottom = 1,
+            left = 1,
+            right = 1,
+            top = 1,
+            win = 1001
+          }
+        },
+        })
+      else
+        screen:expect([[
+          ^                                        |
+          {0:~                                       }|
+          {0:~    }{5:╔══════}{11:new}{5:╗}{0:                        }|
+          {0:~    }{5:║}{1: halloj! }{5:║}{0:                        }|
+          {0:~    }{5:║}{1: BORDAA  }{5:║}{0:                        }|
+          {0:~    }{5:╚═════════╝}{0:                        }|
+                                                  |
+        ]])
       end
     end)
 
@@ -2212,7 +2515,7 @@ describe('float window', function()
           {5:╔═════════╗}|
           {5:║}{1: halloj! }{5:║}|
           {5:║}{1: BORDAA  }{5:║}|
-          {5:╚═════}🦄BB{5:╝}|
+          {5:╚═════}{11:🦄BB}{5:╝}|
         ]], float_pos={
           [4] = { 1001, "NW", 1, 2, 5, true }
         }, win_viewport={
@@ -2226,9 +2529,64 @@ describe('float window', function()
           {0:~    }{5:╔═════════╗}{0:                        }|
           {0:~    }{5:║}{1: halloj! }{5:║}{0:                        }|
           {0:~    }{5:║}{1: BORDAA  }{5:║}{0:                        }|
-          {0:~    }{5:╚═════}🦄BB{5:╝}{0:                        }|
+          {0:~    }{5:╚═════}{11:🦄BB}{5:╝}{0:                        }|
                                                   |
         ]]}
+      end
+
+      -- reuse before footer pos
+      api.nvim_win_set_config(win, { footer = 'new' })
+      if multigrid then
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            ^                                        |
+            {0:~                                       }|*5
+          ## grid 3
+                                                    |
+          ## grid 4
+            {5:╔═════════╗}|
+            {5:║}{1: halloj! }{5:║}|
+            {5:║}{1: BORDAA  }{5:║}|
+            {5:╚══════}{11:new}{5:╝}|
+          ]],
+          float_pos = {
+          [4] = {1001, "NW", 1, 2, 5, true, 50};
+        },
+          win_viewport = {
+          [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
+        },
+          win_viewport_margins = {
+          [2] = {
+            bottom = 0,
+            left = 0,
+            right = 0,
+            top = 0,
+            win = 1000
+          },
+          [4] = {
+            bottom = 1,
+            left = 1,
+            right = 1,
+            top = 1,
+            win = 1001
+          }
+        },
+        })
+      else
+        screen:expect([[
+          ^                                        |
+          {0:~                                       }|
+          {0:~    }{5:╔═════════╗}{0:                        }|
+          {0:~    }{5:║}{1: halloj! }{5:║}{0:                        }|
+          {0:~    }{5:║}{1: BORDAA  }{5:║}{0:                        }|
+          {0:~    }{5:╚══════}{11:new}{5:╝}{0:                        }|
+                                                  |
+        ]])
       end
     end)
 
@@ -2344,6 +2702,7 @@ describe('float window', function()
 
       command('hi B0 guibg=Red guifg=Black')
       command('hi B1 guifg=White')
+
       api.nvim_win_set_config(win, {
         title = {{"🦄"}, {"BB", {"B0", "B1"}}}, title_pos = "right",
         footer= {{"🦄"}, {"BB", {"B0", "B1"}}}, footer_pos = "right",
@@ -2359,10 +2718,10 @@ describe('float window', function()
         ## grid 3
                                                   |
         ## grid 4
-          {5:╔═════}🦄{7:BB}{5:╗}|
+          {5:╔═════}{11:🦄}{7:BB}{5:╗}|
           {5:║}{1: halloj! }{5:║}|
           {5:║}{1: BORDAA  }{5:║}|
-          {5:╚═════}🦄{7:BB}{5:╝}|
+          {5:╚═════}{11:🦄}{7:BB}{5:╝}|
         ]], float_pos={
           [4] = { 1001, "NW", 1, 2, 5, true }
         }, win_viewport={
@@ -2373,10 +2732,82 @@ describe('float window', function()
         screen:expect{grid=[[
           ^                                        |
           {0:~                                       }|
-          {0:~    }{5:╔═════}🦄{7:BB}{5:╗}{0:                        }|
+          {0:~    }{5:╔═════}{11:🦄}{7:BB}{5:╗}{0:                        }|
           {0:~    }{5:║}{1: halloj! }{5:║}{0:                        }|
           {0:~    }{5:║}{1: BORDAA  }{5:║}{0:                        }|
-          {0:~    }{5:╚═════}🦄{7:BB}{5:╝}{0:                        }|
+          {0:~    }{5:╚═════}{11:🦄}{7:BB}{5:╝}{0:                        }|
+                                                  |
+        ]]}
+      end
+      eq({{"🦄"}, {"BB", {"B0", "B1"}}}, api.nvim_win_get_config(win).title)
+      eq({{"🦄"}, {"BB", {"B0", "B1"}}}, api.nvim_win_get_config(win).footer)
+
+      api.nvim_win_set_config(win, {
+        title = {{"🦄", ""}, {"BB", {"B0", "B1", ""}}}, title_pos = "left",
+        footer= {{"🦄", ""}, {"BB", {"B0", "B1", ""}}}, footer_pos = "left",
+      })
+      if multigrid then
+        screen:expect{grid=[[
+        ## grid 1
+          [2:----------------------------------------]|*6
+          [3:----------------------------------------]|
+        ## grid 2
+          ^                                        |
+          {0:~                                       }|*5
+        ## grid 3
+                                                  |
+        ## grid 4
+          {5:╔}🦄{7:BB}{5:═════╗}|
+          {5:║}{1: halloj! }{5:║}|
+          {5:║}{1: BORDAA  }{5:║}|
+          {5:╚}🦄{7:BB}{5:═════╝}|
+        ]], float_pos={
+          [4] = { 1001, "NW", 1, 2, 5, true }
+        }, win_viewport={
+          [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
+        }}
+      else
+        screen:expect{grid=[[
+          ^                                        |
+          {0:~                                       }|
+          {0:~    }{5:╔}🦄{7:BB}{5:═════╗}{0:                        }|
+          {0:~    }{5:║}{1: halloj! }{5:║}{0:                        }|
+          {0:~    }{5:║}{1: BORDAA  }{5:║}{0:                        }|
+          {0:~    }{5:╚}🦄{7:BB}{5:═════╝}{0:                        }|
+                                                  |
+        ]]}
+      end
+      eq({{"🦄", ""}, {"BB", {"B0", "B1", ""}}}, api.nvim_win_get_config(win).title)
+      eq({{"🦄", ""}, {"BB", {"B0", "B1", ""}}}, api.nvim_win_get_config(win).footer)
+
+      -- making it a split should not leak memory
+      api.nvim_win_set_config(win, { vertical = true })
+      if multigrid then
+        screen:expect{grid=[[
+        ## grid 1
+          [4:--------------------]{5:│}[2:-------------------]|*5
+          {5:[No Name] [+]        }{4:[No Name]          }|
+          [3:----------------------------------------]|
+        ## grid 2
+          ^                   |
+          {0:~                  }|*4
+        ## grid 3
+                                                  |
+        ## grid 4
+           halloj!            |
+           BORDAA             |
+          {0:~                   }|*3
+        ]], win_viewport={
+          [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [4] = {win = 1001, topline = 0, botline = 3, curline = 0, curcol = 0, linecount = 2, sum_scroll_delta = 0};
+        }}
+      else
+        screen:expect{grid=[[
+           halloj!            {5:│}^                   |
+           BORDAA             {5:│}{0:~                  }|
+          {0:~                   }{5:│}{0:~                  }|*3
+          {5:[No Name] [+]        }{4:[No Name]          }|
                                                   |
         ]]}
       end
@@ -3759,7 +4190,7 @@ describe('float window', function()
         ]]}
       end
       eq({relative='win', width=12, height=1, bufpos={1,32}, anchor='NW', hide=false,
-          external=false, col=0, row=1, win=firstwin, focusable=true, zindex=50}, api.nvim_win_get_config(win))
+          external=false, col=0, row=1, win=firstwin, focusable=true, mouse=true, zindex=50}, api.nvim_win_get_config(win))
 
       feed('<c-e>')
       if multigrid then
@@ -4062,7 +4493,7 @@ describe('float window', function()
 
     if multigrid then
       pending("supports second UI without multigrid", function()
-        local session2 = helpers.connect(eval('v:servername'))
+        local session2 = n.connect(eval('v:servername'))
         print(session2:request("nvim_eval", "2+2"))
         local screen2 = Screen.new(40,7)
         screen2:attach(nil, session2)
@@ -5377,7 +5808,7 @@ describe('float window', function()
         end
       end)
 
-      it("focus by mouse", function()
+      local function test_float_mouse_focus()
         if multigrid then
           api.nvim_input_mouse('left', 'press', '', 4, 0, 0)
           screen:expect{grid=[[
@@ -5431,10 +5862,18 @@ describe('float window', function()
                                                     |
           ]])
         end
+      end
+
+      it("focus by mouse (focusable=true)", function()
+        test_float_mouse_focus()
       end)
 
-      it("focus by mouse (focusable=false)", function()
-        api.nvim_win_set_config(win, {focusable=false})
+      it("focus by mouse (focusable=false, mouse=true)", function()
+        api.nvim_win_set_config(win, {focusable=false, mouse=true})
+        test_float_mouse_focus()
+      end)
+
+      local function test_float_mouse_no_focus()
         api.nvim_buf_set_lines(0, -1, -1, true, {"a"})
         expected_pos[4][6] = false
         if multigrid then
@@ -5492,6 +5931,16 @@ describe('float window', function()
                                                     |
           ]])
         end
+      end
+
+      it("focus by mouse (focusable=false)", function()
+        api.nvim_win_set_config(win, {focusable=false})
+        test_float_mouse_no_focus()
+      end)
+
+      it("focus by mouse (focusable=true, mouse=false)", function()
+        api.nvim_win_set_config(win, {mouse=false})
+        test_float_mouse_no_focus()
       end)
 
       it("j", function()
@@ -7960,7 +8409,7 @@ describe('float window', function()
     end)
 
     it("correctly redraws when overlaid windows are resized #13991", function()
-	  helpers.source([[
+	  n.source([[
         let popup_config = {"relative" : "editor",
                     \ "width" : 7,
                     \ "height" : 3,
@@ -8024,7 +8473,7 @@ describe('float window', function()
         ]])
       end
 
-      helpers.source([[
+      n.source([[
         let new_popup_config = {"width" : 1, "height" : 3}
         let new_border_config = {"width" : 3, "height" : 5}
 
@@ -8039,7 +8488,7 @@ describe('float window', function()
         nnoremap zz <cmd>call Resize()<cr>
       ]])
 
-      helpers.feed("zz")
+      n.feed("zz")
       if multigrid then
         screen:expect{grid=[[
         ## grid 1
@@ -8299,6 +8748,131 @@ describe('float window', function()
                                                   |
         ]]}
       end
+
+      --
+      -- Check that floats are positioned correctly after changing the zindexes.
+      --
+      command('fclose')
+      exec_lua([[
+        local win1, win3 = ...
+        vim.api.nvim_win_set_config(win1, { zindex = 400, title = 'win_400', title_pos = 'center', border = 'double' })
+        vim.api.nvim_win_set_config(win3, { zindex = 300, title = 'win_300', title_pos = 'center', border = 'single' })
+      ]], win1, win3)
+      if multigrid then
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            ^                                        |
+            {0:~                                       }|*5
+          ## grid 3
+                                                    |
+          ## grid 4
+            {5:╔══════}{11:win_400}{5:═══════╗}|
+            {5:║}{7:                    }{5:║}|
+            {5:║}{7:~                   }{5:║}|*2
+            {5:╚════════════════════╝}|
+          ## grid 6
+            {5:┌──────}{11:win_300}{5:───────┐}|
+            {5:│}{8:                    }{5:│}|
+            {5:│}{8:~                   }{5:│}|*2
+            {5:└────────────────────┘}|
+          ]], float_pos={
+          [4] = {1001, "NW", 1, 1, 5, true, 400};
+          [6] = {1003, "NW", 1, 3, 7, true, 300};
+        }, win_viewport={
+          [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [6] = {win = 1003, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+        }, win_viewport_margins={
+          [2] = { bottom = 0, left = 0, right = 0, top = 0, win = 1000 },
+          [4] = { bottom = 1, left = 1, right = 1, top = 1, win = 1001 },
+          [6] = { bottom = 1, left = 1, right = 1, top = 1, win = 1003 }
+        }})
+      else
+        screen:expect({
+          grid = [[
+            ^                                        |
+            {0:~    }{5:╔══════}{11:win_400}{5:═══════╗}{0:             }|
+            {0:~    }{5:║}{7:                    }{5:║─┐}{0:           }|
+            {0:~    }{5:║}{7:~                   }{5:║}{8: }{5:│}{0:           }|*2
+            {0:~    }{5:╚════════════════════╝}{8: }{5:│}{0:           }|
+                   {5:└────────────────────┘}           |
+          ]]
+        })
+      end
+      exec_lua([[
+        local win1, win3 = ...
+        vim.api.nvim_win_set_config(win1, { zindex = 100, title='win_100' })
+        vim.api.nvim_win_set_config(win3, { zindex = 150, title='win_150' })
+      ]], win1, win3)
+      if multigrid then
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            ^                                        |
+            {0:~                                       }|*5
+          ## grid 3
+                                                    |
+          ## grid 4
+            {5:╔══════}{11:win_100}{5:═══════╗}|
+            {5:║}{7:                    }{5:║}|
+            {5:║}{7:~                   }{5:║}|*2
+            {5:╚════════════════════╝}|
+          ## grid 6
+            {5:┌──────}{11:win_150}{5:───────┐}|
+            {5:│}{8:                    }{5:│}|
+            {5:│}{8:~                   }{5:│}|*2
+            {5:└────────────────────┘}|
+          ]],
+          float_pos = {
+          [4] = {1001, "NW", 1, 1, 5, true, 100};
+          [6] = {1003, "NW", 1, 3, 7, true, 150};
+        },
+          win_viewport = {
+          [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [6] = {win = 1003, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+        },
+          win_viewport_margins = {
+          [2] = {
+            bottom = 0,
+            left = 0,
+            right = 0,
+            top = 0,
+            win = 1000
+          },
+          [4] = {
+            bottom = 1,
+            left = 1,
+            right = 1,
+            top = 1,
+            win = 1001
+          },
+          [6] = {
+            bottom = 1,
+            left = 1,
+            right = 1,
+            top = 1,
+            win = 1003
+          }
+        },
+        })
+      else
+        screen:expect([[
+          ^                                        |
+          {0:~    }{5:╔═┌──────}{11:win_150}{5:───────┐}{0:           }|
+          {0:~    }{5:║}{7: }{5:│}{8:                    }{5:│}{0:           }|
+          {0:~    }{5:║}{7:~}{5:│}{8:~                   }{5:│}{0:           }|*2
+          {0:~    }{5:╚═└────────────────────┘}{0:           }|
+                                                  |
+        ]])
+      end
     end)
 
     it('can use winbar', function()
@@ -8361,6 +8935,10 @@ describe('float window', function()
         }, win_viewport={
           [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
           [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+        },
+        win_viewport_margins={
+          [2] = {win = 1000, top = 0, bottom = 0, left = 0, right = 0};
+          [4] = {win = 1001, top = 2, bottom = 1, left = 1, right = 1};
         }}
       else
         screen:expect{grid=[[
@@ -8882,6 +9460,7 @@ describe('float window', function()
     end)
 
     it('float window with hide option', function()
+      local cwin = api.nvim_get_current_win()
       local buf = api.nvim_create_buf(false,false)
       local win = api.nvim_open_win(buf, false, {relative='editor', width=10, height=2, row=2, col=5, hide = true})
       local expected_pos = {
@@ -8961,6 +9540,22 @@ describe('float window', function()
                                                   |
         ]])
       end
+      -- check window jump with hide
+      feed('<C-W><C-W>')
+      -- should keep on current window
+      eq(cwin, api.nvim_get_current_win())
+      api.nvim_win_set_config(win, {hide=false})
+      api.nvim_set_current_win(win)
+      local win3 = api.nvim_open_win(buf, true, {relative='editor', width=4, height=4, row=2, col=5, hide = false})
+      api.nvim_win_set_config(win, {hide=true})
+      feed('<C-W>w')
+      -- should goto the first window with prev
+      eq(cwin, api.nvim_get_current_win())
+      -- windo
+      command('windo set winheight=6')
+      eq(win3, api.nvim_get_current_win())
+      eq(6, api.nvim_win_get_height(win3))
+      eq(2, api.nvim_win_get_height(win))
     end)
 
     it(':fclose command #9663', function()
@@ -9205,6 +9800,51 @@ describe('float window', function()
       eq(restcmd, fn.winrestcmd())
       eq(config, api.nvim_win_get_config(0))
     end)
+
+    it("error when relative to itself", function()
+      local buf = api.nvim_create_buf(false, true)
+      local config = { relative='win', width=5, height=2, row=3, col=3 }
+      local winid = api.nvim_open_win(buf, false, config)
+      api.nvim_set_current_win(winid)
+      eq("floating window cannot be relative to itself", pcall_err(api.nvim_win_set_config, winid, config))
+    end)
+
+    it("bufpos out of range", function()
+      local buf = api.nvim_create_buf(false, true)
+      api.nvim_buf_set_lines(0, 0, -1, false, {})
+      local config = { relative='win', width=5, height=2, row=0, col=0, bufpos = { 3, 3 } }
+      api.nvim_open_win(buf, false, config)
+      if multigrid then
+        screen:expect({
+          grid = [[
+          ## grid 1
+            [2:----------------------------------------]|*6
+            [3:----------------------------------------]|
+          ## grid 2
+            ^                                        |
+            {0:~                                       }|*5
+          ## grid 3
+                                                    |
+          ## grid 4
+            {1:     }|
+            {2:~    }|
+          ]], float_pos={
+          [4] = {1001, "NW", 2, 0, 0, true, 50};
+        }, win_viewport={
+          [2] = {win = 1000, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+          [4] = {win = 1001, topline = 0, botline = 2, curline = 0, curcol = 0, linecount = 1, sum_scroll_delta = 0};
+        }})
+      else
+        screen:expect({
+          grid = [[
+            {1:^     }                                   |
+            {2:~    }{0:                                   }|
+            {0:~                                       }|*4
+                                                    |
+          ]]
+        })
+      end
+    end)
   end
 
   describe('with ext_multigrid', function()
@@ -9214,4 +9854,3 @@ describe('float window', function()
     with_ext_multigrid(false)
   end)
 end)
-

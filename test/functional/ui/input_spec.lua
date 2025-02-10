@@ -1,15 +1,17 @@
-local helpers = require('test.functional.helpers')(after_each)
-local clear, feed_command = helpers.clear, helpers.feed_command
-local feed, next_msg, eq = helpers.feed, helpers.next_msg, helpers.eq
-local command = helpers.command
-local expect = helpers.expect
-local curbuf_contents = helpers.curbuf_contents
-local api = helpers.api
-local exec_lua = helpers.exec_lua
-local write_file = helpers.write_file
-local fn = helpers.fn
-local eval = helpers.eval
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
+
+local clear, feed_command = n.clear, n.feed_command
+local feed, next_msg, eq = n.feed, n.next_msg, t.eq
+local command = n.command
+local expect = n.expect
+local curbuf_contents = n.curbuf_contents
+local api = n.api
+local exec_lua = n.exec_lua
+local write_file = t.write_file
+local fn = n.fn
+local eval = n.eval
 
 before_each(clear)
 
@@ -280,7 +282,6 @@ end)
 
 it('typing a simplifiable key at hit-enter prompt triggers mapping vim-patch:8.2.0839', function()
   local screen = Screen.new(60, 8)
-  screen:attach()
   command([[nnoremap <C-6> <Cmd>echo 'hit ctrl-6'<CR>]])
   feed_command('ls')
   screen:expect([[
@@ -326,7 +327,6 @@ describe('input non-printable chars', function()
   it("doesn't crash when echoing them back", function()
     write_file('Xtest-overwrite', [[foobar]])
     local screen = Screen.new(60, 8)
-    screen:attach()
     command('set shortmess-=F')
 
     feed_command('e Xtest-overwrite')
@@ -336,8 +336,8 @@ describe('input non-printable chars', function()
       "Xtest-overwrite" [noeol] 1L, 6B                            |
     ]])
 
-    -- The timestamp is in second resolution, wait two seconds to be sure.
-    screen:sleep(2000)
+    -- Wait for some time so that the timestamp changes.
+    vim.uv.sleep(10)
     write_file('Xtest-overwrite', [[smurf]])
     feed_command('w')
     screen:expect([[
@@ -368,7 +368,7 @@ describe('input non-printable chars', function()
       "Xtest-overwrite"                                           |
       {9:WARNING: The file has been changed since reading it!!!}      |
       {6:Do you really want to write to it (y/n)?}u                   |
-      {6:Do you really want to write to it (y/n)?}                    |
+      {6:Do you really want to write to it (y/n)?}{18:^E}                  |
       {6:Do you really want to write to it (y/n)?}^                    |
     ]])
 
@@ -379,7 +379,7 @@ describe('input non-printable chars', function()
       "Xtest-overwrite"                                           |
       {9:WARNING: The file has been changed since reading it!!!}      |
       {6:Do you really want to write to it (y/n)?}u                   |
-      {6:Do you really want to write to it (y/n)?}                    |
+      {6:Do you really want to write to it (y/n)?}{18:^E}                  |
       {6:Do you really want to write to it (y/n)?}n                   |
       {6:Press ENTER or type command to continue}^                     |
     ]])
@@ -426,7 +426,6 @@ describe('display is updated', function()
   local screen
   before_each(function()
     screen = Screen.new(60, 8)
-    screen:attach()
   end)
 
   it('in Insert mode after <Nop> mapping #17911', function()

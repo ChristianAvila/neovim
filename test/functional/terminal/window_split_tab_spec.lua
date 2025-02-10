@@ -1,16 +1,18 @@
-local helpers = require('test.functional.helpers')(after_each)
-local thelpers = require('test.functional.terminal.helpers')
-local assert_alive = helpers.assert_alive
-local clear = helpers.clear
-local feed = helpers.feed
-local feed_command = helpers.feed_command
-local command = helpers.command
-local eq = helpers.eq
-local eval = helpers.eval
-local api = helpers.api
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
+
+local tt = require('test.functional.testterm')
+local assert_alive = n.assert_alive
+local clear = n.clear
+local feed = n.feed
+local feed_command = n.feed_command
+local command = n.command
+local eq = t.eq
+local eval = n.eval
+local api = n.api
 local sleep = vim.uv.sleep
-local retry = helpers.retry
-local is_os = helpers.is_os
+local retry = t.retry
+local is_os = t.is_os
 
 describe(':terminal', function()
   local screen
@@ -20,14 +22,12 @@ describe(':terminal', function()
     -- set the statusline to a constant value because of variables like pid
     -- and current directory and to improve visibility of splits
     api.nvim_set_option_value('statusline', '==========', {})
-    command('highlight StatusLine cterm=NONE')
-    command('highlight StatusLineNC cterm=NONE')
-    command('highlight VertSplit cterm=NONE')
-    screen = thelpers.screen_setup(3)
-  end)
-
-  after_each(function()
-    screen:detach()
+    screen = tt.setup_screen(3)
+    command('highlight StatusLine NONE')
+    command('highlight StatusLineNC NONE')
+    command('highlight StatusLineTerm NONE')
+    command('highlight StatusLineTermNC NONE')
+    command('highlight VertSplit NONE')
   end)
 
   it('next to a closing window', function()
@@ -49,7 +49,7 @@ describe(':terminal', function()
       ==========                                        |
       tty ready                                         |
       rows: 5, cols: 50                                 |
-      {2: }                                                 |
+                                                        |
                                                         |*2
       ==========                                        |
       :2split                                           |
@@ -61,7 +61,7 @@ describe(':terminal', function()
       ==========                                        |
       ^tty ready                                         |
       rows: 5, cols: 50                                 |
-      {2: }                                                 |
+                                                        |
                                                         |*2
       ==========                                        |
       :wincmd p                                         |
@@ -77,7 +77,7 @@ describe(':terminal', function()
     command('bprevious')
     screen:expect([[
       tty ready                                         |
-      ^foo{2: }                                              |
+      ^foo                                               |
                                                         |*8
     ]])
   end)
@@ -102,7 +102,7 @@ describe(':terminal', function()
     screen:expect([[
       tty ready                                      |
       rows: 7, cols: 47                              |
-      {2: }                                              |
+                                                     |
                                                      |*3
       ^                                               |
                                                      |
@@ -112,7 +112,7 @@ describe(':terminal', function()
       tty ready                                |
       rows: 7, cols: 47                        |
       rows: 4, cols: 41                        |
-      {2:^ }                                        |
+      ^                                         |
                                                |
     ]])
   end)

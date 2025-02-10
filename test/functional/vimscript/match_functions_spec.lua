@@ -1,11 +1,12 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
-local eq = helpers.eq
-local clear = helpers.clear
-local fn = helpers.fn
-local command = helpers.command
-local exc_exec = helpers.exc_exec
+local eq = t.eq
+local clear = n.clear
+local fn = n.fn
+local command = n.command
+local exc_exec = n.exc_exec
 
 before_each(clear)
 
@@ -173,7 +174,6 @@ describe('matchaddpos()', function()
   end)
   it('works with zero length', function()
     local screen = Screen.new(40, 5)
-    screen:attach()
     fn.setline(1, 'abcdef')
     command('hi PreProc guifg=Red')
     eq(4, fn.matchaddpos('PreProc', { { 1, 2, 0 } }, 3, 4))

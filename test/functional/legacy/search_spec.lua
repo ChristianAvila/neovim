@@ -1,13 +1,15 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local command = helpers.command
-local eq = helpers.eq
-local eval = helpers.eval
-local feed = helpers.feed
-local fn = helpers.fn
-local poke_eventloop = helpers.poke_eventloop
-local exec = helpers.exec
+
+local clear = n.clear
+local command = n.command
+local eq = t.eq
+local eval = n.eval
+local feed = n.feed
+local fn = n.fn
+local poke_eventloop = n.poke_eventloop
+local exec = n.exec
 
 describe('search cmdline', function()
   local screen
@@ -16,7 +18,6 @@ describe('search cmdline', function()
     clear()
     command('set nohlsearch inccommand=')
     screen = Screen.new(20, 3)
-    screen:attach()
     screen:set_default_attr_ids({
       inc = { reverse = true },
       err = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
@@ -745,7 +746,6 @@ describe('Search highlight', function()
   -- oldtest: Test_hlsearch_dump()
   it('beyond line end vim-patch:8.2.2542', function()
     local screen = Screen.new(50, 6)
-    screen:attach()
     exec([[
       set hlsearch noincsearch cursorline
       call setline(1, ["xxx", "xxx", "xxx"])
@@ -771,7 +771,6 @@ describe('Search highlight', function()
       [4] = { background = Screen.colors.Yellow, bold = true }, -- Search
       [5] = { background = Screen.colors.LightGrey, bold = true, foreground = Screen.colors.Black },
     })
-    screen:attach()
     exec([[
       set hlsearch noincsearch
       call setline(1, repeat(["xxx yyy zzz"], 3))

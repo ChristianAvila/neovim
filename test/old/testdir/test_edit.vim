@@ -1320,7 +1320,7 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
   call assert_equal([0, 10, 1, 0], getpos('.'))
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
-  call assert_equal([0, 2, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   " <S-Up> is the same as <PageUp>
   " <S-Down> is the same as <PageDown>
   call cursor(1, 1)
@@ -1343,7 +1343,7 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
   call assert_equal([0, 10, 1, 0], getpos('.'))
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
-  call assert_equal([0, 2, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   set nostartofline
   call cursor(30, 11)
   norm! zt
@@ -1356,7 +1356,7 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
   call assert_equal([0, 10, 11, 0], getpos('.'))
   call feedkeys("A\<PageUp>\<esc>", 'tnix')
-  call assert_equal([0, 2, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   call cursor(1, 1)
   call feedkeys("A\<PageDown>\<esc>", 'tnix')
   call assert_equal([0, 9, 11, 0], getpos('.'))
@@ -1381,7 +1381,7 @@ func Test_edit_PAGEUP_PAGEDOWN()
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
   call assert_equal([0, 10, 11, 0], getpos('.'))
   call feedkeys("A\<S-Up>\<esc>", 'tnix')
-  call assert_equal([0, 2, 11, 0], getpos('.'))
+  call assert_equal([0, 10, 11, 0], getpos('.'))
   call cursor(1, 1)
   call feedkeys("A\<S-Down>\<esc>", 'tnix')
   call assert_equal([0, 9, 11, 0], getpos('.'))
@@ -1973,6 +1973,11 @@ func Test_edit_insert_reg()
   let @r = 'sample'
   call feedkeys("a\<C-R>=SaveFirstLine()\<CR>", "xt")
   call assert_equal('"', g:Line)
+
+  " Test for inserting an null and an empty list
+  call feedkeys("a\<C-R>=test_null_list()\<CR>", "xt")
+  call feedkeys("a\<C-R>=[]\<CR>", "xt")
+  call assert_equal(['r'], getbufline('', 1, '$'))
   call test_override('ALL', 0)
   close!
 endfunc
@@ -1983,8 +1988,8 @@ func Test_edit_ctrl_r_failed()
 
   let buf = RunVimInTerminal('', #{rows: 6, cols: 60})
 
-  " trying to insert a dictionary produces an error
-  call term_sendkeys(buf, "i\<C-R>={}\<CR>")
+  " trying to insert a blob produces an error
+  call term_sendkeys(buf, "i\<C-R>=0z\<CR>")
 
   " ending Insert mode should put the cursor back on the ':'
   call term_sendkeys(buf, ":\<Esc>")
@@ -2030,7 +2035,7 @@ func Test_edit_browse()
     au!
   augroup END
 
-  " When the USE_FNAME_CASE is defined this used to cause a crash.
+  " When the CASE_INSENSITIVE_FILENAME is defined this used to cause a crash.
   browse enew
   bwipe!
 
@@ -2112,7 +2117,7 @@ func Test_edit_overlong_file_name()
   file %%%%%%%%%%%%%%%%%%%%%%%%%%
   file %%%%%%
   set readonly
-  set ls=2 
+  set ls=2
 
   redraw!
   set noreadonly ls&

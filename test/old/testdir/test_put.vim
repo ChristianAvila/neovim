@@ -168,12 +168,6 @@ func Test_very_large_count()
 endfunc
 
 func Test_very_large_count_64bit()
-  throw 'Skipped: v:sizeoflong is N/A'  " use legacy/put_spec.lua instead
-
-  if v:sizeoflong < 8
-    throw 'Skipped: only works with 64 bit long ints'
-  endif
-
   new
   let @" = repeat('x', 100)
   call assert_fails('norm 999999999p', 'E1240:')
@@ -190,12 +184,6 @@ func Test_very_large_count_block()
 endfunc
 
 func Test_very_large_count_block_64bit()
-  throw 'Skipped: v:sizeoflong is N/A'  " use legacy/put_spec.lua instead
-
-  if v:sizeoflong < 8
-    throw 'Skipped: only works with 64 bit long ints'
-  endif
-
   new
   call setline(1, repeat('x', 100))
   exe "norm \<C-V>$y"
@@ -321,6 +309,23 @@ func Test_put_visual_replace_fold_marker()
   call assert_equal(lines, getline(1, '$'))
 
   bwipe!
+endfunc
+
+func Test_put_dict()
+  new
+  let d = #{a: #{b: 'abc'}, c: [1, 2], d: 0z10}
+  put! =d
+  call assert_equal(["{'a': {'b': 'abc'}, 'c': [1, 2], 'd': 0z10}", ''],
+        \ getline(1, '$'))
+  bw!
+endfunc
+
+func Test_put_list()
+  new
+  let l = ['a', 'b', 'c']
+  put! =l
+  call assert_equal(['a', 'b', 'c', ''], getline(1, '$'))
+  bw!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

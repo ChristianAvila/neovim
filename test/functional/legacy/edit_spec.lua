@@ -1,9 +1,10 @@
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local command = helpers.command
-local expect = helpers.expect
-local feed = helpers.feed
+
+local clear = n.clear
+local command = n.command
+local expect = n.expect
+local feed = n.feed
 local sleep = vim.uv.sleep
 
 before_each(clear)
@@ -30,7 +31,6 @@ describe('edit', function()
   -- oldtest: Test_edit_insert_reg()
   it('inserting a register using CTRL-R', function()
     local screen = Screen.new(10, 6)
-    screen:attach()
     feed('a<C-R>')
     screen:expect([[
       {18:^"}           |
@@ -43,12 +43,17 @@ describe('edit', function()
       {1:~           }|*4
       =^           |
     ]])
+    feed([['r'<CR><Esc>]])
+    expect('r')
+    -- Test for inserting null and empty list
+    feed('a<C-R>=v:_null_list<CR><Esc>')
+    feed('a<C-R>=[]<CR><Esc>')
+    expect('r')
   end)
 
   -- oldtest: Test_edit_ctrl_r_failed()
   it('positioning cursor after CTRL-R expression failed', function()
     local screen = Screen.new(60, 6)
-    screen:attach()
 
     feed('i<C-R>')
     screen:expect([[
@@ -56,20 +61,20 @@ describe('edit', function()
       {1:~                                                           }|*4
       {5:-- INSERT --}                                                |
     ]])
-    feed('={}')
+    feed('=0z')
     screen:expect([[
       {18:"}                                                           |
       {1:~                                                           }|*4
-      ={16:{}}^                                                         |
+      ={26:0}{9:z}^                                                         |
     ]])
-    -- trying to insert a dictionary produces an error
+    -- trying to insert a blob produces an error
     feed('<CR>')
     screen:expect([[
       {18:"}                                                           |
       {1:~                                                           }|
       {3:                                                            }|
-      ={16:{}}                                                         |
-      {9:E731: Using a Dictionary as a String}                        |
+      ={26:0}{9:z}                                                         |
+      {9:E976: Using a Blob as a String}                              |
       {6:Press ENTER or type command to continue}^                     |
     ]])
 

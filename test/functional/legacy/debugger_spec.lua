@@ -1,9 +1,11 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local command = helpers.command
-local feed = helpers.feed
-local write_file = helpers.write_file
+
+local clear = n.clear
+local command = n.command
+local feed = n.feed
+local write_file = t.write_file
 
 before_each(clear)
 
@@ -12,7 +14,6 @@ describe('debugger', function()
 
   before_each(function()
     screen = Screen.new(999, 10)
-    screen:attach()
   end)
 
   -- oldtest: Test_Debugger_breakadd_expr()

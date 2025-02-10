@@ -1,26 +1,28 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear, feed = helpers.clear, helpers.feed
-local eval = helpers.eval
-local eq = helpers.eq
-local neq = helpers.neq
-local command = helpers.command
-local set_method_error = helpers.set_method_error
-local api = helpers.api
-local async_meths = helpers.async_meths
-local test_build_dir = helpers.paths.test_build_dir
-local nvim_prog = helpers.nvim_prog
-local testprg = helpers.testprg
-local exec = helpers.exec
-local exec_capture = helpers.exec_capture
-local exc_exec = helpers.exc_exec
-local exec_lua = helpers.exec_lua
-local poke_eventloop = helpers.poke_eventloop
-local assert_alive = helpers.assert_alive
-local retry = helpers.retry
-local is_os = helpers.is_os
-local fn = helpers.fn
-local skip = helpers.skip
+
+local clear, feed = n.clear, n.feed
+local eval = n.eval
+local eq = t.eq
+local neq = t.neq
+local command = n.command
+local set_method_error = n.set_method_error
+local api = n.api
+local async_meths = n.async_meths
+local test_build_dir = t.paths.test_build_dir
+local nvim_prog = n.nvim_prog
+local testprg = n.testprg
+local exec = n.exec
+local exec_capture = n.exec_capture
+local exc_exec = n.exc_exec
+local exec_lua = n.exec_lua
+local poke_eventloop = n.poke_eventloop
+local assert_alive = n.assert_alive
+local retry = t.retry
+local is_os = t.is_os
+local fn = n.fn
+local skip = t.skip
 
 describe('ui/ext_messages', function()
   local screen
@@ -28,20 +30,10 @@ describe('ui/ext_messages', function()
 
   before_each(function()
     clear()
-    screen = Screen.new(25, 5)
-    screen:attach({ rgb = true, ext_messages = true, ext_popupmenu = true })
-    screen:set_default_attr_ids({
-      [1] = { bold = true, foreground = Screen.colors.Blue1 },
-      [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-      [3] = { bold = true },
-      [4] = { bold = true, foreground = Screen.colors.SeaGreen4 },
-      [5] = { foreground = Screen.colors.Blue1 },
-      [6] = { bold = true, reverse = true },
-      [7] = { background = Screen.colors.Yellow },
-      [8] = { foreground = Screen.colors.Red },
-      [9] = { special = Screen.colors.Red, undercurl = true },
-      [10] = { foreground = Screen.colors.Brown },
-    })
+    screen = Screen.new(25, 5, { rgb = true, ext_messages = true, ext_popupmenu = true })
+    screen:add_extra_attr_ids {
+      [100] = { undercurl = true, special = Screen.colors.Red },
+    }
   end)
   after_each(function()
     os.remove(fname)
@@ -50,118 +42,130 @@ describe('ui/ext_messages', function()
   it('msg_clear follows msg_show kind of confirm', function()
     feed('iline 1<esc>')
     feed(':call confirm("test")<cr>')
-    screen:expect {
+    screen:expect({
       grid = [[
-      line ^1                   |
-      {1:~                        }|*4
-    ]],
+        line ^1                   |
+        {1:~                        }|*4
+      ]],
+      cmdline = {
+        {
+          content = { { '' } },
+          hl_id = 10,
+          pos = 0,
+          prompt = '[O]k: ',
+        },
+      },
       messages = {
         {
-          content = { { '\ntest\n[O]k: ', 4 } },
+          content = { { '\ntest\n', 6, 10 } },
+          history = false,
           kind = 'confirm',
         },
       },
-    }
-
+    })
     feed('<cr>')
-    screen:expect {
+    screen:expect({
       grid = [[
-      line ^1                   |
-      {1:~                        }|*4
-    ]],
-    }
+        line ^1                   |
+        {1:~                        }|*4
+      ]],
+      cmdline = { { abort = false } },
+    })
   end)
 
-  it('msg_show kind=confirm,confirm_sub,emsg,wmsg,quickfix', function()
+  it('msg_show kinds', function()
     feed('iline 1\nline 2<esc>')
 
-    -- kind=confirm
+    -- confirm is now cmdline prompt
     feed(':echo confirm("test")<cr>')
-    screen:expect {
+    screen:expect({
       grid = [[
-      line 1                   |
-      line ^2                   |
-      {1:~                        }|*3
-    ]],
+        line 1                   |
+        line ^2                   |
+        {1:~                        }|*3
+      ]],
+      cmdline = {
+        {
+          content = { { '' } },
+          hl_id = 10,
+          pos = 0,
+          prompt = '[O]k: ',
+        },
+      },
       messages = {
         {
-          content = { { '\ntest\n[O]k: ', 4 } },
+          content = { { '\ntest\n', 6, 10 } },
+          history = false,
           kind = 'confirm',
         },
       },
-    }
-    feed('<cr><cr>')
-    screen:expect {
+    })
+    feed('<cr>')
+    screen:expect({
       grid = [[
-      line 1                   |
-      line ^2                   |
-      {1:~                        }|*3
-    ]],
+        line 1                   |
+        line ^2                   |
+        {1:~                        }|*3
+      ]],
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { '\ntest\n[O]k: ', 4 } },
+          content = { { '\ntest\n', 6, 10 } },
+          history = false,
           kind = 'confirm',
         },
         {
           content = { { '1' } },
+          history = false,
           kind = 'echo',
         },
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
-    }
-    feed('<cr><cr>')
+    })
+    feed('<cr>')
 
-    -- kind=confirm_sub
+    -- :substitute confirm is now cmdline prompt
     feed(':%s/i/X/gc<cr>')
-    screen:expect {
+    screen:expect({
       grid = [[
-      l{7:i}ne 1                   |
-      l{8:i}ne ^2                   |
-      {1:~                        }|*3
-    ]],
-      attr_ids = {
-        [1] = { bold = true, foreground = Screen.colors.Blue1 },
-        [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-        [3] = { bold = true },
-        [4] = { bold = true, foreground = Screen.colors.SeaGreen4 },
-        [5] = { foreground = Screen.colors.Blue1 },
-        [6] = { bold = true, reverse = true },
-        [7] = { reverse = true },
-        [8] = { background = Screen.colors.Yellow },
-      },
-      messages = {
+        l{2:^i}ne 1                   |
+        l{10:i}ne 2                   |
+        {1:~                        }|*3
+      ]],
+      cmdline = {
         {
-          content = { { 'replace with X (y/n/a/q/l/^E/^Y)?', 4 } },
-          kind = 'confirm_sub',
+          content = { { '' } },
+          hl_id = 18,
+          pos = 0,
+          prompt = 'replace with X? (y)es/(n)o/(a)ll/(q)uit/(l)ast/scroll up(^E)/down(^Y)',
         },
       },
-    }
+    })
     feed('nq')
 
     -- kind=wmsg (editing readonly file)
     command('write ' .. fname)
     command('set readonly nohls')
     feed('G$x')
-    screen:expect {
+    screen:expect({
       grid = [[
         line 1                   |
-        {MATCH:.*}|
+        line^                     |
         {1:~                        }|*3
       ]],
-      attr_ids = {
-        [1] = { bold = true, foreground = Screen.colors.Blue1 },
-        [7] = { foreground = Screen.colors.Red },
-      },
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { 'W10: Warning: Changing a readonly file', 7 } },
+          content = { { 'W10: Warning: Changing a readonly file', 19, 26 } },
+          history = true,
           kind = 'wmsg',
         },
       },
-    }
+    })
 
     -- kind=wmsg ('wrapscan' after search reaches EOF)
     feed('uG$/i<cr>')
@@ -171,18 +175,11 @@ describe('ui/ext_messages', function()
       line 2                   |
       {1:~                        }|*3
     ]],
-      attr_ids = {
-        [1] = { bold = true, foreground = Screen.colors.Blue1 },
-        [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-        [3] = { bold = true },
-        [4] = { bold = true, foreground = Screen.colors.SeaGreen4 },
-        [5] = { foreground = Screen.colors.Blue1 },
-        [6] = { bold = true, reverse = true },
-        [7] = { foreground = Screen.colors.Red },
-      },
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { 'search hit BOTTOM, continuing at TOP', 7 } },
+          content = { { 'search hit BOTTOM, continuing at TOP', 19, 26 } },
+          history = true,
           kind = 'wmsg',
         },
       },
@@ -191,22 +188,21 @@ describe('ui/ext_messages', function()
     -- kind=emsg after :throw
     feed(':throw "foo"<cr>')
     screen:expect {
-      grid = [[
-      l^ine 1                   |
-      line 2                   |
-      {1:~                        }|*3
-    ]],
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { 'Error detected while processing :', 2 } },
+          content = { { 'Error detected while processing :', 9, 6 } },
+          history = true,
           kind = 'emsg',
         },
         {
-          content = { { 'E605: Exception not caught: foo', 2 } },
-          kind = '',
+          content = { { 'E605: Exception not caught: foo', 9, 6 } },
+          history = true,
+          kind = 'emsg',
         },
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
@@ -222,13 +218,213 @@ describe('ui/ext_messages', function()
       ^line 2                   |
       {1:~                        }|*3
     ]],
+      cmdline = { { abort = false } },
       messages = {
         {
           content = { { '(2 of 2): line2' } },
+          history = true,
           kind = 'quickfix',
         },
       },
     }
+
+    -- search_cmd
+    feed('?line<cr>')
+    screen:expect({
+      grid = [[
+        ^line 1                   |
+        line 2                   |
+        {1:~                        }|*3
+      ]],
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { '?line ' } },
+          history = false,
+          kind = 'search_cmd',
+        },
+      },
+    })
+
+    -- highlight
+    feed(':filter character highlight<CR>')
+    screen:expect({
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = {
+            { '\n@character     ' },
+            { 'xxx', 26, 155 },
+            { ' ' },
+            { 'links to', 18, 5 },
+            { ' Character\n@character.special ' },
+            { 'xxx', 16, 156 },
+            { ' ' },
+            { 'links to', 18, 5 },
+            { ' SpecialChar' },
+          },
+          history = false,
+          kind = 'list_cmd',
+        },
+      },
+    })
+
+    -- undo
+    feed('uu')
+    screen:expect({
+      grid = [[
+        ^                         |
+        {1:~                        }|*4
+      ]],
+      messages = {
+        {
+          content = { { 'Already at oldest change' } },
+          history = true,
+          kind = 'undo',
+        },
+      },
+    })
+
+    feed('<C-r><C-r><C-r>')
+    screen:expect({
+      grid = [[
+        line 1                   |
+        line^                     |
+        {1:~                        }|*3
+      ]],
+      messages = {
+        {
+          content = { { 'Already at newest change' } },
+          history = true,
+          kind = 'undo',
+        },
+      },
+    })
+
+    -- kind=completion
+    command('set noshowmode')
+    feed('i<C-n>')
+    screen:expect({
+      messages = {
+        {
+          content = { { 'The only match' } },
+          history = false,
+          kind = 'completion',
+        },
+      },
+    })
+    feed('<Esc>')
+    command('set showmode')
+
+    -- kind=echoerr for nvim_echo() err
+    feed(':call nvim_echo([["Error"], ["Message", "Special"]], 1, #{ err:1 })<CR>')
+    screen:expect({
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { 'Error', 9, 6 }, { 'Message', 16, 99 } },
+          history = true,
+          kind = 'echoerr',
+        },
+      },
+    })
+
+    -- kind=verbose for nvim_echo() verbose
+    feed(':call nvim_echo([["Verbose Message"]], 1, #{ verbose:1 })<CR>')
+    screen:expect({
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { 'Verbose Message' } },
+          history = true,
+          kind = 'verbose',
+        },
+      },
+    })
+
+    -- kind=verbose for :verbose messages
+    feed(':1verbose filter Diff[AC] hi<CR>')
+    screen:expect({
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = {
+            { '\nDiffAdd        ' },
+            { 'xxx', 22, 30 },
+            { ' ' },
+            { 'ctermbg=', 18, 5 },
+            { '81 ' },
+            { 'guibg=', 18, 5 },
+            { 'LightBlue' },
+          },
+          history = false,
+          kind = 'list_cmd',
+        },
+        {
+          content = { { '\n\tLast set from Lua (run Nvim with -V1 for more details)' } },
+          history = false,
+          kind = 'verbose',
+        },
+        {
+          content = {
+            { '\nDiffChange     ' },
+            { 'xxx', 4, 31 },
+            { ' ' },
+            { 'ctermbg=', 18, 5 },
+            { '225 ' },
+            { 'guibg=', 18, 5 },
+            { 'LightMagenta' },
+          },
+          history = false,
+          kind = 'list_cmd',
+        },
+        {
+          content = { { '\n\tLast set from Lua (run Nvim with -V1 for more details)' } },
+          history = false,
+          kind = 'verbose',
+        },
+        {
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
+          kind = 'return_prompt',
+        },
+      },
+    })
+
+    -- kind=shell for :!cmd messages
+    local cmd = t.is_os('win') and 'echo stdout& echo stderr>&2& exit 3'
+      or '{ echo stdout; echo stderr >&2; exit 3; }'
+    feed(('<CR>:!%s<CR>'):format(cmd))
+    screen:expect({
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { (':!%s\r\n[No write since last change]\n'):format(cmd) } },
+          history = false,
+          kind = '',
+        },
+        {
+          content = { { ('stdout%s\n'):format(t.is_os('win') and '\r' or '') } },
+          history = false,
+          kind = 'shell_out',
+        },
+        {
+          content = { { ('stderr%s\n'):format(t.is_os('win') and '\r' or ''), 9, 6 } },
+          history = false,
+          kind = 'shell_err',
+        },
+        {
+          content = { { '\nshell returned 3\n\n' } },
+          history = false,
+          kind = 'shell_ret',
+        },
+        {
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
+          kind = 'return_prompt',
+        },
+      },
+    })
   end)
 
   it(':echoerr', function()
@@ -238,10 +434,14 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      messages = { {
-        content = { { 'raa', 2 } },
-        kind = 'echoerr',
-      } },
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { 'raa', 9, 6 } },
+          history = true,
+          kind = 'echoerr',
+        },
+      },
     }
 
     -- cmdline in a later input cycle clears error message
@@ -264,17 +464,21 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { 'bork', 2 } },
+          content = { { 'bork', 9, 6 } },
+          history = true,
           kind = 'echoerr',
         },
         {
-          content = { { 'fail', 2 } },
+          content = { { 'fail', 9, 6 } },
+          history = true,
           kind = 'echoerr',
         },
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
@@ -286,21 +490,26 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { 'bork', 2 } },
+          content = { { 'bork', 9, 6 } },
+          history = true,
           kind = 'echoerr',
         },
         {
-          content = { { 'fail', 2 } },
+          content = { { 'fail', 9, 6 } },
+          history = true,
           kind = 'echoerr',
         },
         {
-          content = { { 'extrafail', 2 } },
+          content = { { 'extrafail', 9, 6 } },
+          history = true,
           kind = 'echoerr',
         },
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
@@ -321,13 +530,17 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      messages = { {
-        content = { { 'problem', 2 } },
-        kind = 'echoerr',
-      } },
+      messages = {
+        {
+          content = { { 'problem', 9, 6 } },
+          history = true,
+          kind = 'echoerr',
+        },
+      },
       cmdline = {
         {
           prompt = 'foo> ',
+          hl_id = 0,
           content = { { '' } },
           pos = 0,
         },
@@ -340,6 +553,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
     }
     eq('solution', eval('x'))
 
@@ -349,16 +563,18 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       msg_history = {
-        { kind = 'echoerr', content = { { 'raa', 2 } } },
-        { kind = 'echoerr', content = { { 'bork', 2 } } },
-        { kind = 'echoerr', content = { { 'fail', 2 } } },
-        { kind = 'echoerr', content = { { 'extrafail', 2 } } },
-        { kind = 'echoerr', content = { { 'problem', 2 } } },
+        { kind = 'echoerr', content = { { 'raa', 9, 6 } } },
+        { kind = 'echoerr', content = { { 'bork', 9, 6 } } },
+        { kind = 'echoerr', content = { { 'fail', 9, 6 } } },
+        { kind = 'echoerr', content = { { 'extrafail', 9, 6 } } },
+        { kind = 'echoerr', content = { { 'problem', 9, 6 } } },
       },
       messages = {
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
@@ -381,10 +597,14 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      messages = { {
-        content = { { 'bork\nfail', 2 } },
-        kind = 'echoerr',
-      } },
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { 'bork\nfail', 9, 6 } },
+          history = true,
+          kind = 'echoerr',
+        },
+      },
     }
 
     feed(':messages<cr>')
@@ -393,15 +613,17 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
       msg_history = {
         {
-          content = { { 'bork\nfail', 2 } },
+          content = { { 'bork\nfail', 9, 6 } },
           kind = 'echoerr',
         },
       },
@@ -415,52 +637,25 @@ describe('ui/ext_messages', function()
     feed('/line<cr>')
     screen:expect {
       grid = [[
-      {7:^line} 1                   |
-      {7:line} 2                   |
+      {10:^line} 1                   |
+      {10:line} 2                   |
       {1:~                        }|*3
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { '/line      W [1/2]' } }, kind = 'search_count' },
+        { content = { { '/line      W [1/2]' } }, kind = 'search_count', history = false },
       },
     }
 
     feed('n')
     screen:expect {
       grid = [[
-      {7:line} 1                   |
-      {7:^line} 2                   |
+      {10:line} 1                   |
+      {10:^line} 2                   |
       {1:~                        }|*3
     ]],
       messages = {
-        { content = { { '/line        [2/2]' } }, kind = 'search_count' },
-      },
-    }
-  end)
-
-  it(':hi Group output', function()
-    feed(':hi ErrorMsg<cr>')
-    screen:expect {
-      grid = [[
-      ^                         |
-      {1:~                        }|*4
-    ]],
-      messages = {
-        {
-          content = {
-            { '\nErrorMsg      ' },
-            { 'xxx', 2 },
-            { ' ' },
-            { 'ctermfg=', 5 },
-            { '15 ' },
-            { 'ctermbg=', 5 },
-            { '1 ' },
-            { 'guifg=', 5 },
-            { 'White ' },
-            { 'guibg=', 5 },
-            { 'Red' },
-          },
-          kind = '',
-        },
+        { content = { { '/line        [2/2]' } }, kind = 'search_count', history = false },
       },
     }
   end)
@@ -473,10 +668,15 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { 'x                     #1' } }, kind = '' },
-        { content = { { 'y                     #2' } }, kind = '' },
-        { content = { { 'Press ENTER or type command to continue', 4 } }, kind = 'return_prompt' },
+        { content = { { 'x                     #1' } }, kind = 'list_cmd', history = false },
+        { content = { { 'y                     #2' } }, kind = 'list_cmd', history = false },
+        {
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
+          kind = 'return_prompt',
+        },
       },
     }
   end)
@@ -489,7 +689,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { '-- INSERT --', 3 } },
+      showmode = { { '-- INSERT --', 5, 11 } },
     }
 
     feed('alphpabet<cr>alphanum<cr>')
@@ -500,7 +700,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*2
     ]],
-      showmode = { { '-- INSERT --', 3 } },
+      showmode = { { '-- INSERT --', 5, 11 } },
     }
 
     feed('<c-x>')
@@ -511,7 +711,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*2
     ]],
-      showmode = { { '-- ^X mode (^]^D^E^F^I^K^L^N^O^Ps^U^V^Y)', 3 } },
+      showmode = { { '-- ^X mode (^]^D^E^F^I^K^L^N^O^Ps^U^V^Y)', 5, 11 } },
     }
 
     feed('<c-p>')
@@ -527,7 +727,7 @@ describe('ui/ext_messages', function()
         items = { { 'alphpabet', '', '', '' }, { 'alphanum', '', '', '' } },
         pos = 1,
       },
-      showmode = { { '-- Keyword Local completion (^N^P) ', 3 }, { 'match 1 of 2', 4 } },
+      showmode = { { '-- Keyword Local completion (^N^P) ', 5, 11 }, { 'match 1 of 2', 6, 18 } },
     }
 
     -- echomsg and showmode don't overwrite each other, this is the same
@@ -545,11 +745,14 @@ describe('ui/ext_messages', function()
         items = { { 'alphpabet', '', '', '' }, { 'alphanum', '', '', '' } },
         pos = 1,
       },
-      messages = { {
-        content = { { 'stuff' } },
-        kind = 'echomsg',
-      } },
-      showmode = { { '-- Keyword Local completion (^N^P) ', 3 }, { 'match 1 of 2', 4 } },
+      messages = {
+        {
+          content = { { 'stuff' } },
+          history = true,
+          kind = 'echomsg',
+        },
+      },
+      showmode = { { '-- Keyword Local completion (^N^P) ', 5, 11 }, { 'match 1 of 2', 6, 18 } },
     }
 
     feed('<c-p>')
@@ -565,11 +768,14 @@ describe('ui/ext_messages', function()
         items = { { 'alphpabet', '', '', '' }, { 'alphanum', '', '', '' } },
         pos = 0,
       },
-      messages = { {
-        content = { { 'stuff' } },
-        kind = 'echomsg',
-      } },
-      showmode = { { '-- Keyword Local completion (^N^P) ', 3 }, { 'match 2 of 2', 4 } },
+      messages = {
+        {
+          content = { { 'stuff' } },
+          history = true,
+          kind = 'echomsg',
+        },
+      },
+      showmode = { { '-- Keyword Local completion (^N^P) ', 5, 11 }, { 'match 2 of 2', 6, 18 } },
     }
 
     feed('<esc>:messages<cr>')
@@ -580,13 +786,15 @@ describe('ui/ext_messages', function()
       alphpabe^t                |
       {1:~                        }|*2
     ]],
+      cmdline = { { abort = false } },
       msg_history = { {
         content = { { 'stuff' } },
         kind = 'echomsg',
       } },
       messages = {
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
@@ -600,7 +808,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { 'recording @q', 3 } },
+      showmode = { { 'recording @q', 5, 11 } },
     }
 
     feed('i')
@@ -609,7 +817,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { '-- INSERT --recording @q', 3 } },
+      showmode = { { '-- INSERT --recording @q', 5, 11 } },
     }
 
     feed('<esc>')
@@ -618,7 +826,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { 'recording @q', 3 } },
+      showmode = { { 'recording @q', 5, 11 } },
     }
 
     feed('q')
@@ -637,7 +845,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { 'recording @q', 3 } },
+      showmode = { { 'recording @q', 5, 11 } },
       mode = 'normal',
     }
 
@@ -647,7 +855,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { 'recording @q', 3 } },
+      showmode = { { 'recording @q', 5, 11 } },
       mode = 'insert',
     }
 
@@ -657,7 +865,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { 'recording @q', 3 } },
+      showmode = { { 'recording @q', 5, 11 } },
       mode = 'normal',
     }
 
@@ -673,20 +881,22 @@ describe('ui/ext_messages', function()
 
   it('supports &showcmd and &ruler', function()
     command('set showcmd ruler')
-    screen:expect {
+    command('hi link MsgArea ErrorMsg')
+    screen:expect({
       grid = [[
-      ^                         |
-      {1:~                        }|*4
-    ]],
-      ruler = { { '0,0-1   All' } },
-    }
+        ^                         |
+        {1:~                        }|*4
+      ]],
+      ruler = { { '0,0-1   All', 9, 61 } },
+    })
+    command('hi clear MsgArea')
     feed('i')
     screen:expect {
       grid = [[
       ^                         |
       {1:~                        }|*4
     ]],
-      showmode = { { '-- INSERT --', 3 } },
+      showmode = { { '-- INSERT --', 5, 11 } },
       ruler = { { '0,1     All' } },
     }
     feed('abcde<cr>12345<esc>')
@@ -717,7 +927,18 @@ describe('ui/ext_messages', function()
     ]],
       ruler = { { '2,1     All' } },
     }
-    feed('d')
+    feed('<c-v>k2l')
+    screen:expect({
+      grid = [[
+        {17:ab}^cde                    |
+        {17:123}45                    |
+        {1:~                        }|*3
+      ]],
+      showmode = { { '-- VISUAL BLOCK --', 5, 11 } },
+      showcmd = { { '2x3' } },
+      ruler = { { '1,3     All' } },
+    })
+    feed('o<esc>d')
     screen:expect {
       grid = [[
       abcde                    |
@@ -754,7 +975,7 @@ describe('ui/ext_messages', function()
       abcde                    |
       ^                         |
       {1:~                        }|*2
-      {6:<o Name] [+] 2,0-1    All}|
+      {3:<o Name] [+] 2,0-1    All}|
     ]])
   end)
 
@@ -765,10 +986,14 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      messages = { {
-        content = { { 'howdy' } },
-        kind = 'echomsg',
-      } },
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { 'howdy' } },
+          history = true,
+          kind = 'echomsg',
+        },
+      },
     }
 
     -- always test a message without kind. If this one gets promoted to a
@@ -782,6 +1007,7 @@ describe('ui/ext_messages', function()
       messages = {
         {
           content = { { 'Type  :qa  and press <Enter> to exit Nvim' } },
+          history = true,
           kind = '',
         },
       },
@@ -793,10 +1019,14 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      messages = { {
-        content = { { 'bork', 2 } },
-        kind = 'echoerr',
-      } },
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { 'bork', 9, 6 } },
+          history = true,
+          kind = 'echoerr',
+        },
+      },
     }
 
     feed(':echo "xyz"<cr>')
@@ -805,10 +1035,14 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
-      messages = { {
-        content = { { 'xyz' } },
-        kind = 'echo',
-      } },
+      cmdline = { { abort = false } },
+      messages = {
+        {
+          content = { { 'xyz' } },
+          history = false,
+          kind = 'echo',
+        },
+      },
     }
 
     feed(':call nosuchfunction()<cr>')
@@ -817,9 +1051,11 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
         {
-          content = { { 'E117: Unknown function: nosuchfunction', 2 } },
+          content = { { 'E117: Unknown function: nosuchfunction', 9, 6 } },
+          history = true,
           kind = 'emsg',
         },
       },
@@ -831,15 +1067,17 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       msg_history = {
         { kind = 'echomsg', content = { { 'howdy' } } },
         { kind = '', content = { { 'Type  :qa  and press <Enter> to exit Nvim' } } },
-        { kind = 'echoerr', content = { { 'bork', 2 } } },
-        { kind = 'emsg', content = { { 'E117: Unknown function: nosuchfunction', 2 } } },
+        { kind = 'echoerr', content = { { 'bork', 9, 6 } } },
+        { kind = 'emsg', content = { { 'E117: Unknown function: nosuchfunction', 9, 6 } } },
       },
       messages = {
         {
-          content = { { 'Press ENTER or type command to continue', 4 } },
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
           kind = 'return_prompt',
         },
       },
@@ -864,11 +1102,14 @@ describe('ui/ext_messages', function()
     }
 
     feed('<cr>')
-    screen:expect([[
-      ^                         |
-      {1:~                        }|*3
-                               |
-    ]])
+    screen:expect({
+      grid = [[
+        ^                         |
+        {1:~                        }|*3
+                                 |
+      ]],
+      cmdline = { { abort = false } },
+    })
     eq(1, eval('&cmdheight'))
 
     feed(':set cmdheight=0')
@@ -887,10 +1128,13 @@ describe('ui/ext_messages', function()
       },
     }
     feed('<cr>')
-    screen:expect([[
-      ^                         |
-      {1:~                        }|*4
-    ]])
+    screen:expect({
+      grid = [[
+        ^                         |
+        {1:~                        }|*4
+      ]],
+      cmdline = { { abort = false } },
+    })
     eq(0, eval('&cmdheight'))
   end)
 
@@ -901,6 +1145,7 @@ describe('ui/ext_messages', function()
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
         {
           content = {
@@ -911,9 +1156,11 @@ error
 stack traceback:
 	[C]: in function 'error'
 	[string ":lua"]:1: in main chunk]],
-              2,
+              9,
+              6,
             },
           },
+          history = true,
           kind = 'lua_error',
         },
       },
@@ -928,11 +1175,13 @@ stack traceback:
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
         {
           content = {
-            { "Error invoking 'test_method' on channel 1:\ncomplete\nerror\n\nmessage", 2 },
+            { "Error invoking 'test_method' on channel 1:\ncomplete\nerror\n\nmessage", 9, 6 },
           },
+          history = true,
           kind = 'rpc_error',
         },
       },
@@ -952,14 +1201,16 @@ stack traceback:
     feed(':map<cr>')
 
     screen:expect {
+      cmdline = { { abort = false } },
       messages = {
         {
           content = {
             { '\nn  Q             @@\nn  Y             y$\nn  j           ' },
-            { '*', 5 },
+            { '*', 18, 1 },
             { ' k' },
           },
-          kind = '',
+          history = false,
+          kind = 'list_cmd',
         },
       },
     }
@@ -976,10 +1227,13 @@ stack traceback:
       ^                         |
       {1:~                        }|*6
     ]],
-      messages = { {
-        content = { { 'wildmenu  wildmode' } },
-        kind = '',
-      } },
+      messages = {
+        {
+          content = { { 'wildmenu  wildmode\n' } },
+          history = false,
+          kind = 'wildlist',
+        },
+      },
       cmdline = {
         {
           firstc = ':',
@@ -995,51 +1249,94 @@ stack traceback:
     feed('ihelllo<esc>')
 
     feed('z=')
-    screen:expect {
+    screen:expect({
       grid = [[
-      {9:helllo}                   |
-      {1:~                        }|*3
-      {1:^~                        }|
-    ]],
-      messages = {
+        {100:^helllo}                   |
+        {1:~                        }|*4
+      ]],
+      cmdline = {
         {
-          content = {
-            {
-              'Change "helllo" to:\n 1 "Hello"\n 2 "Hallo"\n 3 "Hullo"\nType number and <Enter> or click with the mouse (q or empty cancels): ',
-            },
-          },
-          kind = '',
+          content = { { '' } },
+          hl_id = 0,
+          pos = 0,
+          prompt = 'Type number and <Enter> or click with the mouse (q or empty cancels): ',
         },
       },
-    }
+      messages = {
+        {
+          content = { { 'Change "helllo" to:\n 1 "Hello"\n 2 "Hallo"\n 3 "Hullo"\n' } },
+          history = false,
+          kind = 'list_cmd',
+        },
+      },
+    })
 
     feed('1')
-    screen:expect {
+    screen:expect({
       grid = [[
-      {9:helllo}                   |
-      {1:~                        }|*3
-      {1:^~                        }|
-    ]],
+        {100:^helllo}                   |
+        {1:~                        }|*4
+      ]],
+      cmdline = {
+        {
+          content = { { '1' } },
+          hl_id = 0,
+          pos = 1,
+          prompt = 'Type number and <Enter> or click with the mouse (q or empty cancels): ',
+        },
+      },
       messages = {
         {
-          content = {
-            {
-              'Change "helllo" to:\n 1 "Hello"\n 2 "Hallo"\n 3 "Hullo"\nType number and <Enter> or click with the mouse (q or empty cancels): ',
-            },
-          },
-          kind = '',
+          content = { { 'Change "helllo" to:\n 1 "Hello"\n 2 "Hallo"\n 3 "Hullo"\n' } },
+          history = false,
+          kind = 'list_cmd',
         },
-        { content = { { '1' } }, kind = '' },
       },
-    }
+    })
 
     feed('<cr>')
-    screen:expect {
+    screen:expect({
       grid = [[
-      ^Hello                    |
-      {1:~                        }|*4
-    ]],
-    }
+        ^Hello                    |
+        {1:~                        }|*4
+      ]],
+      cmdline = { { abort = false } },
+    })
+
+    async_meths.nvim_command("let g:n = inputlist(['input0', 'input1'])")
+    screen:expect({
+      grid = [[
+        ^Hello                    |
+        {1:~                        }|*4
+      ]],
+      cmdline = {
+        {
+          content = { { '' } },
+          hl_id = 0,
+          pos = 0,
+          prompt = 'Type number and <Enter> or click with the mouse (q or empty cancels): ',
+        },
+      },
+      messages = {
+        {
+          content = { { 'input0\ninput1\n' } },
+          history = false,
+          kind = 'list_cmd',
+        },
+      },
+    })
+
+    feed('42<CR>')
+    screen:expect({
+      grid = [[
+        ^Hello                    |
+        {1:~                        }|*4
+      ]],
+      cmdline = { {
+        abort = false,
+      } },
+    })
+    eq(42, eval('g:n'))
   end)
 
   it('supports nvim_echo messages with multiple attrs', function()
@@ -1054,7 +1351,11 @@ stack traceback:
       {1:~                        }|*4
     ]],
       messages = {
-        { content = { { 'wow, ', 7 }, { 'such\n\nvery ', 2 }, { 'color', 10 } }, kind = 'echomsg' },
+        {
+          content = { { 'wow, ', 10, 8 }, { 'such\n\nvery ', 9, 6 }, { 'color', 8, 12 } },
+          history = true,
+          kind = 'echomsg',
+        },
       },
     }
 
@@ -1064,8 +1365,13 @@ stack traceback:
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { '\n  1 %a   "[No Name]"                    line 1' } }, kind = '' },
+        {
+          content = { { '\n  1 %a   "[No Name]"                    line 1' } },
+          kind = 'list_cmd',
+          history = false,
+        },
       },
     }
 
@@ -1075,11 +1381,19 @@ stack traceback:
       ^                         |
       {1:~                        }|*4
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { 'Press ENTER or type command to continue', 4 } }, kind = 'return_prompt' },
+        {
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
+          kind = 'return_prompt',
+        },
       },
       msg_history = {
-        { content = { { 'wow, ', 7 }, { 'such\n\nvery ', 2 }, { 'color', 10 } }, kind = 'echomsg' },
+        {
+          content = { { 'wow, ', 10, 8 }, { 'such\n\nvery ', 9, 6 }, { 'color', 8, 12 } },
+          kind = 'echomsg',
+        },
       },
     }
 
@@ -1096,8 +1410,99 @@ stack traceback:
     command('write ' .. fname)
     screen:expect({
       messages = {
-        { content = { { string.format('"%s" [New] 0L, 0B written', fname) } }, kind = '' },
+        {
+          content = { { string.format('"%s" [New] 0L, 0B written', fname) } },
+          kind = 'bufwrite',
+          history = true,
+        },
       },
+    })
+  end)
+
+  it('does not do showmode unnecessarily #29086', function()
+    local screen_showmode = screen._handle_msg_showmode
+    local showmode = 0
+    screen._handle_msg_showmode = function(...)
+      screen_showmode(...)
+      showmode = showmode + 1
+    end
+    local s1 = [[
+      ^                         |
+      {1:~                        }|*4
+    ]]
+    screen:expect(s1)
+    eq(showmode, 0)
+    feed('i')
+    screen:expect({
+      grid = s1,
+      showmode = { { '-- INSERT --', 5, 11 } },
+    })
+    eq(showmode, 2)
+    command('set noshowmode')
+    feed('<Esc>')
+    screen:expect(s1)
+    eq(showmode, 3)
+    feed('i')
+    screen:expect_unchanged()
+    eq(showmode, 3)
+  end)
+
+  it('emits single message for multiline print())', function()
+    exec_lua([[print("foo\nbar\nbaz")]])
+    screen:expect({
+      messages = {
+        {
+          content = { { 'foo\nbar\nbaz' } },
+          history = true,
+          kind = 'lua_print',
+        },
+      },
+    })
+    exec_lua([[print(vim.inspect({ foo = "bar" }))]])
+    screen:expect({
+      grid = [[
+        ^                         |
+        {1:~                        }|*4
+      ]],
+      messages = {
+        {
+          content = { { '{\n  foo = "bar"\n}' } },
+          history = true,
+          kind = 'lua_print',
+        },
+      },
+    })
+    exec_lua([[vim.print({ foo = "bar" })]])
+    screen:expect_unchanged()
+  end)
+
+  it('ruler redraw does not crash due to double grid_line_start()', function()
+    exec_lua([[
+      local ns = vim.api.nvim_create_namespace('')
+      vim.ui_attach(ns, { ext_messages = true }, function(event, ...)
+        if event == 'msg_ruler' then
+          vim.api.nvim__redraw({ flush = true })
+        end
+      end)
+      vim.o.ruler = true
+      vim.o.laststatus = 0
+    ]])
+    feed('i')
+    n.assert_alive()
+  end)
+
+  it(':digraph contains newlines', function()
+    command('digraph')
+    screen:expect({
+      condition = function()
+        local nl = 0
+        eq('list_cmd', screen.messages[1].kind)
+        for _, chunk in ipairs(screen.messages[1].content) do
+          nl = nl + (chunk[2]:find('\n') and 1 or 0)
+        end
+        eq(682, nl)
+        screen.messages = {}
+      end,
     })
   end)
 end)
@@ -1106,20 +1511,11 @@ describe('ui/builtin messages', function()
   local screen
   before_each(function()
     clear()
-    screen = Screen.new(60, 7)
-    screen:attach({ rgb = true, ext_popupmenu = true })
-    screen:set_default_attr_ids {
-      [1] = { bold = true, foreground = Screen.colors.Blue1 },
-      [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-      [3] = { bold = true, reverse = true },
-      [4] = { bold = true, foreground = Screen.colors.SeaGreen4 },
-      [5] = { foreground = Screen.colors.Blue1 },
-      [6] = { bold = true, foreground = Screen.colors.Magenta },
-      [7] = { background = Screen.colors.Grey20 },
-      [8] = { reverse = true },
-      [9] = { background = Screen.colors.LightRed },
-      [10] = { background = Screen.colors.Yellow },
-      [11] = { foreground = Screen.colors.Brown },
+    screen = Screen.new(60, 7, { rgb = true, ext_popupmenu = true })
+    screen:add_extra_attr_ids {
+      [100] = { background = Screen.colors.LightRed },
+      [101] = { background = Screen.colors.Grey20 },
+      [102] = { foreground = Screen.colors.Magenta1, bold = true },
     }
   end)
 
@@ -1129,12 +1525,12 @@ describe('ui/builtin messages', function()
     screen:expect {
       grid = [[
       {3:                                                            }|
-      {2:Error invoking 'test_method' on channel 1:}                  |
-      {2:complete}                                                    |
-      {2:error}                                                       |
+      {9:Error invoking 'test_method' on channel 1:}                  |
+      {9:complete}                                                    |
+      {9:error}                                                       |
                                                                   |
-      {2:message}                                                     |
-      {4:Press ENTER or type command to continue}^                     |
+      {9:message}                                                     |
+      {6:Press ENTER or type command to continue}^                     |
     ]],
       request_cb = function(name)
         if name == 'test_method' then
@@ -1152,8 +1548,8 @@ describe('ui/builtin messages', function()
       {1:~                                                                     }|*2
       {3:                                                                      }|
       :hi ErrorMsg                                                          |
-      ErrorMsg       {2:xxx} {5:ctermfg=}15 {5:ctermbg=}1 {5:guifg=}White {5:guibg=}Red         |
-      {4:Press ENTER or type command to continue}^                               |
+      ErrorMsg       {9:xxx} {18:ctermfg=}15 {18:ctermbg=}1 {18:guifg=}White {18:guibg=}Red         |
+      {6:Press ENTER or type command to continue}^                               |
     ]])
 
     feed('<cr>')
@@ -1161,12 +1557,12 @@ describe('ui/builtin messages', function()
     feed(':hi ErrorMsg<cr>')
     screen:expect([[
       :hi ErrorMsg                  |
-      ErrorMsg       {2:xxx} {5:ctermfg=}15 |
-                         {5:ctermbg=}1  |
-                         {5:guifg=}White|
-                         {5:guibg=}Red  |
-      {4:Press ENTER or type command to}|
-      {4: continue}^                     |
+      ErrorMsg       {9:xxx} {18:ctermfg=}15 |
+                         {18:ctermbg=}1  |
+                         {18:guifg=}White|
+                         {18:guibg=}Red  |
+      {6:Press ENTER or type command to}|
+      {6: continue}^                     |
     ]])
     feed('<cr>')
 
@@ -1176,17 +1572,22 @@ describe('ui/builtin messages', function()
 
   it(':syntax list langGroup output', function()
     command('syntax on')
-    command('set syntax=vim')
+    exec([[
+      syn match	vimComment	excludenl +\s"[^\-:.%#=*].*$+lc=1	contains=@vimCommentGroup,vimCommentString
+      syn match	vimComment	+\<endif\s\+".*$+lc=5	contains=@vimCommentGroup,vimCommentString
+      syn match	vimComment	+\<else\s\+".*$+lc=4	contains=@vimCommentGroup,vimCommentString
+      hi link vimComment Comment
+    ]])
     screen:try_resize(110, 7)
     feed(':syntax list vimComment<cr>')
     screen:expect([[
-      {6:--- Syntax items ---}                                                                                          |
-      vimComment     {5:xxx} {5:match} /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  {5:excludenl} {5:contains}=@vimCommentGroup,vimCommentString |
+      {102:--- Syntax items ---}                                                                                          |
+      vimComment     {18:xxx} {18:match} /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  {18:excludenl} {18:contains}=@vimCommentGroup,vimCommentString |
                                                                                                                     |
-                         {5:match} /\<endif\s\+".*$/ms=s+5,lc=5  {5:contains}=@vimCommentGroup,vimCommentString             |
-                         {5:match} /\<else\s\+".*$/ms=s+4,lc=4  {5:contains}=@vimCommentGroup,vimCommentString              |
-                         {5:links to} Comment                                                                           |
-      {4:Press ENTER or type command to continue}^                                                                       |
+                         {18:match} /\<endif\s\+".*$/ms=s+5,lc=5  {18:contains}=@vimCommentGroup,vimCommentString             |
+                         {18:match} /\<else\s\+".*$/ms=s+4,lc=4  {18:contains}=@vimCommentGroup,vimCommentString              |
+                         {18:links to} Comment                                                                           |
+      {6:Press ENTER or type command to continue}^                                                                       |
     ]])
 
     feed('<cr>')
@@ -1194,12 +1595,12 @@ describe('ui/builtin messages', function()
     feed(':syntax list vimComment<cr>')
     screen:expect([[
                                                              |
-                         {5:match} /\<endif\s\+".*$/ms=s+5,lc=5  |
-      {5:contains}=@vimCommentGroup,vimCommentString             |
-                         {5:match} /\<else\s\+".*$/ms=s+4,lc=4  {5:c}|
-      {5:ontains}=@vimCommentGroup,vimCommentString              |
-                         {5:links to} Comment                    |
-      {4:Press ENTER or type command to continue}^                |
+                         {18:match} /\<endif\s\+".*$/ms=s+5,lc=5  |
+      {18:contains}=@vimCommentGroup,vimCommentString             |
+                         {18:match} /\<else\s\+".*$/ms=s+4,lc=4  {18:c}|
+      {18:ontains}=@vimCommentGroup,vimCommentString              |
+                         {18:links to} Comment                    |
+      {6:Press ENTER or type command to continue}^                |
     ]])
     feed('<cr>')
 
@@ -1272,7 +1673,7 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
       grid = [[
       ^                                                            |
       {1:~                                                           }|*5
-      {7:                                          0,0-1         All }|
+      {101:                                          0,0-1         All }|
     ]],
     }
 
@@ -1281,7 +1682,7 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
       grid = [[
       ^                                                            |
       {1:~                                                           }|*5
-      {7:                                          0,0-1 100%        }|
+      {101:                                          0,0-1 100%        }|
     ]],
     }
   end)
@@ -1295,7 +1696,7 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
       {3:                                                            }|
       line 1                                                      |
       line 2                                                      |
-      {4:Press ENTER or type command to continue}^                     |
+      {6:Press ENTER or type command to continue}^                     |
     ]],
     }
 
@@ -1319,7 +1720,7 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
       grid = [[
                                                                   |
       {1:~                                                           }|
-      {8:[No Name]                                                   }|
+      {2:[No Name]                                                   }|
       ^                                                            |
       {1:~                                                           }|
       {3:[No Name]                                                   }|
@@ -1331,12 +1732,12 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
     screen:expect {
       grid = [[
       :set colorcolumn=10 | digraphs                              |
-      NU {5:^@}  10    SH {5:^A}   1    SX {5:^B}   2    EX {5:^C}   3            |
-      ET {5:^D}   4    EQ {5:^E}   5    AK {5:^F}   6    BL {5:^G}   7            |
-      BS {5:^H}   8    HT {5:^I}   9    LF {5:^@}  10    VT {5:^K}  11            |
-      FF {5:^L}  12    CR {5:^M}  13    SO {5:^N}  14    SI {5:^O}  15            |
-      DL {5:^P}  16    D1 {5:^Q}  17    D2 {5:^R}  18    D3 {5:^S}  19            |
-      {4:-- More --}^                                                  |
+      NU {18:^@}  10    SH {18:^A}   1    SX {18:^B}   2    EX {18:^C}   3            |
+      ET {18:^D}   4    EQ {18:^E}   5    AK {18:^F}   6    BL {18:^G}   7            |
+      BS {18:^H}   8    HT {18:^I}   9    LF {18:^@}  10    VT {18:^K}  11            |
+      FF {18:^L}  12    CR {18:^M}  13    SO {18:^N}  14    SI {18:^O}  15            |
+      DL {18:^P}  16    D1 {18:^Q}  17    D2 {18:^R}  18    D3 {18:^S}  19            |
+      {6:-- More --}^                                                  |
     ]],
     }
 
@@ -1345,8 +1746,8 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
       grid = [[
                                                                   |
       {1:~                                                           }|
-      {8:[No Name]                                                   }|
-      ^         {9: }                                                  |
+      {2:[No Name]                                                   }|
+      ^         {100: }                                                  |
       {1:~                                                           }|
       {3:[No Name]                                                   }|
                                                                   |
@@ -1357,13 +1758,13 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
     feed(':set colorcolumn=5 | lua error("x\\n\\nx")<cr>')
     screen:expect {
       grid = [[
-      {2:E5108: Error executing lua [string ":lua"]:1: x}             |
+      {9:E5108: Error executing lua [string ":lua"]:1: x}             |
                                                                   |
-      {2:x}                                                           |
-      {2:stack traceback:}                                            |
-      {2:        [C]: in function 'error'}                            |
-      {2:        [string ":lua"]:1: in main chunk}                    |
-      {4:Press ENTER or type command to continue}^                     |
+      {9:x}                                                           |
+      {9:stack traceback:}                                            |
+      {9:        [C]: in function 'error'}                            |
+      {9:        [string ":lua"]:1: in main chunk}                    |
+      {6:Press ENTER or type command to continue}^                     |
     ]],
     }
 
@@ -1372,8 +1773,8 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
       grid = [[
                                                                   |
       {1:~                                                           }|
-      {8:[No Name]                                                   }|
-      ^    {9: }                                                       |
+      {2:[No Name]                                                   }|
+      ^    {100: }                                                       |
       {1:~                                                           }|
       {3:[No Name]                                                   }|
                                                                   |
@@ -1384,12 +1785,12 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
     feed(':set colorcolumn=5 | lua error("x\\n\\n\\nx")<cr>')
     screen:expect {
       grid = [[
-      {2:E5108: Error executing lua [string ":lua"]:1: x}             |
+      {9:E5108: Error executing lua [string ":lua"]:1: x}             |
                                                                   |*2
-      {2:x}                                                           |
-      {2:stack traceback:}                                            |
-      {2:        [C]: in function 'error'}                            |
-      {4:-- More --}^                                                  |
+      {9:x}                                                           |
+      {9:stack traceback:}                                            |
+      {9:        [C]: in function 'error'}                            |
+      {6:-- More --}^                                                  |
     ]],
     }
 
@@ -1397,11 +1798,11 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
     screen:expect {
       grid = [[
                                                                   |*2
-      {2:x}                                                           |
-      {2:stack traceback:}                                            |
-      {2:        [C]: in function 'error'}                            |
-      {2:        [string ":lua"]:1: in main chunk}                    |
-      {4:Press ENTER or type command to continue}^                     |
+      {9:x}                                                           |
+      {9:stack traceback:}                                            |
+      {9:        [C]: in function 'error'}                            |
+      {9:        [string ":lua"]:1: in main chunk}                    |
+      {6:Press ENTER or type command to continue}^                     |
     ]],
     }
   end)
@@ -1417,10 +1818,10 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
                                                                   |
       {1:~                                                           }|
       {3:                                                            }|
-      {10:wow, }{2:such}                                                   |
+      {10:wow, }{9:such}                                                   |
                                                                   |
-      {2:very }{11:color}                                                  |
-      {4:Press ENTER or type command to continue}^                     |
+      {9:very }{8:color}                                                  |
+      {6:Press ENTER or type command to continue}^                     |
     ]],
     }
 
@@ -1439,12 +1840,47 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
                                                                   |
       {1:~                                                           }|
       {3:                                                            }|
-      {10:wow, }{2:such}                                                   |
+      {10:wow, }{9:such}                                                   |
                                                                   |
-      {2:very }{11:color}                                                  |
-      {4:Press ENTER or type command to continue}^                     |
+      {9:very }{8:color}                                                  |
+      {6:Press ENTER or type command to continue}^                     |
     ]],
     }
+  end)
+
+  it('supports nvim_echo messages with emoji', function()
+    -- stylua: ignore
+    async_meths.nvim_echo(
+      { { 'wow, 🏳️‍⚧️🧑‍🌾❤️😂🏴‍☠️\nvariant ❤️ one\nvariant ❤ two' } }, true, {}
+    )
+
+    screen:expect([[
+                                                                  |
+      {1:~                                                           }|
+      {3:                                                            }|
+      wow, 🏳️‍⚧️🧑‍🌾❤️😂🏴‍☠️                                             |
+      variant ❤️ one                                              |
+      variant ❤ two                                               |
+      {6:Press ENTER or type command to continue}^                     |
+    ]])
+
+    feed '<cr>'
+    screen:expect([[
+      ^                                                            |
+      {1:~                                                           }|*5
+                                                                  |
+    ]])
+
+    feed ':messages<cr>'
+    screen:expect([[
+                                                                  |
+      {1:~                                                           }|
+      {3:                                                            }|
+      wow, 🏳️‍⚧️🧑‍🌾❤️😂🏴‍☠️                                             |
+      variant ❤️ one                                              |
+      variant ❤ two                                               |
+      {6:Press ENTER or type command to continue}^                     |
+    ]])
   end)
 
   it('prints lines in Ex mode correctly with a burst of carriage returns #19341', function()
@@ -1453,19 +1889,19 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
     feed('gggQ<CR><CR>1<CR><CR>vi')
     screen:expect([[
       Entering Ex mode.  Type "visual" to go to Normal mode.      |
-      {11:  2 }bbb                                                     |
-      {11:  3 }ccc                                                     |
+      {8:  2 }bbb                                                     |
+      {8:  3 }ccc                                                     |
       :1                                                          |
-      {11:  1 }aaa                                                     |
-      {11:  2 }bbb                                                     |
+      {8:  1 }aaa                                                     |
+      {8:  2 }bbb                                                     |
       :vi^                                                         |
     ]])
     feed('<CR>')
     screen:expect([[
-      {11:  1 }aaa                                                     |
-      {11:  2 }^bbb                                                     |
-      {11:  3 }ccc                                                     |
-      {11:  4 }                                                        |
+      {8:  1 }aaa                                                     |
+      {8:  2 }^bbb                                                     |
+      {8:  3 }ccc                                                     |
+      {8:  4 }                                                        |
       {1:~                                                           }|*2
                                                                   |
     ]])
@@ -1506,7 +1942,7 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
         aaa                                                         |
         bbb                                                         |
         ccc                                                         |
-        {4:Press ENTER or type command to continue}^                     |
+        {6:Press ENTER or type command to continue}^                     |
       ]],
       }
     end
@@ -1538,7 +1974,7 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
       {1:~                                                           }|*3
       {3:                                                            }|
                                                                   |
-      {4:Press ENTER or type command to continue}^                     |
+      {6:Press ENTER or type command to continue}^                     |
     ]])
     feed('<CR>')
     screen:expect([[
@@ -1576,6 +2012,35 @@ vimComment     xxx match /\s"[^\-:.%#=*].*$/ms=s+1,lc=1  excludenl contains=@vim
                                                                   |*4
     ]])
   end)
+
+  it('supports :intro with cmdheight=0 #26505', function()
+    screen:try_resize(80, 24)
+    command('set cmdheight=0')
+    feed(':intro<CR>')
+    screen:expect([[
+                                                                                      |*5
+      {MATCH:.*}|
+                                                                                      |
+                        Nvim is open source and freely distributable                  |
+                                  https://neovim.io/#chat                             |
+                                                                                      |
+                       type  :help nvim{18:<Enter>}       if you are new!                  |
+                       type  :checkhealth{18:<Enter>}     to optimize Nvim                 |
+                       type  :q{18:<Enter>}               to exit                          |
+                       type  :help{18:<Enter>}            for help                         |
+                                                                                      |
+      {MATCH: +}type  :help news{18:<Enter>} to see changes in v{MATCH:%d+%.%d+ +}|
+                                                                                      |
+                               Help poor children in Uganda!                          |
+                       type  :help iccf{18:<Enter>}       for information                  |
+                                                                                      |*2
+      {3:                                                                                }|
+                                                                                      |
+      {6:Press ENTER or type command to continue}^                                         |
+    ]])
+    feed('<CR>')
+    assert_alive()
+  end)
 end)
 
 it('calling screenstring() after redrawing between messages without UI #20999', function()
@@ -1594,18 +2059,7 @@ describe('ui/ext_messages', function()
 
   before_each(function()
     clear { args_rm = { '--headless' }, args = { '--cmd', 'set shortmess-=I' } }
-    screen = Screen.new(80, 24)
-    screen:attach({ rgb = true, ext_messages = true, ext_popupmenu = true })
-    screen:set_default_attr_ids({
-      [1] = { bold = true, foreground = Screen.colors.Blue1 },
-      [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-      [3] = { bold = true },
-      [4] = { bold = true, foreground = Screen.colors.SeaGreen4 },
-      [5] = { foreground = Screen.colors.Blue1 },
-      [6] = { reverse = true },
-      [7] = { bold = true, reverse = true },
-      [8] = { background = Screen.colors.Plum1 },
-    })
+    screen = Screen.new(80, 24, { rgb = true, ext_messages = true, ext_popupmenu = true })
   end)
 
   it('supports intro screen', function()
@@ -1619,65 +2073,67 @@ describe('ui/ext_messages', function()
       {1:~                 }Nvim is open source and freely distributable{1:                  }|
       {1:~                           }https://neovim.io/#chat{1:                             }|
       {1:~                                                                               }|
-      {1:~                }type  :help nvim{5:<Enter>}       if you are new! {1:                 }|
-      {1:~                }type  :checkhealth{5:<Enter>}     to optimize Nvim{1:                 }|
-      {1:~                }type  :q{5:<Enter>}               to exit         {1:                 }|
-      {1:~                }type  :help{5:<Enter>}            for help        {1:                 }|
+      {1:~                }type  :help nvim{18:<Enter>}       if you are new! {1:                 }|
+      {1:~                }type  :checkhealth{18:<Enter>}     to optimize Nvim{1:                 }|
+      {1:~                }type  :q{18:<Enter>}               to exit         {1:                 }|
+      {1:~                }type  :help{18:<Enter>}            for help        {1:                 }|
       {1:~                                                                               }|
-      {1:~{MATCH: +}}type  :help news{5:<Enter>} to see changes in v{MATCH:%d+%.%d+}{1:{MATCH: +}}|
+      {1:~{MATCH: +}}type  :help news{18:<Enter>} to see changes in v{MATCH:%d+%.%d+}{1:{MATCH: +}}|
       {1:~                                                                               }|
       {1:~                        }Help poor children in Uganda!{1:                          }|
-      {1:~                }type  :help iccf{5:<Enter>}       for information {1:                 }|
+      {1:~                }type  :help iccf{18:<Enter>}       for information {1:                 }|
       {1:~                                                                               }|*5
     ]]
+    local showmode = { { '-- INSERT --', 5, 11 } }
     screen:expect(introscreen)
 
     -- <c-l> (same as :mode) does _not_ clear intro message
     feed('<c-l>i')
-    screen:expect { grid = introscreen, showmode = { { '-- INSERT --', 3 } } }
+    screen:expect { grid = introscreen, showmode = showmode }
 
-    -- opening a float also does not
-    local win = api.nvim_open_win(api.nvim_create_buf(false, false), true, {
+    -- opening a float without focus also does not
+    local win = api.nvim_open_win(api.nvim_create_buf(false, false), false, {
       relative = 'editor',
       height = 1,
       width = 5,
       row = 1,
       col = 5,
     })
-    feed('float<esc><c-l>')
     screen:expect {
       grid = [[
-                                                                                      |
-      {1:~    }{8:floa^t}{1:                                                                      }|
+      ^                                                                                |
+      {1:~    }{4:     }{1:                                                                      }|
       {1:~                                                                               }|*3
       {MATCH:.*}|
       {1:~                                                                               }|
       {1:~                 }Nvim is open source and freely distributable{1:                  }|
       {1:~                           }https://neovim.io/#chat{1:                             }|
       {1:~                                                                               }|
-      {1:~                }type  :help nvim{5:<Enter>}       if you are new! {1:                 }|
-      {1:~                }type  :checkhealth{5:<Enter>}     to optimize Nvim{1:                 }|
-      {1:~                }type  :q{5:<Enter>}               to exit         {1:                 }|
-      {1:~                }type  :help{5:<Enter>}            for help        {1:                 }|
+      {1:~                }type  :help nvim{18:<Enter>}       if you are new! {1:                 }|
+      {1:~                }type  :checkhealth{18:<Enter>}     to optimize Nvim{1:                 }|
+      {1:~                }type  :q{18:<Enter>}               to exit         {1:                 }|
+      {1:~                }type  :help{18:<Enter>}            for help        {1:                 }|
       {1:~                                                                               }|
-      {1:~{MATCH: +}}type  :help news{5:<Enter>} to see changes in v{MATCH:%d+%.%d+}{1:{MATCH: +}}|
+      {1:~{MATCH: +}}type  :help news{18:<Enter>} to see changes in v{MATCH:%d+%.%d+}{1:{MATCH: +}}|
       {1:~                                                                               }|
       {1:~                        }Help poor children in Uganda!{1:                          }|
-      {1:~                }type  :help iccf{5:<Enter>}       for information {1:                 }|
+      {1:~                }type  :help iccf{18:<Enter>}       for information {1:                 }|
       {1:~                                                                               }|*5
     ]],
+      showmode = showmode,
     }
+
     api.nvim_win_close(win, true)
-    screen:expect { grid = introscreen }
+    screen:expect { grid = introscreen, showmode = showmode }
 
     -- but editing text does..
-    feed('ix')
+    feed('x')
     screen:expect {
       grid = [[
       x^                                                                               |
       {1:~                                                                               }|*23
     ]],
-      showmode = { { '-- INSERT --', 3 } },
+      showmode = showmode,
     }
 
     feed('<esc>:intro<cr>')
@@ -1690,19 +2146,24 @@ describe('ui/ext_messages', function()
                         Nvim is open source and freely distributable                  |
                                   https://neovim.io/#chat                             |
                                                                                       |
-                       type  :help nvim{5:<Enter>}       if you are new!                  |
-                       type  :checkhealth{5:<Enter>}     to optimize Nvim                 |
-                       type  :q{5:<Enter>}               to exit                          |
-                       type  :help{5:<Enter>}            for help                         |
+                       type  :help nvim{18:<Enter>}       if you are new!                  |
+                       type  :checkhealth{18:<Enter>}     to optimize Nvim                 |
+                       type  :q{18:<Enter>}               to exit                          |
+                       type  :help{18:<Enter>}            for help                         |
                                                                                       |
-      {MATCH: +}type  :help news{5:<Enter>} to see changes in v{MATCH:%d+%.%d+ +}|
+      {MATCH: +}type  :help news{18:<Enter>} to see changes in v{MATCH:%d+%.%d+ +}|
                                                                                       |
                                Help poor children in Uganda!                          |
-                       type  :help iccf{5:<Enter>}       for information                  |
+                       type  :help iccf{18:<Enter>}       for information                  |
                                                                                       |*5
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { 'Press ENTER or type command to continue', 4 } }, kind = 'return_prompt' },
+        {
+          content = { { 'Press ENTER or type command to continue', 6, 18 } },
+          history = false,
+          kind = 'return_prompt',
+        },
       },
     }
 
@@ -1711,6 +2172,58 @@ describe('ui/ext_messages', function()
       grid = [[
       ^x                                                                               |
       {1:~                                                                               }|*23
+    ]],
+    }
+  end)
+
+  it('clears intro screen when new buffer is active', function()
+    api.nvim_set_current_buf(api.nvim_create_buf(true, false))
+    screen:expect {
+      grid = [[
+      ^                                                                                |
+      {1:~                                                                               }|*23
+    ]],
+    }
+  end)
+
+  it('clears intro screen when new buffer is active in floating window', function()
+    local win_opts = { relative = 'editor', height = 1, width = 5, row = 1, col = 5 }
+    api.nvim_open_win(api.nvim_create_buf(false, false), true, win_opts)
+    screen:expect {
+      grid = [[
+                                                                                      |
+      {1:~    }{4:^     }{1:                                                                      }|
+      {1:~                                                                               }|*22
+    ]],
+    }
+  end)
+
+  it('clears intro screen when initial buffer is active in floating window', function()
+    local win_opts = { relative = 'editor', height = 1, width = 5, row = 1, col = 5 }
+    api.nvim_open_win(api.nvim_get_current_buf(), true, win_opts)
+    screen:expect {
+      grid = [[
+                                                                                      |
+      {1:~    }{4:^     }{1:                                                                      }|
+      {1:~                                                                               }|*22
+    ]],
+    }
+  end)
+
+  it('clears intro screen when initial window is converted to be floating', function()
+    exec_lua([[
+      local init_win_id = vim.api.nvim_get_current_win()
+      vim.cmd('split')
+      local win_opts = { relative = 'editor', height = 1, width = 5, row = 1, col = 5 }
+      vim.api.nvim_win_set_config(init_win_id, win_opts)
+      vim.api.nvim_set_current_win(init_win_id)
+    ]])
+    screen:expect {
+      grid = [[
+                                                                                      |
+      {1:~    }{4:^     }{1:                                                                      }|
+      {1:~                                                                               }|*21
+      {2:[No Name]                                                                       }|
     ]],
     }
   end)
@@ -1726,10 +2239,11 @@ describe('ui/ext_messages', function()
       ────────────────────────────────────────────────────────────────────────────────|
                                                                                       |
       {1:~                                                                               }|*10
-      {7:[No Name]                                                                       }|
+      {3:[No Name]                                                                       }|
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { '  cmdheight=0' } }, kind = '' },
+        { content = { { '  cmdheight=0' } }, kind = 'list_cmd', history = false },
       },
     })
 
@@ -1742,10 +2256,11 @@ describe('ui/ext_messages', function()
       ────────────────────────────────────────────────────────────────────────────────|
                                                                                       |
       {1:~                                                                               }|*9
-      {7:[No Name]                                                                       }|
+      {3:[No Name]                                                                       }|
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { '  laststatus=3' } }, kind = '' },
+        { content = { { '  laststatus=3' } }, kind = 'list_cmd', history = false },
       },
     })
 
@@ -1762,10 +2277,11 @@ describe('ui/ext_messages', function()
       ────────────────────────────────────────────────────────────────────────────────|
                                                                                       |
       {1:~                                                                               }|*10
-      {7:[No Name]                                                                       }|
+      {3:[No Name]                                                                       }|
     ]],
+      cmdline = { { abort = false } },
       messages = {
-        { content = { { '  cmdheight=0' } }, kind = '' },
+        { content = { { '  cmdheight=0' } }, kind = 'list_cmd', history = false },
       },
     })
   end)
@@ -1773,15 +2289,7 @@ end)
 
 it('ui/ext_multigrid supports intro screen', function()
   clear { args_rm = { '--headless' }, args = { '--cmd', 'set shortmess-=I' } }
-  local screen = Screen.new(80, 24)
-  screen:attach({ rgb = true, ext_multigrid = true })
-  screen:set_default_attr_ids {
-    [1] = { bold = true, foreground = Screen.colors.Blue1 },
-    [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
-    [3] = { bold = true },
-    [4] = { bold = true, foreground = Screen.colors.SeaGreen4 },
-    [5] = { foreground = Screen.colors.Blue1 },
-  }
+  local screen = Screen.new(80, 24, { rgb = true, ext_multigrid = true })
 
   screen:expect {
     grid = [[
@@ -1796,15 +2304,15 @@ it('ui/ext_multigrid supports intro screen', function()
       {1:~                 }Nvim is open source and freely distributable{1:                  }|
       {1:~                           }https://neovim.io/#chat{1:                             }|
       {1:~                                                                               }|
-      {1:~                }type  :help nvim{5:<Enter>}       if you are new! {1:                 }|
-      {1:~                }type  :checkhealth{5:<Enter>}     to optimize Nvim{1:                 }|
-      {1:~                }type  :q{5:<Enter>}               to exit         {1:                 }|
-      {1:~                }type  :help{5:<Enter>}            for help        {1:                 }|
+      {1:~                }type  :help nvim{18:<Enter>}       if you are new! {1:                 }|
+      {1:~                }type  :checkhealth{18:<Enter>}     to optimize Nvim{1:                 }|
+      {1:~                }type  :q{18:<Enter>}               to exit         {1:                 }|
+      {1:~                }type  :help{18:<Enter>}            for help        {1:                 }|
       {1:~                                                                               }|
-      {1:~{MATCH: +}}type  :help news{5:<Enter>} to see changes in v{MATCH:%d+%.%d+}{1:{MATCH: +}}|
+      {1:~{MATCH: +}}type  :help news{18:<Enter>} to see changes in v{MATCH:%d+%.%d+}{1:{MATCH: +}}|
       {1:~                                                                               }|
       {1:~                        }Help poor children in Uganda!{1:                          }|
-      {1:~                }type  :help iccf{5:<Enter>}       for information {1:                 }|
+      {1:~                }type  :help iccf{18:<Enter>}       for information {1:                 }|
       {1:~                                                                               }|*4
     ## grid 3
                                                                                       |
@@ -1832,7 +2340,7 @@ it('ui/ext_multigrid supports intro screen', function()
       x^                                                                               |
       {1:~                                                                               }|*22
     ## grid 3
-      {3:-- INSERT --}                                                                    |
+      {5:-- INSERT --}                                                                    |
     ]],
     win_viewport = {
       [2] = {
@@ -1856,7 +2364,6 @@ describe('ui/msg_puts_printf', function()
 
     clear({ env = { LANG = 'ja_JP.UTF-8' } })
     screen = Screen.new(25, 5)
-    screen:attach()
 
     if is_os('win') then
       if os.execute('chcp 932 > NUL 2>&1') ~= 0 then
@@ -1878,7 +2385,7 @@ describe('ui/msg_puts_printf', function()
     )
 
     cmd = cmd .. '"' .. nvim_prog .. '" -u NONE -i NONE -Es -V1'
-    command([[call termopen(']] .. cmd .. [[')]])
+    command([[call jobstart(']] .. cmd .. [[',{'term':v:true})]])
     screen:expect([[
     ^Exモードに入ります。ノー |
     マルモードに戻るには "vis|
@@ -1897,7 +2404,6 @@ describe('pager', function()
   before_each(function()
     clear()
     screen = Screen.new(35, 8)
-    screen:attach()
     screen:set_default_attr_ids({
       [1] = { bold = true, foreground = Screen.colors.Blue1 },
       [2] = { foreground = Screen.colors.Grey100, background = Screen.colors.Red },
@@ -1953,8 +2459,6 @@ aliquip ex ea commodo consequat.]]
   end)
 
   it('can be quit with Lua #11224 #16537', function()
-    -- NOTE: adds "4" to message history, although not displayed initially
-    --       (triggered the more prompt).
     screen:try_resize(40, 5)
     feed(':lua for i=0,10 do print(i) end<cr>')
     screen:expect {
@@ -1984,13 +2488,13 @@ aliquip ex ea commodo consequat.]]
       {4:-- More --}^                              |
     ]],
     }
-    feed('j')
+    feed('G')
     screen:expect {
       grid = [[
-      1                                       |
-      2                                       |
-      3                                       |
-      4                                       |
+      7                                       |
+      8                                       |
+      9                                       |
+      10                                      |
       {4:Press ENTER or type command to continue}^ |
     ]],
     }
@@ -2686,15 +3190,14 @@ end)
 it('pager works in headless mode with UI attached', function()
   skip(is_os('win'))
   clear()
-  local child_server = assert(helpers.new_pipename())
+  local child_server = assert(n.new_pipename())
   fn.jobstart({ nvim_prog, '--clean', '--headless', '--listen', child_server })
   retry(nil, nil, function()
     neq(nil, vim.uv.fs_stat(child_server))
   end)
 
-  local child_session = helpers.connect(child_server)
-  local child_screen = Screen.new(40, 6)
-  child_screen:attach(nil, child_session)
+  local child_session = n.connect(child_server)
+  local child_screen = Screen.new(40, 6, nil, child_session)
   child_screen._default_attr_ids = nil -- TODO: unskip with new color scheme
 
   child_session:notify('nvim_command', [[echo range(100)->join("\n")]])

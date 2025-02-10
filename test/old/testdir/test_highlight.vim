@@ -785,8 +785,8 @@ func Test_1_highlight_Normalgroup_exists()
   if !has('gui_running')
     call assert_match('hi Normal\s*clear', hlNormal)
   elseif has('gui_gtk2') || has('gui_gnome') || has('gui_gtk3')
-    " expect is DEFAULT_FONT of gui_gtk_x11.c
-    call assert_match('hi Normal\s*font=Monospace 10', hlNormal)
+    " expect is DEFAULT_FONT of gui_gtk_x11.c (any size)
+    call assert_match('hi Normal\s*font=Monospace\>', hlNormal)
   elseif has('gui_motif')
     " expect is DEFAULT_FONT of gui_x11.c
     call assert_match('hi Normal\s*font=7x13', hlNormal)
@@ -823,6 +823,24 @@ func Test_highlight_cmd_errors()
   let c = repeat("t_fo,", 100) . "t_fo"
   " call assert_fails('exe "hi Xgroup1 start=" . c', 'E422:')
   let &t_fo = ""
+endfunc
+
+" Test for User group highlighting used in the statusline
+func Test_highlight_User()
+  CheckNotGui
+  hi User1 ctermfg=12
+  redraw!
+  call assert_equal('12', synIDattr(synIDtrans(hlID('User1')), 'fg'))
+  hi clear
+endfunc
+
+" Test for MsgArea highlighting
+func Test_highlight_MsgArea()
+  CheckNotGui
+  hi MsgArea ctermfg=20
+  redraw!
+  call assert_equal('20', synIDattr(synIDtrans(hlID('MsgArea')), 'fg'))
+  hi clear
 endfunc
 
 " Test for using RGB color values in a highlight group

@@ -1,12 +1,14 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local feed, eq, eval, ok = helpers.feed, helpers.eq, helpers.eval, helpers.ok
-local source, async_meths, run = helpers.source, helpers.async_meths, helpers.run
-local clear, command, fn = helpers.clear, helpers.command, helpers.fn
-local exc_exec = helpers.exc_exec
-local api = helpers.api
-local load_adjust = helpers.load_adjust
-local retry = helpers.retry
+
+local feed, eq, eval, ok = n.feed, t.eq, n.eval, t.ok
+local source, async_meths, run = n.source, n.async_meths, n.run
+local clear, command, fn = n.clear, n.command, n.fn
+local exc_exec = n.exc_exec
+local api = n.api
+local load_adjust = n.load_adjust
+local retry = t.retry
 
 describe('timers', function()
   before_each(function()
@@ -92,12 +94,56 @@ describe('timers', function()
     assert(0 <= diff and diff <= 4, 'expected (0 <= diff <= 4), got: ' .. tostring(diff))
   end)
 
-  it('are triggered in blocking getchar() call', function()
-    command("call timer_start(5, 'MyHandler', {'repeat': -1})")
-    async_meths.nvim_command('let g:val = 0 | let g:c = getchar()')
+  it('are triggered in inputlist() call #7857', function()
+    async_meths.nvim_exec2(
+      [[
+        call timer_start(5, 'MyHandler', {'repeat': -1})
+        let g:val = 0
+        let g:n = inputlist(['input0', 'input1'])
+      ]],
+      {}
+    )
     retry(nil, nil, function()
       local val = eval('g:val')
       ok(val >= 2, '>= 2', tostring(val))
+      eq(0, eval("exists('g:n')"))
+    end)
+    feed('42<CR>')
+    eq(42, eval('g:n'))
+  end)
+
+  it('are triggered in confirm() call', function()
+    api.nvim_ui_attach(80, 24, {}) -- needed for confirm() to work
+    async_meths.nvim_exec2(
+      [[
+        call timer_start(5, 'MyHandler', {'repeat': -1})
+        let g:val = 0
+        let g:n = confirm('Are you sure?', "&Yes\n&No\n&Cancel")
+      ]],
+      {}
+    )
+    retry(nil, nil, function()
+      local val = eval('g:val')
+      ok(val >= 2, '>= 2', tostring(val))
+      eq(0, eval("exists('g:n')"))
+    end)
+    feed('c')
+    eq(3, eval('g:n'))
+  end)
+
+  it('are triggered in blocking getchar() call', function()
+    async_meths.nvim_exec2(
+      [[
+        call timer_start(5, 'MyHandler', {'repeat': -1})
+        let g:val = 0
+        let g:c = getchar()
+      ]],
+      {}
+    )
+    retry(nil, nil, function()
+      local val = eval('g:val')
+      ok(val >= 2, '>= 2', tostring(val))
+      eq(0, eval("exists('g:c')"))
       eq(0, eval('getchar(1)'))
     end)
     feed('c')
@@ -106,10 +152,6 @@ describe('timers', function()
 
   it('can invoke redraw in blocking getchar() call', function()
     local screen = Screen.new(40, 6)
-    screen:attach()
-    screen:set_default_attr_ids({
-      [1] = { bold = true, foreground = Screen.colors.Blue },
-    })
 
     api.nvim_buf_set_lines(0, 0, -1, true, { 'ITEM 1', 'ITEM 2' })
     source([[
@@ -128,19 +170,29 @@ describe('timers', function()
         redraw
       endfunc
     ]])
-    async_meths.nvim_command('let g:c2 = getchar()')
+    async_meths.nvim_command("let g:c2 = getchar(-1, {'cursor': 'msg'})")
     async_meths.nvim_command(
       'call timer_start(' .. load_adjust(100) .. ", 'AddItem', {'repeat': -1})"
     )
 
     screen:expect([[
-      ^ITEM 1                                  |
+      ITEM 1                                  |
       ITEM 2                                  |
       {1:~                                       }|*3
-                                              |
+      ^                                        |
     ]])
     async_meths.nvim_command('let g:cont = 1')
 
+    screen:expect([[
+      ITEM 1                                  |
+      ITEM 2                                  |
+      ITEM 3                                  |
+      {1:~                                       }|*2
+      ^                                        |
+    ]])
+
+    feed('3')
+    eq(51, eval('g:c2'))
     screen:expect([[
       ^ITEM 1                                  |
       ITEM 2                                  |
@@ -148,19 +200,6 @@ describe('timers', function()
       {1:~                                       }|*2
                                               |
     ]])
-
-    feed('3')
-    eq(51, eval('g:c2'))
-    screen:expect {
-      grid = [[
-      ^ITEM 1                                  |
-      ITEM 2                                  |
-      ITEM 3                                  |
-      {1:~                                       }|*2
-                                              |
-    ]],
-      unchanged = true,
-    }
   end)
 
   it('can be stopped', function()
@@ -226,8 +265,6 @@ describe('timers', function()
 
   it("doesn't mess up the cmdline", function()
     local screen = Screen.new(40, 6)
-    screen:attach()
-    screen:set_default_attr_ids({ [0] = { bold = true, foreground = 255 } })
     source([[
       let g:val = 0
       func! MyHandler(timer)
@@ -245,7 +282,7 @@ describe('timers', function()
     feed(':good')
     screen:expect([[
                                               |
-      {0:~                                       }|*4
+      {1:~                                       }|*4
       :good^                                   |
     ]])
     command('let g:val = 1')
@@ -265,7 +302,6 @@ describe('timers', function()
 
   it('can be triggered after an empty string <expr> mapping #17257', function()
     local screen = Screen.new(40, 6)
-    screen:attach()
     command([=[imap <expr> <F2> [timer_start(0, { _ -> execute("throw 'x'", "") }), ''][-1]]=])
     feed('i<F2>')
     screen:expect({ any = 'E605: Exception not caught: x' })

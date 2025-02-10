@@ -1,11 +1,12 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 
-local exc_exec = helpers.exc_exec
-local command = helpers.command
-local clear = helpers.clear
-local api = helpers.api
-local fn = helpers.fn
-local eq = helpers.eq
+local exc_exec = n.exc_exec
+local command = n.command
+local clear = n.clear
+local api = n.api
+local fn = n.fn
+local eq = t.eq
 
 local function redir_exec(cmd)
   api.nvim_set_var('__redir_exec_cmd', cmd)
@@ -115,7 +116,7 @@ describe('NULL', function()
     null_expr_test(
       'is accepted as an empty list by inputlist()',
       '[feedkeys("\\n"), inputlist(L)]',
-      'Type number and <Enter> or click with the mouse (q or empty cancels): ',
+      '',
       { 0, 0 }
     )
     null_expr_test(

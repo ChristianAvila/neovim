@@ -1,12 +1,14 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear, command = helpers.clear, helpers.command
-local pcall_err = helpers.pcall_err
-local eval = helpers.eval
-local eq = helpers.eq
-local insert = helpers.insert
-local feed = helpers.feed
-local api = helpers.api
+
+local clear, command = n.clear, n.command
+local pcall_err = t.pcall_err
+local eval = n.eval
+local eq = t.eq
+local insert = n.insert
+local feed = n.feed
+local api = n.api
 
 describe("'fillchars'", function()
   local screen
@@ -14,7 +16,6 @@ describe("'fillchars'", function()
   before_each(function()
     clear()
     screen = Screen.new(25, 5)
-    screen:attach()
   end)
 
   describe('"eob" flag', function()
@@ -155,7 +156,6 @@ describe("'listchars'", function()
   before_each(function()
     clear()
     screen = Screen.new(50, 5)
-    screen:attach()
   end)
 
   it('has global value', function()

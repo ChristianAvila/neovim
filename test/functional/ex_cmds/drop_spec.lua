@@ -1,8 +1,9 @@
-local helpers = require('test.functional.helpers')(after_each)
-local command = helpers.command
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear, feed, feed_command = helpers.clear, helpers.feed, helpers.feed_command
-local exec = helpers.exec
+
+local command = n.command
+local clear, feed, feed_command = n.clear, n.feed, n.feed_command
+local exec = n.exec
 
 describe(':drop', function()
   local screen
@@ -10,7 +11,6 @@ describe(':drop', function()
   before_each(function()
     clear()
     screen = Screen.new(35, 10)
-    screen:attach()
     screen:set_default_attr_ids({
       [0] = { bold = true, foreground = Screen.colors.Blue },
       [1] = { bold = true, reverse = true },

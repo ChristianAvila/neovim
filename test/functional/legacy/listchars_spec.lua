@@ -1,9 +1,10 @@
 -- Tests for 'listchars' display with 'list' and :list.
 
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local feed, insert, exec = helpers.feed, helpers.insert, helpers.exec
-local clear, feed_command, expect = helpers.clear, helpers.feed_command, helpers.expect
+
+local feed, insert, exec = n.feed, n.insert, n.exec
+local clear, feed_command, expect = n.clear, n.feed_command, n.expect
 
 -- luacheck: ignore 621 (Indentation)
 describe("'listchars'", function()
@@ -102,7 +103,6 @@ describe("'listchars'", function()
 
   it('"exceeds" character does not appear in foldcolumn vim-patch:8.2.3121', function()
     local screen = Screen.new(60, 10)
-    screen:attach()
     exec([[
       call setline(1, ['aaa', '', 'a', 'aaaaaa'])
       vsplit

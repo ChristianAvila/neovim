@@ -1,9 +1,10 @@
-local helpers = require('test.functional.helpers')(after_each)
+local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
-local clear = helpers.clear
-local command = helpers.command
-local exec = helpers.exec
-local feed = helpers.feed
+
+local clear = n.clear
+local command = n.command
+local exec = n.exec
+local feed = n.feed
 
 before_each(clear)
 
@@ -16,7 +17,6 @@ describe('breakindent', function()
       [1] = { background = Screen.colors.Grey, foreground = Screen.colors.DarkBlue }, -- SignColumn
       [2] = { bold = true }, -- ModeMsg
     })
-    screen:attach()
     exec([[
       set listchars=eol:$
       let &signcolumn = 'yes'
@@ -67,7 +67,6 @@ describe('breakindent', function()
       setlocal breakindent
       call setline(1, "\t" .. join(range(100)))
     ]])
-    screen:attach()
 
     feed('v$')
     screen:expect([[

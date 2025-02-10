@@ -1,10 +1,12 @@
-local helpers = require('test.functional.helpers')(after_each)
-local clear = helpers.clear
-local exec_lua = helpers.exec_lua
-local eq = helpers.eq
-local is_os = helpers.is_os
-local skip = helpers.skip
-local write_file = require('test.helpers').write_file
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
+
+local clear = n.clear
+local exec_lua = n.exec_lua
+local eq = t.eq
+local is_os = t.is_os
+local skip = t.skip
+local write_file = t.write_file
 
 describe('URI methods', function()
   before_each(function()
@@ -206,7 +208,7 @@ describe('URI methods', function()
     it('Windows paths should not be treated as uris', function()
       skip(not is_os('win'), 'Not applicable on non-Windows')
 
-      local file = helpers.tmpname()
+      local file = t.tmpname()
       write_file(file, 'Test content')
       local test_case = string.format(
         [[
@@ -215,7 +217,7 @@ describe('URI methods', function()
         ]],
         file
       )
-      local expected_uri = 'file:///' .. file:gsub('\\', '/')
+      local expected_uri = 'file:///' .. t.fix_slashes(file)
       eq(expected_uri, exec_lua(test_case))
       os.remove(file)
     end)
@@ -249,5 +251,13 @@ describe('URI methods', function()
         eq(uri, exec_lua(test_case))
       end
     )
+  end)
+
+  describe('encode to uri', function()
+    it('rfc2732 including brackets', function()
+      exec_lua("str = '[:]'")
+      exec_lua("rfc = 'rfc2732'")
+      eq('[%3a]', exec_lua('return vim.uri_encode(str, rfc)'))
+    end)
   end)
 end)
